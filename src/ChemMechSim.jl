@@ -7,4 +7,8 @@ include("units.jl")
 using .ChemUnits: canonical
 export canonical
 
+# —— Data layer (pure Julia, no MTK dependency) ——
+include("data/types.jl")         # SpeciesID, SpeciesRole
+export SpeciesID, SpeciesRole
+
 end # module
