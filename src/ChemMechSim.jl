@@ -33,6 +33,9 @@ export Mechanism
 include("config.jl")             # MechanismConfig
 export MechanismConfig
 
+# —— MTK / Catalyst / solver (arrive in Phase 1; data layer above stays pure) ——
+using ModelingToolkit, Catalyst, OrdinaryDiffEq
+
 # —— Interface stubs (implemented in later phase plans) ——
 include("lowering.jl")
 include("catalyst_interop.jl")

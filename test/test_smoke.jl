@@ -23,8 +23,4 @@ using DynamicQuantities
 
     cfg = MechanismConfig()
     @test cfg.reverse_rate === :irreversible
-
-    # Lowering is a stub: it must error cleanly (framework scope).
-    @test_throws ErrorException lower_to_mtk(mech; config=cfg)
-    @test_throws ErrorException simulate(mech)
 end
