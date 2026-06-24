@@ -14,4 +14,10 @@ export SpeciesID, SpeciesRole
 include("data/thermo.jl")         # ThermoModel (abstract), ThermoDatabase
 export ThermoModel, ThermoDatabase
 
+include("data/kinetics.jl")       # AbstractKinetics hierarchy
+export AbstractKinetics, AbstractFalloff,
+       ElementaryArrhenius, ThirdBodyArrhenius,
+       TroeFalloff, SRIFalloff, LindemannFalloff, PlogRate, ChebyshevRate,
+       TroeParams, SRIParams
+
 end # module
