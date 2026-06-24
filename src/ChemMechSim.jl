@@ -24,4 +24,7 @@ include("data/reaction.jl")       # ReactionData, ReverseRatePolicy
 export ReverseRatePolicy, Irreversible, ExplicitReverse, ThermoReverse,
        ReactionData, ReactionMeta
 
+include("data/species.jl")        # SpeciesData
+export SpeciesData
+
 end # module
