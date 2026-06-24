@@ -27,4 +27,7 @@ export ReverseRatePolicy, Irreversible, ExplicitReverse, ThermoReverse,
 include("data/species.jl")        # SpeciesData
 export SpeciesData
 
+include("data/mechanism.jl")      # Mechanism
+export Mechanism
+
 end # module
