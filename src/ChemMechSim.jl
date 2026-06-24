@@ -30,4 +30,7 @@ export SpeciesData
 include("data/mechanism.jl")      # Mechanism
 export Mechanism
 
+include("config.jl")             # MechanismConfig
+export MechanismConfig
+
 end # module
