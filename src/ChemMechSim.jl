@@ -33,4 +33,16 @@ export Mechanism
 include("config.jl")             # MechanismConfig
 export MechanismConfig
 
+# —— Interface stubs (implemented in later phase plans) ——
+include("lowering.jl")
+include("catalyst_interop.jl")
+include("reactor.jl")
+include("validation.jl")
+include("api.jl")
+
+export lower_to_mtk, lower_reaction, import_from_catalyst,
+       ChemPhaseSystem, BatchReactor,
+       validate, ValidationReport,
+       simulate, build_problem, extract_system, generate_function, generate_jacobian
+
 end # module
