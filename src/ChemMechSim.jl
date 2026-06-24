@@ -20,4 +20,8 @@ export AbstractKinetics, AbstractFalloff,
        TroeFalloff, SRIFalloff, LindemannFalloff, PlogRate, ChebyshevRate,
        TroeParams, SRIParams
 
+include("data/reaction.jl")       # ReactionData, ReverseRatePolicy
+export ReverseRatePolicy, Irreversible, ExplicitReverse, ThermoReverse,
+       ReactionData, ReactionMeta
+
 end # module
