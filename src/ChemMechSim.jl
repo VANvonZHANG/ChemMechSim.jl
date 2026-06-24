@@ -11,4 +11,7 @@ export canonical
 include("data/types.jl")         # SpeciesID, SpeciesRole
 export SpeciesID, SpeciesRole
 
+include("data/thermo.jl")         # ThermoModel (abstract), ThermoDatabase
+export ThermoModel, ThermoDatabase
+
 end # module
