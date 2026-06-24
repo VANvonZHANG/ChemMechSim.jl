@@ -12,9 +12,8 @@ simulate(reactor, tspan; kwargs...) = _apinotimpl("simulate", "MVP (Phase 1)")
 build_problem(reactor, args...; kwargs...) =
     _apinotimpl("build_problem", "MVP (Phase 1)")
 
-"Extract the underlying MTK ODESystem. (stub — Phase 1)"
-extract_system(reactor; kwargs...) =
-    _apinotimpl("extract_system", "MVP (Phase 1)")
+"Extract the underlying MTK ODESystem from a ChemPhaseSystem."
+extract_system(phase::ChemPhaseSystem) = phase.sys
 
 "Generate standalone RHS Julia code from a system. (stub — Phase 3)"
 generate_function(sys; kwargs...) =
