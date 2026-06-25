@@ -3,3 +3,6 @@
 *.jl.*.cov
 *.lcov
 coverage/
+
+# generated plot output (examples/brusselator.jl writes these)
+examples/*.png

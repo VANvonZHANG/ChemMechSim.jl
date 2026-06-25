@@ -1,25 +1,38 @@
-# High-level API stubs (layered: simulate / build_problem / extract_system).
-# Implementation arrives with the MVP (Phase 1) / Phase 3 plans. (spec §6, §7)
+# Layered API: extract_system / build_problem / simulate / generate_function.
+# simulate/build_problem operate on a ChemPhaseSystem (the Phase 1 "reactor").
+# generate_function returns standalone Julia code (spec §6, §7).
 
-_apinotimpl(what, phase) =
-    error("$what: not implemented in framework scaffold; see the $phase plan.")
+"Extract the underlying MTK ODESystem from a ChemPhaseSystem."
+extract_system(phase::ChemPhaseSystem) = phase.sys
 
-"Simulate a reactor over a time span. (stub — Phase 1)"
-simulate(reactor; kwargs...) = _apinotimpl("simulate", "MVP (Phase 1)")
-simulate(reactor, tspan; kwargs...) = _apinotimpl("simulate", "MVP (Phase 1)")
+"Resolve a speciesname => value initial-condition map to state => value pairs
+ (the mtkcompile'd system may have reordered its states)."
+function _u0_pairs(phase::ChemPhaseSystem, u0::AbstractDict)
+    byname = Dict(String(ModelingToolkit.getname(s)) => s
+                  for s in ModelingToolkit.unknowns(phase.sys))
+    return [byname[k] => v for (k, v) in u0]
+end
 
-"Build an ODEProblem from a reactor. (stub — Phase 1)"
-build_problem(reactor, args...; kwargs...) =
-    _apinotimpl("build_problem", "MVP (Phase 1)")
+"Build an ODEProblem from a ChemPhaseSystem. `u0` is a Dict(speciesname => value)."
+function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan)
+    return ODEProblem(phase.sys, _u0_pairs(phase, u0), tspan)
+end
 
-"Extract the underlying MTK ODESystem. (stub — Phase 1)"
-extract_system(reactor; kwargs...) =
-    _apinotimpl("extract_system", "MVP (Phase 1)")
+"Simulate a ChemPhaseSystem over `tspan`. `u0` is a Dict(speciesname => value).
+ Default solver Tsit5() (non-stiff); stiff mechanisms (Phase 5) should pass Rodas5P/CVODE_BDF."
+function simulate(phase::ChemPhaseSystem, tspan=(0.0, 1.0); u0,
+                  solver=Tsit5(), kwargs...)
+    return solve(build_problem(phase, u0, tspan), solver; kwargs...)
+end
 
-"Generate standalone RHS Julia code from a system. (stub — Phase 3)"
-generate_function(sys; kwargs...) =
-    _apinotimpl("generate_function", "Phase 3")
+"Generate standalone RHS Julia code (an out-of-place function Expr) from an MTK system."
+function generate_function(sys)
+    rhss = [eq.rhs for eq in equations(sys)]
+    return first(ModelingToolkit.build_function(rhss, ModelingToolkit.unknowns(sys),
+                                                ModelingToolkit.parameters(sys),
+                                                [ModelingToolkit.t_nounits]))
+end
 
-"Generate standalone Jacobian Julia code from a system. (stub — Phase 3)"
+"Generate standalone Jacobian Julia code. (stub — Phase 3)"
 generate_jacobian(sys; kwargs...) =
-    _apinotimpl("generate_jacobian", "Phase 3")
+    error("generate_jacobian: not implemented in Phase 1; see the Phase 3 plan.")
