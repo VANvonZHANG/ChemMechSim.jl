@@ -104,17 +104,6 @@ end
     @test r.phase.config.constraint === :none          # mode wins → zero-point
 end
 
-function _brusselator_mech()
-    X = SpeciesData(id=1, name="X"); Y = SpeciesData(id=2, name="Y")
-    rxns = [
-        ReactionData(reactants=Dict{Int,Float64}(),  products=Dict(1=>1.0), kinetics=ElementaryArrhenius(1.0,0,0)),
-        ReactionData(reactants=Dict(1=>2.0, 2=>1.0), products=Dict(1=>3.0), kinetics=ElementaryArrhenius(1.0,0,0)),
-        ReactionData(reactants=Dict(1=>1.0),         products=Dict(2=>1.0), kinetics=ElementaryArrhenius(3.0,0,0)),
-        ReactionData(reactants=Dict(1=>1.0),         products=Dict{Int,Float64}(), kinetics=ElementaryArrhenius(1.0,0,0)),
-    ]
-    Mechanism(species=[X, Y], reactions=rxns)
-end
-
 @testset "Phase 2 acceptance: Brusselator in BatchReactor (limit cycle)" begin
     r = BatchReactor(_brusselator_mech())
     sol = simulate(r, (0.0, 40.0); u0=Dict("X"=>1.0, "Y"=>0.5), reltol=1e-9, abstol=1e-9)
