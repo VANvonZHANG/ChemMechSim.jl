@@ -57,3 +57,11 @@ end
     @test_throws ErrorException lower_to_mtk(mech; config=MechanismConfig(energy=:adiabatic))
     @test lower_to_mtk(mech; config=MechanismConfig()) !== nothing   # default zero-point ok
 end
+
+@testset "lower_to_mtk: rejects temperature-dependent Arrhenius in Phase 1" begin
+    a = SpeciesData(id=1, name="A"); b = SpeciesData(id=2, name="B")
+    mech = Mechanism(species=[a, b],
+        reactions=[ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
+                                kinetics=ElementaryArrhenius(1.0, 1.0, 1000.0))])
+    @test_throws ErrorException lower_to_mtk(mech)
+end

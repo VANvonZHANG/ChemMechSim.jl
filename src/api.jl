@@ -25,7 +25,7 @@ function simulate(phase::ChemPhaseSystem, tspan=(0.0, 1.0); u0,
     return solve(build_problem(phase, u0, tspan), solver; kwargs...)
 end
 
-"Generate standalone RHS Julia code (an in-place function Expr) from an MTK system."
+"Generate standalone RHS Julia code (an out-of-place function Expr) from an MTK system."
 function generate_function(sys)
     rhss = [eq.rhs for eq in equations(sys)]
     return first(ModelingToolkit.build_function(rhss, ModelingToolkit.unknowns(sys),

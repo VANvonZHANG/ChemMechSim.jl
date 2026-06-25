@@ -3,13 +3,16 @@
 # The Catalyst-backend lowering path (catalyst_lowering) and constraint-layer
 # assembly (append_constraint_layers!) remain stubs (Phase 2.5 spike / Phase 4).
 
-"Rate constant k(T) = A·T^b·exp(-Ea/RT) for an elementary Arrhenius law.
- Collapses to the bare A-factor when b = Ea = 0 (e.g. Brusselator constant rates)."
-function _arrhenius_k(kin::ElementaryArrhenius, T)
-    A, b, Ea = kin.A, kin.b, kin.Ea
-    (iszero(b) && iszero(Ea)) && return A
-    R = 8.314
-    return A * T^b * exp(-Ea / (R * T))
+"Rate constant for an elementary Arrhenius law. Phase 1 supports only constant
+ rates (b = Ea = 0 → the bare A-factor, e.g. Brusselator); the temperature-dependent
+ form k(T) = A·T^b·exp(-Ea/RT) needs a temperature model and arrives in Phase 3.
+ (Phase 1's zero-point has no T state/parameter, so a T-dependent rate cannot be
+ lowered correctly here — guard it rather than silently misuse the time variable.)"
+function _arrhenius_k(kin::ElementaryArrhenius)
+    iszero(kin.b) && iszero(kin.Ea) ||
+        error("_arrhenius_k: temperature-dependent Arrhenius (b=$(kin.b), Ea=$(kin.Ea)) " *
+              "is not supported in Phase 1 (no temperature model yet); see the Phase 3 plan.")
+    return kin.A
 end
 
 "Mass-action product ∏ c[sid]^ν over a stoichiometry map."
@@ -32,9 +35,9 @@ function lower_reaction(rx::ReactionData, mech::Mechanism, cvar, config::Mechani
                                          direct_mtk_lowering(rx, mech, cvar)
 end
 
-"Direct-MTK lowering path: build k(T)·∏c^ν symbolically (spec §5.4)."
+"Direct-MTK lowering path: build k·∏c^ν symbolically (spec §5.4)."
 function direct_mtk_lowering(rx::ReactionData, mech::Mechanism, cvar)
-    k = _arrhenius_k(rx.kinetics, ModelingToolkit.t_nounits)
+    k = _arrhenius_k(rx.kinetics)
     return k * _mass_action(rx.reactants, cvar)
 end
 
