@@ -25,7 +25,7 @@ end
 # adds NO constraint equations (spec §5.5: "零点连约束层都不带，就是裸 ODE"), so it
 # is a plain struct rather than an @mtkmodel — the @mtkmodel reactor family
 # (which composes constraint layers) arrives in Phase 4, once the energy/EOS
-# layers it would compose actually exist (see plan Global Constraints).
+# layers it would compose actually exist.
 
 "A ChemPhaseSystem wrapper — the Layer-1 reactor entry point (zero-point for now).
  Holds the lowered phase; Phase 4 will extend the reactor concept with
