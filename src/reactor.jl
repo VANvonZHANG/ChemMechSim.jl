@@ -36,9 +36,12 @@ struct BatchReactor
 end
 
 "Build a BatchReactor from a Mechanism. Keyword args mirror MechanismConfig
- (default = the :kinetic zero-point). Non-zero-point configs error inside
- lower_to_mtk until the energy/EOS/thermo layers arrive in later phases."
+ (default = the :kinetic zero-point). Pass `mode` to select a convenience preset
+ (spec §5.3.3); when given, `mode` overrides the individual layer kwargs.
+ Non-zero-point configs error inside lower_to_mtk until the energy/EOS/thermo
+ layers arrive in later phases."
 function BatchReactor(mech::Mechanism;
+        mode::Union{Symbol,Nothing}=nothing,
         energy::Symbol=:isothermal,
         constraint::Symbol=:none,
         eos::Symbol=:off,
@@ -46,9 +49,11 @@ function BatchReactor(mech::Mechanism;
         reverse_rate::Symbol=:irreversible,
         state_basis::Symbol=:concentration,
         name::Symbol=:batch)
-    config = MechanismConfig(energy=energy, constraint=constraint, eos=eos,
-                             thermo_data=thermo_data, reverse_rate=reverse_rate,
-                             state_basis=state_basis)
+    config = isnothing(mode) ?
+        MechanismConfig(energy=energy, constraint=constraint, eos=eos,
+                        thermo_data=thermo_data, reverse_rate=reverse_rate,
+                        state_basis=state_basis) :
+        convenience_config(mode)
     phase = ChemPhaseSystem(mech; config=config)   # lower_to_mtk guards zero-point
     return BatchReactor(phase, name)
 end
@@ -67,3 +72,29 @@ BatchReactor(s::AbstractString; kwargs...) =
 Base.show(io::IO, r::BatchReactor) =
     print(io, "BatchReactor(:$(r.name), energy=$(r.phase.config.energy), " *
               "constraint=$(r.phase.config.constraint))")
+
+# —— Convenience modes (spec §5.3.3) ————————————————————————————————
+# Short symbols that expand to a MechanismConfig. Only :kinetic (the zero-point)
+# is lowerable in Phase 2; the others document the target API and error helpfully
+# (via lower_to_mtk's zero-point guard) until their layers (EOS/energy/NASA) land.
+
+const _CONVENIENCE_MODES = Dict{Symbol,MechanismConfig}(
+    :kinetic          => MechanismConfig(),
+    :fixedT           => MechanismConfig(energy=:isothermal,  constraint=:constant_volume,
+                                         eos=:ideal_gas, thermo_data=:nasa7, reverse_rate=:explicit),
+    :adiabatic_constV => MechanismConfig(energy=:adiabatic,   constraint=:constant_volume,
+                                         eos=:ideal_gas, thermo_data=:nasa7, reverse_rate=:thermo_equilibrium),
+    :adiabatic_constP => MechanismConfig(energy=:adiabatic,   constraint=:constant_pressure,
+                                         eos=:ideal_gas, thermo_data=:nasa7, reverse_rate=:thermo_equilibrium),
+)
+
+"Map a convenience-mode symbol to its MechanismConfig (spec §5.3.3).
+ Known modes: :kinetic, :fixedT, :adiabatic_constV, :adiabatic_constP.
+ When `mode` is passed to BatchReactor it overrides the individual
+ energy/constraint/eos/thermo_data/reverse_rate/state_basis kwargs."
+function convenience_config(mode::Symbol)
+    haskey(_CONVENIENCE_MODES, mode) ||
+        error("convenience_config: unknown mode :$mode; known modes: " *
+              "$(sort(collect(keys(_CONVENIENCE_MODES))))")
+    return _CONVENIENCE_MODES[mode]
+end

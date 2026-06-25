@@ -65,3 +65,41 @@ end
     @test code isa Expr
     @test occursin("function", string(code))
 end
+
+@testset "convenience_config: maps all four modes" begin
+    k = convenience_config(:kinetic)
+    @test k.energy === :isothermal && k.constraint === :none && k.eos === :off &&
+          k.thermo_data === :none && k.reverse_rate === :irreversible
+    f = convenience_config(:fixedT)
+    @test f.energy === :isothermal && f.constraint === :constant_volume &&
+          f.eos === :ideal_gas && f.thermo_data === :nasa7 && f.reverse_rate === :explicit
+    av = convenience_config(:adiabatic_constV)
+    @test av.energy === :adiabatic && av.constraint === :constant_volume &&
+          av.eos === :ideal_gas && av.thermo_data === :nasa7 && av.reverse_rate === :thermo_equilibrium
+    ap = convenience_config(:adiabatic_constP)
+    @test ap.energy === :adiabatic && ap.constraint === :constant_pressure &&
+          ap.eos === :ideal_gas && ap.thermo_data === :nasa7 && ap.reverse_rate === :thermo_equilibrium
+end
+
+@testset "convenience_config: unknown mode errors" begin
+    @test_throws ErrorException convenience_config(:bogus)
+end
+
+@testset "BatchReactor: mode=:kinetic runs (zero-point)" begin
+    r = BatchReactor(_decay_mech(); mode=:kinetic)
+    @test r.phase.config.constraint === :none          # zero-point
+    @test r.phase.config.eos === :off
+    sol = simulate(r, (0.0, 1.0); u0=Dict("A" => 3.0, "B" => 0.0), reltol=1e-10, abstol=1e-10)
+    @test all(isfinite, sol.u[end])
+end
+
+@testset "BatchReactor: non-zero-point mode errors helpfully" begin
+    # :fixedT needs EOS + NASA → not lowerable in Phase 2.
+    @test_throws ErrorException BatchReactor(_decay_mech(); mode=:fixedT)
+    @test_throws ErrorException BatchReactor(_decay_mech(); mode=:adiabatic_constV)
+end
+
+@testset "BatchReactor: mode overrides individual kwargs" begin
+    r = BatchReactor(_decay_mech(); mode=:kinetic, constraint=:constant_pressure)
+    @test r.phase.config.constraint === :none          # mode wins → zero-point
+end
