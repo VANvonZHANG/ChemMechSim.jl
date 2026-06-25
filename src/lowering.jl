@@ -61,8 +61,8 @@ end
 "Lower a Mechanism into a structural_simplify'd MTK ODESystem (zero-point)."
 function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig())
     _is_zero_point(config) ||
-        error("lower_to_mtk: Phase 1 supports only the :kinetic zero-point config (MechanismConfig()). " *
-              "Energy/EOS/thermo/reverse layers arrive in later phases.")
+        error("lower_to_mtk: only the :kinetic zero-point config (MechanismConfig()) is supported so far; " *
+              "energy/EOS/thermo/reverse layers arrive in later phases.")
     t = ModelingToolkit.t_nounits
     D = ModelingToolkit.D_nounits
     cvars = [only(@variables ($(Symbol(sp.name)))(t)) for sp in mech.species]
