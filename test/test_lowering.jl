@@ -2,6 +2,7 @@ using Test
 using ChemMechSim
 using ModelingToolkit
 using ModelingToolkit: unknowns, getname
+using Catalyst
 
 "Index of each named state in the simplified system (order may be reordered)."
 function _state_index(sys)
@@ -64,4 +65,18 @@ end
         reactions=[ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
                                 kinetics=ElementaryArrhenius(1.0, 1.0, 1000.0))])
     @test_throws ErrorException lower_to_mtk(mech)
+end
+
+@testset "lower_to_mtk: species are Catalyst @species (backend-ready)" begin
+    a = SpeciesData(id=1, name="A"); b = SpeciesData(id=2, name="B")
+    mech = Mechanism(species=[a, b],
+        reactions=[ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                                kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))])
+    sys = lower_to_mtk(mech)
+    A = unknowns(sys)[findfirst(s -> String(getname(s)) == "A", unknowns(sys))]
+    B = unknowns(sys)[findfirst(s -> String(getname(s)) == "B", unknowns(sys))]
+    # Catalyst accepts @species (but rejects plain @variables) as Reaction substrates.
+    # isequal: symbolic == returns a non-boolean Equation, so use structural isequal.
+    rx = Catalyst.Reaction(2.0, [A], [B])
+    @test isequal(Catalyst.oderatelaw(rx; combinatoric_ratelaw=false), 2.0 * A)
 end

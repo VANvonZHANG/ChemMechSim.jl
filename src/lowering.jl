@@ -65,7 +65,10 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
               "energy/EOS/thermo/reverse layers arrive in later phases.")
     t = ModelingToolkit.t_nounits
     D = ModelingToolkit.D_nounits
-    cvars = [only(@variables ($(Symbol(sp.name)))(t)) for sp in mech.species]
+    # @species (Catalyst) — not plain @variables — so the lowered unknowns are
+    # Catalyst-recognized and can feed Catalyst.Reaction/oderatelaw in the backend
+    # lowering path (Phase 2.5a Task 3). @species vars are ordinary MTK unknowns.
+    cvars = [only(@species ($(Symbol(sp.name)))(t)) for sp in mech.species]
     cvar = Dict(mech.species[i].id => cvars[i] for i in eachindex(mech.species))
     rates = [lower_reaction(rx, mech, cvar, config) for rx in mech.reactions]
     eqs = [D(cvars[i]) ~ _species_rhs(mech.species[i].id, mech, rates)
