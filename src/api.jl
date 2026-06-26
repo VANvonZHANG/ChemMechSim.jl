@@ -13,16 +13,18 @@ function _u0_pairs(phase::ChemPhaseSystem, u0::AbstractDict)
     return [byname[k] => v for (k, v) in u0]
 end
 
-"Build an ODEProblem from a ChemPhaseSystem. `u0` is a Dict(speciesname => value)."
-function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan)
-    return ODEProblem(phase.sys, _u0_pairs(phase, u0), tspan)
+"Build an ODEProblem from a ChemPhaseSystem. `u0` is a Dict(speciesname => value);
+ `params` is an optional Vector of Pair(parameter => value) (e.g. `[T => 500.0]`)."
+function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan; params=Pair[])
+    return ODEProblem(phase.sys, [_u0_pairs(phase, u0); params], tspan)
 end
 
-"Simulate a ChemPhaseSystem over `tspan`. `u0` is a Dict(speciesname => value).
- Default solver Tsit5() (non-stiff); stiff mechanisms (Phase 5) should pass Rodas5P/CVODE_BDF."
+"Simulate a ChemPhaseSystem over `tspan`. `u0` is a Dict(speciesname => value);
+ `params` sets parameter values (e.g. `[T => 500.0]`). Default solver Tsit5()
+ (non-stiff); stiff mechanisms (Phase 5) should pass Rodas5P/CVODE_BDF."
 function simulate(phase::ChemPhaseSystem, tspan=(0.0, 1.0); u0,
-                  solver=Tsit5(), kwargs...)
-    return solve(build_problem(phase, u0, tspan), solver; kwargs...)
+                  solver=Tsit5(), params=Pair[], kwargs...)
+    return solve(build_problem(phase, u0, tspan; params=params), solver; kwargs...)
 end
 
 "Generate standalone RHS Julia code (an out-of-place function Expr) from an MTK system."
@@ -38,13 +40,15 @@ end
 "Extract the underlying MTK ODESystem from a BatchReactor."
 extract_system(r::BatchReactor) = extract_system(r.phase)
 
-"Build an ODEProblem from a BatchReactor. `u0` is a Dict(speciesname => value)."
-build_problem(r::BatchReactor, u0::AbstractDict, tspan) = build_problem(r.phase, u0, tspan)
+"Build an ODEProblem from a BatchReactor. `u0` is a Dict(speciesname => value);
+ `params` is an optional Pair vector."
+build_problem(r::BatchReactor, u0::AbstractDict, tspan; params=Pair[]) =
+    build_problem(r.phase, u0, tspan; params=params)
 
-"Simulate a BatchReactor over `tspan`. `u0` is a Dict(speciesname => value).
- Default solver Tsit5() (non-stiff); stiff mechanisms (Phase 5) should pass Rodas5P/CVODE_BDF."
-function simulate(r::BatchReactor, tspan=(0.0, 1.0); u0, solver=Tsit5(), kwargs...)
-    return simulate(r.phase, tspan; u0=u0, solver=solver, kwargs...)
+"Simulate a BatchReactor over `tspan`. `u0` is a Dict(speciesname => value);
+ `params` sets parameter values. Default solver Tsit5()."
+function simulate(r::BatchReactor, tspan=(0.0, 1.0); u0, solver=Tsit5(), params=Pair[], kwargs...)
+    return simulate(r.phase, tspan; u0=u0, solver=solver, params=params, kwargs...)
 end
 
 "Generate standalone RHS Julia code from a BatchReactor's system."
