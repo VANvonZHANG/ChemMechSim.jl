@@ -3,9 +3,6 @@ using ChemMechSim
 using Catalyst
 using ModelingToolkit: equations, ODEProblem, unknowns, getname
 
-"Index of named state `name` in the simplified system (order may be reordered)."
-_var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unknowns(sys))]
-
 _decay_mech() = Mechanism(
     species=[SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")],
     reactions=[ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
