@@ -12,16 +12,19 @@ import ChemMechSim: catalyst_lowering, direct_mtk_lowering
     # Three species, shared via lower_to_mtk's @species declaration.
     a = SpeciesData(id=1, name="A"); b = SpeciesData(id=2, name="B"); m = SpeciesData(id=3, name="M")
     rxA = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
-                       kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))     # → catalyst path
+                       kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))
     rxB = ReactionData(reactants=Dict(1 => 1.0, 3 => 1.0), products=Dict(2 => 1.0),
-                       kinetics=ElementaryArrhenius(0.5, 0.0, 0.0))    # → forced direct path
+                       kinetics=ElementaryArrhenius(0.5, 0.0, 0.0))
     mech = Mechanism(species=[a, b, m], reactions=[rxA, rxB])
-    sys = lower_to_mtk(mech)
+    sys = lower_to_mtk(mech)        # rxA and rxB are both ElementaryArrhenius → both via catalyst_lowering
     A, B, Mv = _var(sys, "A"), _var(sys, "B"), _var(sys, "M")
     cvar = Dict(1 => A, 2 => B, 3 => Mv)
 
-    # One rate via EACH path, referencing the SAME @species, assembled into one system
-    # (mirrors the validated 2026-06-26 unification probe exactly).
+    # Prove the two lowering PATH FUNCTIONS agree on shared @species and unify into
+    # one ODESystem: rxA's rate via the Catalyst path, rxB's via the direct path.
+    # (Inside lower_to_mtk itself every elementary reaction currently routes through
+    #  catalyst_lowering — a genuine catalyst+direct mix within one lower_to_mtk call
+    #  arrives in Phase 2.5b, once non-ElementaryArrhenius kinetics exist.)
     rate_cat = catalyst_lowering(rxA, mech, cvar, nothing)    # 1.0*A        (Catalyst path)
     rate_dir = direct_mtk_lowering(rxB, mech, cvar, nothing)  # 0.5*A*M      (direct path)
     t = ModelingToolkit.t_nounits; D = ModelingToolkit.D_nounits
@@ -48,9 +51,12 @@ end
     A, B = _var(sys, "A"), _var(sys, "B")
     T = parameters(sys)[findfirst(p -> String(getname(p)) == "T", parameters(sys))]
     cvar = Dict(1 => A, 2 => B)
-    # Both paths build the same T-dependent symbolic rate k(T)·A on the shared @species.
-    @test isequal(catalyst_lowering(rxn, mech, cvar, T),
-                  direct_mtk_lowering(rxn, mech, cvar, T))
+    # Both paths build the same T-dependent symbolic rate k(T)·A on the shared @species,
+    # and it matches the expected Arrhenius form A·T^b·exp(-Ea/RT)·c.
+    rc = catalyst_lowering(rxn, mech, cvar, T)
+    rd = direct_mtk_lowering(rxn, mech, cvar, T)
+    @test isequal(rc, rd)
+    @test isequal(rc, 2.0 * T^1.0 * exp(-8314.0 / (8.314 * T)) * A)
 end
 
 @testset "§3.4 #3 (flow): a mixed mechanism lowers & solves end-to-end" begin

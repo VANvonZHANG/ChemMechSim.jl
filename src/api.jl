@@ -56,4 +56,4 @@ generate_function(r::BatchReactor) = generate_function(extract_system(r))
 
 "Generate standalone Jacobian Julia code. (stub — Phase 3)"
 generate_jacobian(sys; kwargs...) =
-    error("generate_jacobian: not implemented in Phase 1; see the Phase 3 plan.")
+    error("generate_jacobian: not implemented yet; see the Phase 3 plan.")
