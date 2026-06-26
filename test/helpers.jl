@@ -20,6 +20,9 @@ end
 "Look up a named unknown on a simplified system (order may be reordered)."
 _var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unknowns(sys))]
 
+"Index of each named state in the simplified system (order may be reordered)."
+_state_index(sys) = Dict(String(getname(s)) => i for (i, s) in enumerate(unknowns(sys)))
+
 "Look up a named parameter on a simplified system (order may be reordered)."
 _param(sys, name) =
     parameters(sys)[findfirst(p -> String(getname(p)) == name, parameters(sys))]

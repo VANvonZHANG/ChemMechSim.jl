@@ -5,11 +5,6 @@ using ModelingToolkit: unknowns, getname
 using Catalyst
 import ChemMechSim: catalyst_native, catalyst_lowering, direct_mtk_lowering
 
-"Index of each named state in the simplified system (order may be reordered)."
-function _state_index(sys)
-    Dict(String(getname(s)) => i for (i, s) in enumerate(unknowns(sys)))
-end
-
 @testset "lower_to_mtk: first-order A -> B" begin
     a = SpeciesData(id=1, name="A")
     b = SpeciesData(id=2, name="B")

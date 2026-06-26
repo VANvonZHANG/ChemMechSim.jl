@@ -46,6 +46,7 @@ end
 "True iff rate law `kin` needs a temperature symbol (T-dependent Arrhenius).
  Other kinetics types arrive in Phase 2.5b and declare their own needs there."
 _is_T_dependent(kin::ElementaryArrhenius) = !(iszero(kin.b) && iszero(kin.Ea))
+_is_T_dependent(kin::ThirdBodyArrhenius) = _is_T_dependent(kin.base)
 _is_T_dependent(kin::AbstractKinetics) = false
 
 "True iff any reaction in `mech` needs a T parameter."
@@ -85,6 +86,26 @@ function _direct_rate(kin::ElementaryArrhenius, rx, mech, cvar, T, j)
     order = sum(values(rx.reactants))
     k = _arrhenius_k_param(kin, order, "k_$j", T)
     return k * _mass_action(rx.reactants, cvar)
+end
+
+"Third-body enhanced rate (spec §5.2): k_base(T)·∏ reactants·[M]_eff. The third body is
+ NOT a reactant — it enters via the efficiencies map. k_base carries a unit one order higher
+ than the elementary base (the [M]_eff factor adds one concentration)."
+function _direct_rate(kin::ThirdBodyArrhenius, rx, mech, cvar, T, j)
+    base_order = sum(values(rx.reactants))
+    order = base_order + 1                              # +1 for the [M]_eff factor
+    k = _arrhenius_k_param(kin.base, order, "k_$j", T)
+    return k * _mass_action(rx.reactants, cvar) * _meff(mech, kin.efficiencies, cvar)
+end
+
+"Effective third-body concentration [M]_eff = Σ_i α_i·[X_i] over all species (default α=1)."
+function _meff(mech::Mechanism, efficiencies::Dict{SpeciesID,Float64}, cvar)
+    m = 0.0
+    for sp in mech.species
+        alpha = get(efficiencies, sp.id, 1.0)
+        m += alpha * cvar[sp.id]
+    end
+    return m
 end
 
 # Fallback for kinetics types not yet unit-aware (third-body/Troe/etc. arrive in Tasks 2-4).
