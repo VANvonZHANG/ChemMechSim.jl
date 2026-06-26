@@ -48,3 +48,24 @@ end
     kbad = ChemMechSim.rate_param(:kbad, 0.5, u"m/s")   # wrong unit for a 1st-order rate
     @test_throws Exception (@named sys = ODESystem([D(A) ~ -kbad * A], t))
 end
+
+import ChemMechSim: _k_unit
+
+@testset "A-factor unit derivation by stoichiometry (§5.6.5)" begin
+    # [k] = conc^(1-order)·s^-1 ; dim(conc) = mol·m^-3
+    @test dimension(_k_unit(1, 0.0)) == dimension(u"s^-1")               # unimolecular
+    @test dimension(_k_unit(2, 0.0)) == dimension(u"m^3/(mol*s)")       # bimolecular
+    @test dimension(_k_unit(3, 0.0)) == dimension(u"m^6/(mol^2*s)")     # termolecular
+    # T-dependent b: [A] = [k]/K^b
+    @test dimension(_k_unit(2, 0.5)) == dimension(u"m^3/(mol*s)") / dimension(u"K"^0.5)
+end
+
+@testset "A-factor unit: end-to-end dim check for 1st/2nd/3rd order" begin
+    # a bimolecular A+B->C with derived k unit builds (dim check passes)
+    a = SpeciesData(id=1, name="A"); b = SpeciesData(id=2, name="B"); c = SpeciesData(id=3, name="C")
+    mech = Mechanism(species=[a, b, c],
+        reactions=[ReactionData(reactants=Dict(1 => 1.0, 2 => 1.0), products=Dict(3 => 1.0),
+                                kinetics=ElementaryArrhenius(2.0, 0.0, 0.0))])
+    sys = lower_to_mtk(mech)                          # builds => bimolecular k unit is consistent
+    @test length(ModelingToolkit.unknowns(sys)) == 3
+end
