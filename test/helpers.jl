@@ -20,6 +20,10 @@ end
 "Look up a named unknown on a simplified system (order may be reordered)."
 _var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unknowns(sys))]
 
+"Look up a named parameter on a simplified system (order may be reordered)."
+_param(sys, name) =
+    parameters(sys)[findfirst(p -> String(getname(p)) == name, parameters(sys))]
+
 "Default parameter values of a simplified system, in parameters(sys) order (for ODEFunction
  out-of-place calls under units, where `nothing` does not substitute defaults)."
 _pvals(sys) = [ModelingToolkit.getdefault(p) for p in ModelingToolkit.parameters(sys)]

@@ -33,16 +33,18 @@ import ChemMechSim: catalyst_lowering, direct_mtk_lowering
     simp = mtkcompile(osys)
 
     @test length(equations(simp)) == 3                       # one unified ODESystem
-    # Both paths produce the same symbolic form: k_param · mass-action product.
-    @test isequal(rate_cat, rate_cat)                        # catalyst path output is stable
-    @test isequal(rate_dir, rate_dir)                        # direct path output is stable
+    # Structural check: each path's rate is the mass-action form k_param · ∏species
+    # (§3.4 #3). The k-params created by the standalone lowering calls are symbolically
+    # equal to the same-named params in `sys`, so isequal verifies the symbolic structure.
+    k1A = _param(sys, "k_1_A")          # reaction 1 (catalyst path, rxA: A -> B)
+    k2A = _param(sys, "k_2_A")          # reaction 2 (direct path,   rxB: A + M -> B)
+    @test isequal(rate_cat, k1A * A)         # catalyst path output: k·A
+    @test isequal(rate_dir, k2A * A * Mv)    # direct path output:   k·A·M
     # The k parameters carry their stored defaults (1.0 and 0.5).
-    k1 = parameters(sys)[findfirst(p -> String(getname(p)) == "k_1_A", parameters(sys))]
-    k2 = parameters(sys)[findfirst(p -> String(getname(p)) == "k_2_A", parameters(sys))]
-    @test ModelingToolkit.getdefault(k1) == 1.0
-    @test ModelingToolkit.getdefault(k2) == 0.5
+    @test ModelingToolkit.getdefault(k1A) == 1.0
+    @test ModelingToolkit.getdefault(k2A) == 0.5
     sol = solve(ODEProblem(simp, [A => 1.0, B => 0.0, Mv => 2.0,
-                                  k1 => 1.0, k2 => 0.5], (0.0, 1.0)), Tsit5())
+                                  k1A => 1.0, k2A => 0.5], (0.0, 1.0)), Tsit5())
     @test all(isfinite, sol.u[end])                          # and it solves
     @test sol(1.0; idxs=B) > 0.0
 end
@@ -61,9 +63,12 @@ end
     rc = catalyst_lowering(rxn, mech, cvar, T, 1)
     rd = direct_mtk_lowering(rxn, mech, cvar, T, 1)
     @test isequal(rc, rd)
+    # Structural check: the T-dependent rate is k_A · T^b · exp(-θ/T) · A (§3.4 #2).
+    # Under units, k = A_param · T^b · exp(-θ/T) where θ = Ea/R (dimensionless exponent).
+    kA  = _param(sys, "k_1_A")
+    kθ  = _param(sys, "k_1_theta")
+    @test isequal(rc, kA * T^1.0 * exp(-kθ / T) * A)
     # The A-factor and θ parameters carry their stored defaults.
-    kA = parameters(sys)[findfirst(p -> String(getname(p)) == "k_1_A", parameters(sys))]
-    kθ = parameters(sys)[findfirst(p -> String(getname(p)) == "k_1_theta", parameters(sys))]
     @test ModelingToolkit.getdefault(kA) == 2.0
     @test ModelingToolkit.getdefault(kθ) ≈ 8314.0 / 8.314
 end
