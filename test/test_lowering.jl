@@ -3,6 +3,7 @@ using ChemMechSim
 using ModelingToolkit
 using ModelingToolkit: unknowns, getname
 using Catalyst
+import ChemMechSim: catalyst_native, catalyst_lowering, direct_mtk_lowering
 
 "Index of each named state in the simplified system (order may be reordered)."
 function _state_index(sys)
@@ -95,4 +96,37 @@ end
     # isequal: symbolic == returns a non-boolean Equation, so use structural isequal.
     rx = Catalyst.Reaction(2.0, [A], [B])
     @test isequal(Catalyst.oderatelaw(rx; combinatoric_ratelaw=false), 2.0 * A)
+end
+
+@testset "catalyst_native: ElementaryArrhenius is Catalyst-native" begin
+    rxn = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                       kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))
+    @test catalyst_native(rxn, MechanismConfig()) == true
+end
+
+@testset "catalyst_lowering: rate equals the direct path (shared @species)" begin
+    a = SpeciesData(id=1, name="A"); b = SpeciesData(id=2, name="B")
+    rxn = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                       kinetics=ElementaryArrhenius(2.0, 0.0, 0.0))
+    mech = Mechanism(species=[a, b], reactions=[rxn])
+    sys = lower_to_mtk(mech)
+    A = unknowns(sys)[findfirst(s -> String(getname(s)) == "A", unknowns(sys))]
+    B = unknowns(sys)[findfirst(s -> String(getname(s)) == "B", unknowns(sys))]
+    cvar = Dict(1 => A, 2 => B)
+    # isequal: symbolic == returns a non-boolean Equation.
+    @test isequal(catalyst_lowering(rxn, mech, cvar, nothing), 2.0 * A)
+    @test isequal(catalyst_lowering(rxn, mech, cvar, nothing),
+                  direct_mtk_lowering(rxn, mech, cvar, nothing))
+end
+
+@testset "catalyst path: Brusselator RHS is unchanged" begin
+    # After Task 3 every elementary reaction routes through catalyst_lowering;
+    # the species-conservation RHS must be identical to the direct path.
+    sys = lower_to_mtk(_brusselator_mech())
+    idx = _state_index(sys)
+    u = zeros(2); u[idx["X"]] = 2.0; u[idx["Y"]] = 1.0
+    du = zeros(2)
+    ODEFunction(sys)(du, u, nothing, 0.0)
+    @test du[idx["X"]] ≈ -3.0                    # 1 - 4·2 + (2²)·1 = -3
+    @test du[idx["Y"]] ≈  2.0                    # 3·2 - (2²)·1 = 2
 end

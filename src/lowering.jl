@@ -1,7 +1,7 @@
 # Lowering pipeline: Mechanism + config → MTK ODESystem (spec §5.4).
-# Phase 2.5a: @species variables + T-dependent Arrhenius k(T). Direct-MTK path
-# here; the Catalyst-backend path (catalyst_lowering) and constraint-layer
-# assembly (append_constraint_layers!) are stubs (Task 3 / Phase 4).
+# Phase 2.5a: @species variables + T-dependent Arrhenius k(T) + the Catalyst
+# mass-action backend (catalyst_lowering via oderatelaw). Constraint-layer
+# assembly (append_constraint_layers!) remains a stub (Phase 4).
 
 # Molar gas constant (spec §5.6.2: R = 8.314 J/(mol·K)).
 const R_GAS = 8.314
@@ -37,10 +37,11 @@ function _mass_action(stoich::Dict{SpeciesID,Float64}, cvar)
     return ma
 end
 
-"Whether a reaction could use the Catalyst mass-action lowering backend.
- Phase 2.5a Task 2 always lowers directly; Task 3 makes this true for
- elementary Arrhenius. (spec §3.3, §5.4)"
-catalyst_native(rx::ReactionData, config::MechanismConfig) = false
+"Whether a reaction lowers via the Catalyst mass-action backend (spec §3.3/§5.4).
+ True for plain elementary Arrhenius (mass-action); false for rate types Catalyst
+ does not represent natively (third-body/falloff/PLOG/Chebyshev arrive in 2.5b)."
+catalyst_native(rx::ReactionData, config::MechanismConfig) =
+    rx.kinetics isa ElementaryArrhenius
 
 "Symbolic rate expression for one reaction (dispatches on catalyst_native)."
 function lower_reaction(rx::ReactionData, mech::Mechanism, cvar, T, config::MechanismConfig)
@@ -52,6 +53,25 @@ end
 function direct_mtk_lowering(rx::ReactionData, mech::Mechanism, cvar, T)
     k = _arrhenius_k(rx.kinetics, T)
     return k * _mass_action(rx.reactants, cvar)
+end
+
+"Catalyst mass-action lowering path (spec §5.4). Builds a Catalyst.Reaction from
+ the ReactionData (referencing the shared @species), then reads its symbolic rate
+ law via oderatelaw. combinatoric_ratelaw=false gives deterministic k·∏c^ν with NO
+ factorial scaling (required for combustion, spec §3.1). Verified 2026-06-26 to
+ handle ∅→X, X→∅, species-on-both-sides, Float64 stoich, and symbolic k(T) rates."
+function catalyst_lowering(rx::ReactionData, mech::Mechanism, cvar, T)
+    kin = rx.kinetics
+    kin isa ElementaryArrhenius ||
+        error("catalyst_lowering: only ElementaryArrhenius is Catalyst-native so far; " *
+              "other rate laws arrive in Phase 2.5b.")
+    subs       = [cvar[sid] for sid in keys(rx.reactants)]
+    substoich  = collect(values(rx.reactants))
+    prods      = [cvar[sid] for sid in keys(rx.products)]
+    prodstoich = collect(values(rx.products))
+    # 5 positional args: stoichiometry is positional (keywords substoich=/prodstoich= are ignored).
+    crate = Catalyst.Reaction(_arrhenius_k(kin, T), subs, prods, substoich, prodstoich)
+    return Catalyst.oderatelaw(crate; combinatoric_ratelaw=false)
 end
 
 "net rate of change Σⱼ netstoichⱼᵢ·rateⱼ for the species with id `sid`."
@@ -92,12 +112,8 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
     return mtkcompile(raw)
 end
 
-# —— Stubs for paths that arrive after Phase 2.5a ——
-
-"Catalyst mass-action lowering path (spec §5.4). (stub — Phase 2.5a Task 3)"
-catalyst_lowering(rx, mech, cvar, T) =
-    error("catalyst_lowering: not implemented yet; see the Phase 2.5a plan, Task 3.")
+# —— Constraint-layer assembly (stub until Phase 4) ——
 
 "Append energy/EOS/reactor constraint layers to the equation set. (stub — Phase 4)"
 append_constraint_layers!(eqs, mech, config) =
-    error("append_constraint_layers!: not implemented in Phase 1; see the Phase 4 plan.")
+    error("append_constraint_layers!: not implemented; see the Phase 4 plan.")
