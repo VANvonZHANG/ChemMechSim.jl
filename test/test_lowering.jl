@@ -24,7 +24,7 @@ end
     idx = _state_index(sys)
     u = zeros(2); u[idx["A"]] = 3.0; u[idx["B"]] = 5.0
     du = zeros(2)
-    ODEFunction(sys)(du, u, nothing, 0.0)
+    ODEFunction(sys)(du, u, _pvals(sys), 0.0)
     @test du[idx["A"]] ≈ -6.0
     @test du[idx["B"]] ≈  6.0
 end
@@ -46,7 +46,7 @@ end
     idx = _state_index(sys)
     u = zeros(2); u[idx["X"]] = 2.0; u[idx["Y"]] = 1.0
     du = zeros(2)
-    ODEFunction(sys)(du, u, nothing, 0.0)
+    ODEFunction(sys)(du, u, _pvals(sys), 0.0)
     @test du[idx["X"]] ≈ -3.0
     @test du[idx["Y"]] ≈  2.0
 end
@@ -62,7 +62,7 @@ end
 
 @testset "lower_to_mtk: constant-rate mechanism has no T parameter" begin
     sys = lower_to_mtk(_brusselator_mech())     # all rates constant
-    @test isempty(ModelingToolkit.parameters(sys))
+    @test !any(p -> String(ModelingToolkit.getname(p)) == "T", ModelingToolkit.parameters(sys))
 end
 
 @testset "lower_to_mtk: T-dependent Arrhenius solves at the given T" begin
@@ -113,10 +113,15 @@ end
     A = unknowns(sys)[findfirst(s -> String(getname(s)) == "A", unknowns(sys))]
     B = unknowns(sys)[findfirst(s -> String(getname(s)) == "B", unknowns(sys))]
     cvar = Dict(1 => A, 2 => B)
-    # isequal: symbolic == returns a non-boolean Equation.
-    @test isequal(catalyst_lowering(rxn, mech, cvar, nothing), 2.0 * A)
-    @test isequal(catalyst_lowering(rxn, mech, cvar, nothing),
-                  direct_mtk_lowering(rxn, mech, cvar, nothing))
+    # Under units, k is a rate_param (default = stored A-factor); both paths
+    # produce the same symbolic k·A. isequal: symbolic == returns a non-boolean Equation.
+    crate = catalyst_lowering(rxn, mech, cvar, nothing, 1)
+    drate = direct_mtk_lowering(rxn, mech, cvar, nothing, 1)
+    @test isequal(crate, drate)
+    # The k parameter carries the stored default (2.0).
+    kparam = ModelingToolkit.parameters(sys)[findfirst(p -> String(ModelingToolkit.getname(p)) == "k_1_A",
+                                                            ModelingToolkit.parameters(sys))]
+    @test ModelingToolkit.getdefault(kparam) == 2.0
 end
 
 @testset "catalyst path: Brusselator RHS is unchanged" begin
@@ -126,7 +131,7 @@ end
     idx = _state_index(sys)
     u = zeros(2); u[idx["X"]] = 2.0; u[idx["Y"]] = 1.0
     du = zeros(2)
-    ODEFunction(sys)(du, u, nothing, 0.0)
+    ODEFunction(sys)(du, u, _pvals(sys), 0.0)
     @test du[idx["X"]] ≈ -3.0                    # 1 - 4·2 + (2²)·1 = -3
     @test du[idx["Y"]] ≈  2.0                    # 3·2 - (2²)·1 = 2
 end

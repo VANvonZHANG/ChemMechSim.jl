@@ -1,23 +1,46 @@
 # Lowering pipeline: Mechanism + config → MTK ODESystem (spec §5.4).
-# Phase 2.5a: @species variables + T-dependent Arrhenius k(T) + the Catalyst
-# mass-action backend (catalyst_lowering via oderatelaw). Constraint-layer
-# assembly (append_constraint_layers!) remains a stub (Phase 4).
+# Phase 2.5b: unit-aware lowering (§5.6). @species carry [unit=conc], T [unit=K],
+# and each reaction's rate constant k is a unit-bearing parameter (stoichiometrically
+# derived unit), so MTK's dimension check fires at System construction.
+# The Catalyst mass-action backend (catalyst_lowering via oderatelaw) shares the
+# same unit-bearing k. Constraint-layer assembly (append_constraint_layers!) is a
+# stub (Phase 4).
+
+using DynamicQuantities     # for u"..." unit literals in rate-param construction
 
 # Molar gas constant (spec §5.6.2: R = 8.314 J/(mol·K)).
+# Stays here for Task 1; moves to src/data/types.jl in Task 5.
 const R_GAS = 8.314
 
-"Arrhenius rate constant k(T) = A·T^b·exp(-Ea/RT). Collapses to the bare
- A-factor when b = Ea = 0 (no temperature model needed). `T` is the symbolic
- temperature parameter, or `nothing` when no reaction is T-dependent; a
- T-dependent law with T === nothing is a bug and is rejected."
-function _arrhenius_k(kin::ElementaryArrhenius, T)
-    A, b, Ea = kin.A, kin.b, kin.Ea
-    (iszero(b) && iszero(Ea)) && return A
-    T === nothing &&
-        error("_arrhenius_k: T-dependent Arrhenius (b=$b, Ea=$Ea) needs a T parameter, " *
-              "but none was introduced. This should not happen — lower_to_mtk creates T " *
-              "iff a reaction is T-dependent.")
-    return A * T^b * exp(-Ea / (R_GAS * T))
+"Attach a DynamicQuantities unit to a symbolic variable/parameter (the @species/@parameters
+ macros reject interpolated names with [unit=...], so units are attached via setmetadata)."
+_attach_unit(sym, unit) = ModelingToolkit.setmetadata(sym, ModelingToolkit.VariableUnit, unit)
+
+"Build a rate-constant parameter `name` with `default` value and a derived `unit` (§5.6.5).
+ The @parameters macro only accepts a LITERAL default with interpolation, so create with a
+ placeholder then setdefault + setmetadata."
+function rate_param(name::Symbol, default, unit)
+    kp = only(@parameters ($(name)) = 1.0)
+    kp = ModelingToolkit.setdefault(kp, default)
+    return _attach_unit(kp, unit)
+end
+
+"Expected unit of a rate constant for overall reaction order `order` (Σ reactant stoich,
+ incl. the third-body/[M] factor where applicable) and Arrhenius exponent `b`:
+ [k] = conc^(1-order)·s⁻¹ ; the A-factor absorbs T^b -> [A] = [k] / K^b."
+_k_unit(order, b) = ChemUnits.conc^(1 - order) * u"s^-1" / (u"K"^b)
+
+"Symbolic rate constant k(T) for an ElementaryArrhenius law, as a unit-bearing parameter.
+ `order` = Σ reactant stoichiometry (for unit derivation). Creates A (and θ, T if needed)."
+function _arrhenius_k_param(kin::ElementaryArrhenius, order::Real, nameprefix::AbstractString, T)
+    b = kin.b
+    A = rate_param(Symbol(nameprefix, "_A"), kin.A, _k_unit(order, b))
+    if iszero(b) && iszero(kin.Ea)
+        return A                                   # constant rate, no T dependence
+    end
+    # T-dependent: k = A·T^b·exp(-θ/T), θ = Ea/R (K) so the exponent is dimensionless
+    θ = rate_param(Symbol(nameprefix, "_theta"), kin.Ea / R_GAS, u"K")
+    return A * T^b * exp(-θ / T)
 end
 
 "True iff rate law `kin` needs a temperature symbol (T-dependent Arrhenius).
@@ -43,36 +66,50 @@ end
 catalyst_native(rx::ReactionData, config::MechanismConfig) =
     rx.kinetics isa ElementaryArrhenius
 
-"Symbolic rate expression for one reaction (dispatches on catalyst_native)."
-function lower_reaction(rx::ReactionData, mech::Mechanism, cvar, T, config::MechanismConfig)
-    return catalyst_native(rx, config) ? catalyst_lowering(rx, mech, cvar, T) :
-                                         direct_mtk_lowering(rx, mech, cvar, T)
+"Symbolic NET rate for one reaction (forward minus reverse). Irreducible elementary
+ reactions may go via the Catalyst path; everything else (and all reversible reactions)
+ use the direct path. `j` is the reaction index (for naming its rate parameters)."
+function lower_reaction(rx::ReactionData, mech::Mechanism, cvar, T, config::MechanismConfig, j::Int)
+    rx.reverse_policy isa Irreversible ||
+        return _net_rate(rx, mech, cvar, T, j)            # ThermoReverse (Task 6)
+    return catalyst_native(rx, config) ? catalyst_lowering(rx, mech, cvar, T, j) :
+                                         direct_mtk_lowering(rx, mech, cvar, T, j)
 end
 
-"Direct-MTK lowering path: build k(T)·∏c^ν symbolically (spec §5.4)."
-function direct_mtk_lowering(rx::ReactionData, mech::Mechanism, cvar, T)
-    k = _arrhenius_k(rx.kinetics, T)
+"Direct-MTK lowering path: build the symbolic rate by dispatching on kinetics type."
+direct_mtk_lowering(rx::ReactionData, mech::Mechanism, cvar, T, j::Int) =
+    _direct_rate(rx.kinetics, rx, mech, cvar, T, j)
+
+"Elementary Arrhenius forward rate: k(T)·∏ reactants. k is a unit-bearing rate_param."
+function _direct_rate(kin::ElementaryArrhenius, rx, mech, cvar, T, j)
+    order = sum(values(rx.reactants))
+    k = _arrhenius_k_param(kin, order, "k_$j", T)
     return k * _mass_action(rx.reactants, cvar)
 end
 
-"Catalyst mass-action lowering path (spec §5.4). Builds a Catalyst.Reaction from
- the ReactionData (referencing the shared @species), then reads its symbolic rate
- law via oderatelaw. combinatoric_ratelaw=false gives deterministic k·∏c^ν with NO
- factorial scaling (required for combustion, spec §3.1). Verified 2026-06-26 to
- handle ∅→X, X→∅, species-on-both-sides, Float64 stoich, and symbolic k(T) rates."
-function catalyst_lowering(rx::ReactionData, mech::Mechanism, cvar, T)
+# Fallback for kinetics types not yet unit-aware (third-body/Troe/etc. arrive in Tasks 2-4).
+_direct_rate(kin::AbstractKinetics, rx, mech, cvar, T, j) =
+    error("_direct_rate: unit-aware lowering for $(typeof(kin)) arrives in a later task.")
+
+"Catalyst mass-action lowering path (spec §5.4). Builds a Catalyst.Reaction on the
+ shared @species with the SAME unit-bearing k, then reads its rate law via oderatelaw."
+function catalyst_lowering(rx::ReactionData, mech::Mechanism, cvar, T, j::Int)
     kin = rx.kinetics
     kin isa ElementaryArrhenius ||
-        error("catalyst_lowering: only ElementaryArrhenius is Catalyst-native so far; " *
-              "other rate laws arrive in Phase 2.5b.")
+        error("catalyst_lowering: only ElementaryArrhenius is Catalyst-native so far.")
+    order = sum(values(rx.reactants))
+    k = _arrhenius_k_param(kin, order, "k_$j", T)
     subs       = [cvar[sid] for sid in keys(rx.reactants)]
     substoich  = collect(values(rx.reactants))
     prods      = [cvar[sid] for sid in keys(rx.products)]
     prodstoich = collect(values(rx.products))
-    # 5 positional args: stoichiometry is positional (keywords substoich=/prodstoich= are ignored).
-    crate = Catalyst.Reaction(_arrhenius_k(kin, T), subs, prods, substoich, prodstoich)
+    crate = Catalyst.Reaction(k, subs, prods, substoich, prodstoich)
     return Catalyst.oderatelaw(crate; combinatoric_ratelaw=false)
 end
+
+# ThermoReverse net rate (stub — Task 6 implements the reverse-rate path).
+_net_rate(rx, mech, cvar, T, j) =
+    error("_net_rate: reversible (ThermoReverse) lowering arrives in Task 6.")
 
 "net rate of change Σⱼ netstoichⱼᵢ·rateⱼ for the species with id `sid`."
 function _species_rhs(sid::SpeciesID, mech::Mechanism, rates)
@@ -91,24 +128,25 @@ function _is_zero_point(c::MechanismConfig)
            c.state_basis === :concentration
 end
 
-"Lower a Mechanism into a structural_simplify'd MTK ODESystem (zero-point).
- Creates a T parameter (default 300 K) iff any reaction is T-dependent."
+"Lower a Mechanism into a structural_simplify'd MTK ODESystem (unit-aware, zero-point).
+ Species get [unit=conc]; T [unit=K] is created iff any reaction is T-dependent or
+ ThermoReverse. Each reaction's rate constant is a unit-bearing parameter (default = stored
+ value), so MTK's dimension check fires at System construction (§5.6)."
 function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig())
     _is_zero_point(config) ||
         error("lower_to_mtk: only the :kinetic zero-point config (MechanismConfig()) is supported so far; " *
-              "energy/EOS/thermo/reverse layers arrive in later phases.")
-    t = ModelingToolkit.t_nounits
-    D = ModelingToolkit.D_nounits
-    # @species (Catalyst) — not plain @variables — so the lowered unknowns are
-    # Catalyst-recognized and can feed Catalyst.Reaction/oderatelaw in the backend
-    # lowering path (Phase 2.5a Task 3). @species vars are ordinary MTK unknowns.
-    cvars = [only(@species ($(Symbol(sp.name)))(t)) for sp in mech.species]
+              "energy/EOS/thermo layers arrive in later phases.")
+    t = ModelingToolkit.t
+    D = ModelingToolkit.D
+    cvars = [_attach_unit(only(@species ($(Symbol(sp.name)))(t)), ChemUnits.conc)
+             for sp in mech.species]
     cvar = Dict(mech.species[i].id => cvars[i] for i in eachindex(mech.species))
-    Tparam = _needs_T(mech) ? only(@parameters ($(Symbol("T"))) = 300.0) : nothing
-    rates = [lower_reaction(rx, mech, cvar, Tparam, config) for rx in mech.reactions]
+    Tparam = _needs_T(mech) ? rate_param(:T, 300.0, u"K") : nothing
+    rates = [lower_reaction(rx, mech, cvar, Tparam, config, j)
+             for (j, rx) in enumerate(mech.reactions)]
     eqs = [D(cvars[i]) ~ _species_rhs(mech.species[i].id, mech, rates)
            for i in eachindex(mech.species)]
-    @named raw = System(eqs, t)
+    @named raw = System(eqs, t)          # dimension check fires here (ValidationError on mismatch)
     return mtkcompile(raw)
 end
 
