@@ -44,7 +44,7 @@ include("validation.jl")
 include("api.jl")
 
 export lower_to_mtk, lower_reaction, import_from_catalyst,
-       ChemPhaseSystem, BatchReactor,
+       ChemPhaseSystem, BatchReactor, convenience_config,
        validate, ValidationReport,
        simulate, build_problem, extract_system, generate_function, generate_jacobian
 

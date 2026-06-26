@@ -33,6 +33,23 @@ function generate_function(sys)
                                                 [ModelingToolkit.t_nounits]))
 end
 
+# —— BatchReactor dispatch (Phase 2): delegate to the wrapped ChemPhaseSystem ——
+
+"Extract the underlying MTK ODESystem from a BatchReactor."
+extract_system(r::BatchReactor) = extract_system(r.phase)
+
+"Build an ODEProblem from a BatchReactor. `u0` is a Dict(speciesname => value)."
+build_problem(r::BatchReactor, u0::AbstractDict, tspan) = build_problem(r.phase, u0, tspan)
+
+"Simulate a BatchReactor over `tspan`. `u0` is a Dict(speciesname => value).
+ Default solver Tsit5() (non-stiff); stiff mechanisms (Phase 5) should pass Rodas5P/CVODE_BDF."
+function simulate(r::BatchReactor, tspan=(0.0, 1.0); u0, solver=Tsit5(), kwargs...)
+    return simulate(r.phase, tspan; u0=u0, solver=solver, kwargs...)
+end
+
+"Generate standalone RHS Julia code from a BatchReactor's system."
+generate_function(r::BatchReactor) = generate_function(extract_system(r))
+
 "Generate standalone Jacobian Julia code. (stub — Phase 3)"
 generate_jacobian(sys; kwargs...) =
     error("generate_jacobian: not implemented in Phase 1; see the Phase 3 plan.")

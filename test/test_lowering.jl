@@ -49,7 +49,7 @@ end
     @test du[idx["Y"]] ≈  2.0
 end
 
-@testset "lower_to_mtk: rejects non-zero-point config in Phase 1" begin
+@testset "lower_to_mtk: rejects non-zero-point config (zero-point only so far)" begin
     a = SpeciesData(id=1, name="A"); b = SpeciesData(id=2, name="B")
     mech = Mechanism(species=[a, b],
         reactions=[ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
