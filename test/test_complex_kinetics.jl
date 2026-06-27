@@ -67,3 +67,23 @@ end
     F = 10^(lFc / (1 + (f1 / f2)^2))
     @test k_cs ≈ kinf * (Pr / (1 + Pr)) * F  rtol = 1e-6
 end
+
+@testset "ThermoReverse: A<->B equilibrates at [B]/[A] = K_c" begin
+    a1 = 2.5
+    base = (a1, 0.0, 0.0, 0.0, 0.0, -a1 * 298.15, -a1 * log(298.15))
+    δ = log(2.0)
+    aB = (a1, 0.0, 0.0, 0.0, 0.0, -a1 * 298.15, -a1 * log(298.15) + δ)
+    nA = NASA7(base, base, 200.0, 1000.0, 3500.0)
+    nB = NASA7(aB,   aB,   200.0, 1000.0, 3500.0)
+    spA = SpeciesData(id=1, name="A", thermo=nA)
+    spB = SpeciesData(id=2, name="B", thermo=nB)
+    rxn = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                       kinetics=ElementaryArrhenius(1.0, 0.0, 0.0), reverse_policy=ThermoReverse())
+    mech = Mechanism(species=[spA, spB], reactions=[rxn])
+    phase = ChemPhaseSystem(mech)
+    sol = simulate(phase, (0.0, 50.0); u0=Dict("A" => 1.0, "B" => 0.0), reltol=1e-9, abstol=1e-12)
+    sys = extract_system(phase)
+    A_end = sol(50.0; idxs=_var(sys, "A")); B_end = sol(50.0; idxs=_var(sys, "B"))
+    @test B_end / A_end ≈ 2.0   rtol = 1e-3
+    @test A_end + B_end ≈ 1.0   atol = 1e-6
+end

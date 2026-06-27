@@ -49,8 +49,11 @@ _is_T_dependent(kin::ThirdBodyArrhenius) = _is_T_dependent(kin.base)
 _is_T_dependent(kin::AbstractFalloff) = true
 _is_T_dependent(kin::AbstractKinetics) = false
 
-"True iff any reaction in `mech` needs a T parameter."
-_needs_T(mech::Mechanism) = any(_is_T_dependent(rx.kinetics) for rx in mech.reactions)
+"True iff any reaction in `mech` needs a T parameter (forward kinetics or reverse)."
+_needs_T(mech::Mechanism) =
+    any(_is_T_dependent(rx.kinetics) || _reverse_needs_T(rx.reverse_policy) for rx in mech.reactions)
+_reverse_needs_T(::ThermoReverse) = true
+_reverse_needs_T(::ReverseRatePolicy) = false
 
 "Mass-action product ∏ c[sid]^ν over a stoichiometry map."
 function _mass_action(stoich::Dict{SpeciesID,Float64}, cvar)
@@ -160,9 +163,77 @@ function catalyst_lowering(rx::ReactionData, mech::Mechanism, cvar, T, j::Int)
     return Catalyst.oderatelaw(crate; combinatoric_ratelaw=false)
 end
 
-# ThermoReverse net rate (stub — Task 6 implements the reverse-rate path).
-_net_rate(rx, mech, cvar, T, j) =
-    error("_net_rate: reversible (ThermoReverse) lowering arrives in Task 6.")
+# ThermoReverse net rate: forward minus reverse (Task 6, §3.4 #4).
+
+"Net rate = forward - reverse for a reversible reaction (direct path)."
+function _net_rate(rx::ReactionData, mech, cvar, T, j)
+    rx.kinetics isa ElementaryArrhenius ||
+        error("_net_rate: reverse rates for non-elementary kinetics ($(typeof(rx.kinetics))) " *
+              "are not supported in this spike; use Irreversible or an explicit reverse.")
+    order = sum(values(rx.reactants))
+    kf = _arrhenius_k_param(rx.kinetics, order, "k_$j", T)
+    fwd = kf * _mass_action(rx.reactants, cvar)
+    return fwd - _reverse_rate(rx.reverse_policy, rx, mech, cvar, T, kf)
+end
+
+_reverse_rate(::Irreversible, rx, mech, cvar, T, kf) = 0.0
+function _reverse_rate(::ThermoReverse, rx, mech, cvar, T, kf)
+    T === nothing &&
+        error("_reverse_rate(ThermoReverse): K_c(T) needs a T parameter, but none exists.")
+    Kc = _equilibrium_constant(mech, rx, T)
+    return (kf / Kc) * _mass_action(rx.products, cvar)
+end
+
+"Equilibrium constant K_c(T) = exp(-Δg°/RT) from NASA7 thermo (§3.4 #4). Δg°/RT is
+ dimensionless, so exp is dimensionless — passes the dim check under units (verified
+ 2026-06-26). The general (P°/RT)^Δν factor for Δν≠0 is deferred."
+_equilibrium_constant(mech::Mechanism, rx::ReactionData, T) = exp(-_delta_g_over_RT(mech, rx, T))
+
+function _delta_g_over_RT(mech::Mechanism, rx::ReactionData, T)
+    g = 0.0
+    for (sid, nu) in rx.products;  g += nu * _g_over_RT(_thermo_of(mech, sid), T, sid); end
+    for (sid, nu) in rx.reactants; g -= nu * _g_over_RT(_thermo_of(mech, sid), T, sid); end
+    return g
+end
+
+"Dimensionless g/RT from NASA7 thermo. For plain Real T (e.g. the numeric K_c test)
+ delegates directly to the data-layer g_over_RT. For a symbolic/unit-bearing T (the
+ K-param in lowering) the NASA7 coefficients must carry unit metadata so each polynomial
+ term is dimensionless under MTK's dim check: a2..a5 absorb powers of K^-n (so a_i·T^i is
+ dimensionless), a6 has unit K (so a6/T is dimensionless), a1/a7 are dimensionless. Tmid
+ also needs unit K for the range comparison. Coefficients are created as unit-bearing
+ rate_params (default = stored value, metadata unit) so MTK's dim check validates but the
+ generated code uses plain Float64s. `sid` names params uniquely per species. Verified
+ 2026-06-26: K_c = exp(-Δg°/RT) is dimensionless and passes the dim check. NOTE: Num <: Real
+ in Julia, so the symbolic method is dispatched via T::Num (more specific than Real)."
+_g_over_RT(m::NASA7, T::Real, sid) = g_over_RT(m, T)
+function _g_over_RT(m::NASA7, T::Num, sid)
+    Tmid_K = rate_param(Symbol("Tmid_sp", sid), m.Tmid, u"K")  # K-typed so T <= Tmid is unit-consistent
+    T_ref = rate_param(Symbol("Tref_sp", sid), 1.0, u"K")     # 1 K reference so log(T/T_ref) is dimensionless
+    lo, hi = m.low_coeffs, m.high_coeffs
+    # Coeffs as unit-bearing params: a_i·T^(i-1) dimensionless for i=1..5; a6·(1/T) dimensionless
+    a1 = ifelse(T <= Tmid_K, _sp(sid, :a1l, lo[1], u"1"),       _sp(sid, :a1h, hi[1], u"1"))
+    a2 = ifelse(T <= Tmid_K, _sp(sid, :a2l, lo[2], u"K^-1"),    _sp(sid, :a2h, hi[2], u"K^-1"))
+    a3 = ifelse(T <= Tmid_K, _sp(sid, :a3l, lo[3], u"K^-2"),    _sp(sid, :a3h, hi[3], u"K^-2"))
+    a4 = ifelse(T <= Tmid_K, _sp(sid, :a4l, lo[4], u"K^-3"),    _sp(sid, :a4h, hi[4], u"K^-3"))
+    a5 = ifelse(T <= Tmid_K, _sp(sid, :a5l, lo[5], u"K^-4"),    _sp(sid, :a5h, hi[5], u"K^-4"))
+    a6 = ifelse(T <= Tmid_K, _sp(sid, :a6l, lo[6], u"K"),       _sp(sid, :a6h, hi[6], u"K"))
+    a7 = ifelse(T <= Tmid_K, _sp(sid, :a7l, lo[7], u"1"),       _sp(sid, :a7h, hi[7], u"1"))
+    h_RT = a1 + a2 * T / 2 + a3 * T^2 / 3 + a4 * T^3 / 4 + a5 * T^4 / 5 + a6 / T
+    s_R  = a1 * log(T / T_ref) + a2 * T + a3 * T^2 / 2 + a4 * T^3 / 3 + a5 * T^4 / 4 + a7
+    return h_RT - s_R
+end
+_g_over_RT(m::ThermoModel, T, sid) = error("_g_over_RT: thermo model $(typeof(m)) unsupported; only NASA7.")
+
+"Species-keyed unit-bearing parameter for NASA7 coefficients (rate_param wrapper)."
+_sp(sid, tag, val, unit) = rate_param(Symbol("sp", sid, "_", tag), val, unit)
+
+_species_by_id(mech::Mechanism, sid::SpeciesID) = mech.species[sid]
+function _thermo_of(mech::Mechanism, sid::SpeciesID)
+    th = _species_by_id(mech, sid).thermo
+    th === nothing && error("_thermo_of: species id $sid has no thermo; ThermoReverse needs NASA7 on all species.")
+    return th
+end
 
 "net rate of change Σⱼ netstoichⱼᵢ·rateⱼ for the species with id `sid`."
 function _species_rhs(sid::SpeciesID, mech::Mechanism, rates)

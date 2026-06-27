@@ -44,3 +44,21 @@ end
     @test cp_molar(m, 999.0)  ≈ 2.0 * R_THERMO
     @test cp_molar(m, 1001.0) ≈ 4.0 * R_THERMO
 end
+
+@testset "K_c(T): isomerization A<->B with entropy-only offset" begin
+    a1 = 2.5
+    base = (a1, 0.0, 0.0, 0.0, 0.0, -a1 * 298.15, -a1 * log(298.15))
+    δ = log(2.0)
+    aB = (a1, 0.0, 0.0, 0.0, 0.0, -a1 * 298.15, -a1 * log(298.15) + δ)
+    nA = NASA7(base, base, 200.0, 1000.0, 3500.0)
+    nB = NASA7(aB,   aB,   200.0, 1000.0, 3500.0)
+    spA = SpeciesData(id=1, name="A", thermo=nA)
+    spB = SpeciesData(id=2, name="B", thermo=nB)
+    rxn = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                       kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))
+    mech = Mechanism(species=[spA, spB], reactions=[rxn])
+    import ChemMechSim: _equilibrium_constant
+    for T in (400.0, 800.0, 1200.0)
+        @test _equilibrium_constant(mech, rxn, T) ≈ 2.0  rtol = 1e-9   # K_c = exp(δ) = 2
+    end
+end
