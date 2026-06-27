@@ -47,6 +47,7 @@ end
  Other kinetics types arrive in Phase 2.5b and declare their own needs there."
 _is_T_dependent(kin::ElementaryArrhenius) = !(iszero(kin.b) && iszero(kin.Ea))
 _is_T_dependent(kin::ThirdBodyArrhenius) = _is_T_dependent(kin.base)
+_is_T_dependent(kin::AbstractFalloff) = true
 _is_T_dependent(kin::AbstractKinetics) = false
 
 "True iff any reaction in `mech` needs a T parameter."
@@ -96,6 +97,38 @@ function _direct_rate(kin::ThirdBodyArrhenius, rx, mech, cvar, T, j)
     order = base_order + 1                              # +1 for the [M]_eff factor
     k = _arrhenius_k_param(kin.base, order, "k_$j", T)
     return k * _mass_action(rx.reactants, cvar) * _meff(mech, kin.efficiencies, cvar)
+end
+
+"Troe falloff forward rate (spec §5.2, §3.4 #2). k_blend = kinf·(Pr/(1+Pr))·F_Troe, with
+ Pr = k0·[M]_eff/kinf (dimensionless). kinf carries the high-pressure (Σν-reactant) unit;
+ k0 carries one order higher. Verified 2026-06-26: log10/10^x/exp of symbolic Nums survive
+ mtkCompile and the dimension check passes (Pr dimensionless)."
+function _direct_rate(kin::TroeFalloff, rx, mech, cvar, T, j)
+    T === nothing && error("_direct_rate(TroeFalloff): falloff is T-dependent but no T parameter exists.")
+    base_order = sum(values(rx.reactants))
+    kinf = _arrhenius_k_param(kin.high_rate, base_order,     "k_$j" * "_high", T)
+    k0   = _arrhenius_k_param(kin.low_rate,  base_order + 1, "k_$j" * "_low",  T)
+    meff = _meff(mech, kin.efficiencies, cvar)
+    Pr   = k0 * meff / kinf
+    F    = _troe_F(kin.troe, Pr, T, j)
+    k    = kinf * (Pr / (1 + Pr)) * F
+    return k * _mass_action(rx.reactants, cvar)
+end
+
+"Troe center-broadening factor F (TroeParams α, T1, T2, T3). T1/T2/T3 are temperatures
+ (K); under units they MUST be K-params so T/T1 etc. are dimensionless — a bare Float64
+ would make exp(-T/T3) dimensional and fail the dim check (verified 2026-06-26: bare-T3
+ → ValidationError; K-param T3 → passes)."
+function _troe_F(tp::TroeParams, Pr, T, j)
+    α = tp.α
+    T1 = rate_param(Symbol("k_", j, "_troeT1"), tp.T1, u"K")
+    T2 = rate_param(Symbol("k_", j, "_troeT2"), tp.T2, u"K")
+    T3 = rate_param(Symbol("k_", j, "_troeT3"), tp.T3, u"K")
+    Fcent = (1 - α) * exp(-T / T3) + α * exp(-T / T1) + exp(-T / T2)
+    lFc = log10(Fcent); lPr = log10(Pr)
+    c = -0.4 - 0.67 * lFc; N = 0.75 - 1.27 * lFc
+    f1 = lPr + c; f2 = N - 0.14 * f1
+    return 10^(lFc / (1 + (f1 / f2)^2))
 end
 
 "Effective third-body concentration [M]_eff = Σ_i α_i·[X_i] over all species (default α=1)."

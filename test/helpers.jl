@@ -30,3 +30,9 @@ _param(sys, name) =
 "Default parameter values of a simplified system, in parameters(sys) order (for ODEFunction
  out-of-place calls under units, where `nothing` does not substitute defaults)."
 _pvals(sys) = [ModelingToolkit.getdefault(p) for p in ModelingToolkit.parameters(sys)]
+
+"Replace the T entry in a default param vector with Tv (for ODEFunction pointwise checks)."
+function replace_T(pvals, sys, Tv)
+    ps = ModelingToolkit.parameters(sys)
+    [String(ModelingToolkit.getname(p)) == "T" ? Tv : v for (p, v) in zip(ps, pvals)]
+end
