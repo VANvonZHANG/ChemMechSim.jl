@@ -1,23 +1,14 @@
 using Test
 using ChemMechSim
 
-# After Phase 2, only these interface functions remain unimplemented stubs:
-#   generate_jacobian (Phase 3), validate (Phase 2.5).
-# Every other former stub is now real and covered by its own test file.
+# After Phase 2.5b, only generate_jacobian remains an unimplemented stub (Phase 3).
+# validate is now real (covered by test_validation.jl).
 @testset "remaining stubs" begin
-    a = SpeciesData(id=1, name="A")
-    b = SpeciesData(id=2, name="B")
+    a = SpeciesData(id=1, name="A"); b = SpeciesData(id=2, name="B")
     rxn = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
                        kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))
     mech = Mechanism(species=[a, b], reactions=[rxn])
-
-    for f in (generate_jacobian, validate)
-        @test_throws ErrorException f(mech)
-    end
-
-    # BatchReactor(mech) now succeeds (zero-point); covered by test_reactor.jl.
-
-    # ValidationReport is a concrete data type (no computation needed)
+    @test_throws ErrorException generate_jacobian(mech)
     rep = ValidationReport()
     @test isempty(rep.errors) && isempty(rep.warnings) && isempty(rep.info)
 end
