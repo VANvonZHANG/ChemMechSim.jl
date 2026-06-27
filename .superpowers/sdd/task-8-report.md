@@ -26,3 +26,17 @@
 - The handwritten RHS and the mechanism agree exactly after the dc[6] fix — the lowered system was correct; the spec's reference function had the stoichiometry omission.
 
 - Commit: `773504f` — `test(phase25b): H2-O2 mixed-lowering acceptance vs handwritten RHS + Jacobian (§3.4 #5/#6)`
+
+## Fix I1/I2/M5 (whole-branch review)
+
+**I1 — Guard ThermoReverse against Δν≠0 (silent-wrong-K_c trap):** `_reverse_rate(::ThermoReverse, …)` in `src/lowering.jl` now computes `dnu = sum(values(rx.products)) - sum(values(rx.reactants))` and errors if `dnu != 0`, with a message explaining the missing `(P°/RT)^Δν` concentration-basis factor is deferred. This mirrors the existing helpful-error pattern in `_net_rate`. The existing Δν=0 test (`A<->B`) still passes; a new test (`A+B<->C`, Δν=-1) confirms the guard fires via `@test_throws ErrorException`.
+
+**I2 — Robust species-by-id lookup:** Added `species_by_id(mech, sid)` to `src/data/mechanism.jl` as a pure-data helper using `findfirst(sp -> sp.id == sid, mech.species)`. Both `src/lowering.jl` (`_species_by_id`, used by `_thermo_of`) and `src/validation.jl` (`_element_totals`) now call this shared helper instead of the fragile `mech.species[sid]` index assumption. Non-contiguous/non-1-based species ids can no longer silently look up the wrong species.
+
+**M5 — Float-robust element-count comparison:** `_check_element_conservation` in `src/validation.jl` now uses `_dicts_approx_equal(a, b)` (same keys + all values `isapprox(…; atol=1e-9)`) instead of exact `Dict{String,Float64}` equality, so float roundoff from non-integer stoichiometry cannot cause false element-imbalance errors.
+
+**Files modified:** `src/lowering.jl`, `src/validation.jl`, `src/data/mechanism.jl`, `test/test_complex_kinetics.jl`.
+
+**Verification:** Full suite `Pkg.test()` — all tests pass, 0 warnings. New testset "ThermoReverse: Δν≠0 is rejected" passes (1/1).
+
+- Commit: `ce34d34` — `fix(phase25b): guard ThermoReverse Δν≠0 + robust species-id lookup + float-robust validation (review I1/I2/M5)`

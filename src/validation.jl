@@ -27,7 +27,7 @@ function _check_element_conservation(mech::Mechanism, rep::ValidationReport)
     for (j, rx) in enumerate(mech.reactions)
         lhs = _element_totals(rx.reactants, mech, rep)
         rhs = _element_totals(rx.products,  mech, rep)
-        lhs == rhs ||
+        _dicts_approx_equal(lhs, rhs) ||
             push!(rep.errors,
                   "reaction #$j is not element-balanced: " *
                   "reactant elements $lhs ≠ product elements $rhs.")
@@ -37,7 +37,7 @@ end
 function _element_totals(stoich::Dict{SpeciesID,Float64}, mech::Mechanism, rep::ValidationReport)
     counts = Dict{String,Float64}()
     for (sid, nu) in stoich
-        sp = mech.species[sid]
+        sp = species_by_id(mech, sid)
         if isempty(sp.elements)
             push!(rep.warnings,
                   "species $(sp.name) (id $sid) has no elemental composition; " *
@@ -58,4 +58,11 @@ function _check_molecular_weights(mech::Mechanism, rep::ValidationReport)
                   "species $(sp.name) (id $(sp.id)) has no molecular weight " *
                   "(required for EOS / mass-fraction state basis; spec §5.3.4).")
     end
+end
+
+"Float-robust Dict{String,Float64} equality for element-count comparison (review M5):
+ same keys and all values isapprox within atol=1e-9."
+function _dicts_approx_equal(a::Dict{String,Float64}, b::Dict{String,Float64})
+    sort(collect(keys(a))) == sort(collect(keys(b))) || return false
+    return all(isapprox(a[k], b[k]; atol=1e-9) for k in keys(a))
 end

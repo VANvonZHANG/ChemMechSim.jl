@@ -180,6 +180,10 @@ _reverse_rate(::Irreversible, rx, mech, cvar, T, kf) = 0.0
 function _reverse_rate(::ThermoReverse, rx, mech, cvar, T, kf)
     T === nothing &&
         error("_reverse_rate(ThermoReverse): K_c(T) needs a T parameter, but none exists.")
+    dnu = sum(values(rx.products)) - sum(values(rx.reactants))
+    dnu == 0 ||
+        error("_reverse_rate(ThermoReverse): Δν≠0 ($dnu) concentration-basis K_c is not supported " *
+              "in this spike (only Δν=0, e.g. isomerization A<->B); the general (P°/RT)^Δν factor is deferred.")
     Kc = _equilibrium_constant(mech, rx, T)
     return (kf / Kc) * _mass_action(rx.products, cvar)
 end
@@ -239,7 +243,7 @@ _g_over_RT(m::ThermoModel, T, sid) = error("_g_over_RT: thermo model $(typeof(m)
 "Species-keyed unit-bearing parameter for NASA7 coefficients (rate_param wrapper)."
 _sp(sid, tag, val, unit) = rate_param(Symbol("sp", sid, "_", tag), val, unit)
 
-_species_by_id(mech::Mechanism, sid::SpeciesID) = mech.species[sid]
+_species_by_id(mech::Mechanism, sid::SpeciesID) = species_by_id(mech, sid)
 function _thermo_of(mech::Mechanism, sid::SpeciesID)
     th = _species_by_id(mech, sid).thermo
     th === nothing && error("_thermo_of: species id $sid has no thermo; ThermoReverse needs NASA7 on all species.")

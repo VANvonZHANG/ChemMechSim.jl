@@ -87,3 +87,14 @@ end
     @test B_end / A_end ≈ 2.0   rtol = 1e-3
     @test A_end + B_end ≈ 1.0   atol = 1e-6
 end
+
+@testset "ThermoReverse: Δν≠0 is rejected (concentration-basis K_c deferred)" begin
+    a = SpeciesData(id=1, name="A", thermo=NASA7((2.5,0,0,0,0,0.0,0.0),(2.5,0,0,0,0,0.0,0.0),200.0,1000.0,3500.0))
+    b = SpeciesData(id=2, name="B", thermo=NASA7((2.5,0,0,0,0,0.0,0.0),(2.5,0,0,0,0,0.0,0.0),200.0,1000.0,3500.0))
+    c = SpeciesData(id=3, name="C", thermo=NASA7((2.5,0,0,0,0,0.0,0.0),(2.5,0,0,0,0,0.0,0.0),200.0,1000.0,3500.0))
+    # A + B <-> C  (Δν = 1 - 2 = -1)
+    rxn = ReactionData(reactants=Dict(1 => 1.0, 2 => 1.0), products=Dict(3 => 1.0),
+                       kinetics=ElementaryArrhenius(1.0, 0.0, 0.0), reverse_policy=ThermoReverse())
+    mech = Mechanism(species=[a, b, c], reactions=[rxn])
+    @test_throws ErrorException ChemPhaseSystem(mech)   # lowering hits _reverse_rate -> Δν guard
+end

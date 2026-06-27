@@ -16,3 +16,11 @@ function Mechanism(; species::Vector{SpeciesData},
                      elements::Vector{String}=String[])
     Mechanism(species, reactions, thermo, elements)
 end
+
+"Robust species lookup by id. Uses findfirst rather than assuming species.id == 1-based
+ index, so non-contiguous/non-1-based ids cannot silently look up the wrong species (review I2)."
+function species_by_id(mech::Mechanism, sid::SpeciesID)
+    idx = findfirst(sp -> sp.id == sid, mech.species)
+    idx === nothing && error("species_by_id: no species with id $sid in this Mechanism.")
+    return mech.species[idx]
+end
