@@ -8,9 +8,8 @@
 
 using DynamicQuantities     # for u"..." unit literals in rate-param construction
 
-# Molar gas constant (spec §5.6.2: R = 8.314 J/(mol·K)).
-# Stays here for Task 1; moves to src/data/types.jl in Task 5.
-const R_GAS = 8.314
+# R_GAS now lives in src/data/types.jl (moved in Task 5; visible here because
+# types.jl is included before lowering.jl in ChemMechSim.jl).
 
 "Attach a DynamicQuantities unit to a symbolic variable/parameter (the @species/@parameters
  macros reject interpolated names with [unit=...], so units are attached via setmetadata)."

@@ -8,11 +8,14 @@ using .ChemUnits: canonical
 export canonical
 
 # —— Data layer (pure Julia, no MTK dependency) ——
-include("data/types.jl")         # SpeciesID, SpeciesRole
-export SpeciesID, SpeciesRole
+include("data/types.jl")         # SpeciesID, SpeciesRole, R_GAS
+export SpeciesID, SpeciesRole, R_GAS
 
-include("data/thermo.jl")         # ThermoModel (abstract), ThermoDatabase
-export ThermoModel, ThermoDatabase
+include("data/thermo.jl")         # ThermoModel (abstract), ThermoDatabase, NASA7
+export ThermoModel, ThermoDatabase,
+       NASA7,
+       cp_over_R, h_over_RT, s_over_R, g_over_RT,
+       cp_molar, h_molar, s_molar, g_molar
 
 include("data/kinetics.jl")       # AbstractKinetics hierarchy
 export AbstractKinetics, AbstractFalloff,
