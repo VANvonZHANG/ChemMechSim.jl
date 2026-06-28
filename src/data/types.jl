@@ -11,3 +11,8 @@ const SpeciesID = Int
 #   :constant_pool   — held at a fixed concentration
 #   :bath_gas        — third-body bath gas
 const SpeciesRole = Symbol
+
+# Molar gas constant (spec §5.6.2: R = 8.314 J/(mol·K)).
+# Lives in the data layer so src/data/thermo.jl can use it WITHOUT `using` MTK;
+# types.jl is included before both thermo.jl and lowering.jl.
+const R_GAS = 8.314   # J/(mol·K)
