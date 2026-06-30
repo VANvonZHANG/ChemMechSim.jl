@@ -143,3 +143,23 @@ end
     @test any(occursin("_A", n)   for n in pnames)      # A param present
     @test "T" in pnames                                  # T retained (T-dependent)
 end
+
+@testset ":fixedT mode — isothermal species ODE + EOS pressure observed" begin
+    a = SpeciesData(id=1, name="A"); b = SpeciesData(id=2, name="B")
+    rxn = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
+                       kinetics=ElementaryArrhenius(1.0,0.0,0.0),
+                       reverse_policy=ExplicitReverse(ElementaryArrhenius(2.0,0.0,0.0)))
+    mech = Mechanism(species=[a,b], reactions=[rxn])
+    phase = ChemPhaseSystem(mech; config=convenience_config(:fixedT))
+    sys = extract_system(phase)
+    @test :P in [getname(o.lhs) for o in observed(sys)]                     # P observed
+    Av = unknowns(sys)[findfirst(s -> String(getname(s))=="A", unknowns(sys))]
+    Bv = unknowns(sys)[findfirst(s -> String(getname(s))=="B", unknowns(sys))]
+    Tp  = parameters(sys)[findfirst(p -> String(getname(p))=="T", parameters(sys))]  # T retained
+    Pvar = [o.lhs for o in observed(sys) if getname(o.lhs)==:P][1]
+    Tv = 1000.0
+    sol = simulate(phase, (0.0,5.0); u0=Dict("A"=>1.0,"B"=>0.0), params=[Tp=>Tv], reltol=1e-9, abstol=1e-12)
+    csum = sol(2.0; idxs=Av) + sol(2.0; idxs=Bv)
+    @test sol(2.0; idxs=Pvar) ≈ csum * 8.314 * Tv  rtol=1e-4               # P = (Σc)·R·T
+    @test csum ≈ 1.0  atol=1e-6                                            # mass conserved
+end

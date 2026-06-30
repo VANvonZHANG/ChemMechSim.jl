@@ -38,9 +38,13 @@ end
     @test_throws ErrorException BatchReactor("gri30.yaml")
 end
 
-@testset "BatchReactor: non-zero-point config errors" begin
-    # EOS needs MW + units-lowering; not in Phase 2.
-    @test_throws ErrorException BatchReactor(_decay_mech(); eos=:ideal_gas)
+@testset "BatchReactor: isothermal + ideal_gas EOS is lowerable (Phase 3)" begin
+    # Phase 3 lowers isothermal + ideal_gas (EOS as observed P); only
+    # energy=:adiabatic / :constant_pressure / non-conc bases still error.
+    r = BatchReactor(_decay_mech(); eos=:ideal_gas)
+    @test any(o -> ModelingToolkit.getname(o.lhs) === :P,
+              ModelingToolkit.observed(extract_system(r)))      # P observed
+    @test_throws ErrorException BatchReactor(_decay_mech(); energy=:adiabatic)
 end
 
 @testset "BatchReactor: simulate A->B decay matches analytic 3*exp(-2t)" begin
@@ -90,10 +94,15 @@ end
     @test all(isfinite, sol.u[end])
 end
 
-@testset "BatchReactor: non-zero-point mode errors helpfully" begin
-    # :fixedT needs EOS + NASA → not lowerable in Phase 2.
-    @test_throws ErrorException BatchReactor(_decay_mech(); mode=:fixedT)
+@testset "BatchReactor: :fixedT is lowerable; :adiabatic_* still errors" begin
+    # Phase 3 lowers :fixedT (isothermal + ideal_gas EOS observed). The adiabatic
+    # modes still require the energy/EOS-as-DAE layers (Phase 4).
+    r = BatchReactor(_decay_mech(); mode=:fixedT)
+    @test r.phase.config.eos === :ideal_gas
+    @test any(o -> ModelingToolkit.getname(o.lhs) === :P,
+              ModelingToolkit.observed(extract_system(r)))      # P observed
     @test_throws ErrorException BatchReactor(_decay_mech(); mode=:adiabatic_constV)
+    @test_throws ErrorException BatchReactor(_decay_mech(); mode=:adiabatic_constP)
 end
 
 @testset "BatchReactor: mode overrides individual kwargs" begin

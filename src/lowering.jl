@@ -284,34 +284,56 @@ function _species_rhs(sid::SpeciesID, mech::Mechanism, rates)
     return rhs
 end
 
-"True iff `config` is the :kinetic zero-point (the only config lowered so far)."
-function _is_zero_point(c::MechanismConfig)
-    return c.energy === :isothermal && c.constraint === :none && c.eos === :off &&
-           c.thermo_data === :none && c.reverse_rate === :irreversible &&
-           c.state_basis === :concentration
-end
+"True iff `config` is lowerable in Phase 3: isothermal, concentration basis, const-V or unconstrained,
+ with EOS off OR ideal-gas-as-observed. (The :kinetic zero-point and :fixedT are the common cases.)"
+_lowerable(c::MechanismConfig) =
+    c.energy === :isothermal && c.state_basis === :concentration &&
+    c.constraint in (:none, :constant_volume) && c.eos in (:off, :ideal_gas)
 
 "Lower a Mechanism into a structural_simplify'd MTK ODESystem (unit-aware, zero-point).
  Species get [unit=conc]; T [unit=K] is created iff any reaction is T-dependent or
  ThermoReverse. Each reaction's rate constant is a unit-bearing parameter (default = stored
  value), so MTK's dimension check fires at System construction (§5.6)."
 function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig())
-    _PSTD_PARAM[] = nothing        # reset lowering-scoped thermo-constant singletons
+    _PSTD_PARAM[] = nothing        # reset lowering-scoped thermo-constant singletons (Task 4)
     _RGAS_PARAM[] = nothing
-    _is_zero_point(config) ||
-        error("lower_to_mtk: only the :kinetic zero-point config (MechanismConfig()) is supported so far; " *
-              "energy/EOS/thermo layers arrive in later phases.")
+    _lowerable(config) ||
+        error("lower_to_mtk: config not supported in Phase 3 (energy=:adiabatic, EOS-as-DAE, " *
+              ":constant_pressure, and non-concentration bases arrive in Phase 4). " *
+              "Got: energy=$(config.energy) constraint=$(config.constraint) eos=$(config.eos) " *
+              "basis=$(config.state_basis). Use MechanismConfig() (:kinetic) or convenience_config(:fixedT).")
     t = ModelingToolkit.t
     D = ModelingToolkit.D
     cvars = [_attach_unit(only(@species ($(Symbol(sp.name)))(t)), ChemUnits.conc)
              for sp in mech.species]
     cvar = Dict(mech.species[i].id => cvars[i] for i in eachindex(mech.species))
-    Tparam = _needs_T(mech) ? rate_param(:T, 300.0, u"K") : nothing
+    # T exists iff any reaction is T-dependent OR EOS needs it (P = Σc·R·T)
+    Tparam = (_needs_T(mech) || config.eos === :ideal_gas) ? rate_param(:T, 300.0, u"K") : nothing
     rates = [lower_reaction(rx, mech, cvar, Tparam, config, j)
              for (j, rx) in enumerate(mech.reactions)]
     eqs = [D(cvars[i]) ~ _species_rhs(mech.species[i].id, mech, rates)
            for i in eachindex(mech.species)]
-    @named raw = System(eqs, t)          # dimension check fires here (ValidationError on mismatch)
+    if config.eos === :ideal_gas
+        return _lower_with_eos(eqs, t, cvars, Tparam)
+    end
+    @named raw = System(eqs, t)          # zero-point / isothermal-no-EOS: auto-discover (unchanged)
+    return mtkcompile(raw)
+end
+
+"Build the system with EOS observed P ~ (Σc)·R·T. R and T appear in the observed equation, so they
+ are dropped by mtkcompile under auto-discover — rebuild with EXPLICIT params so they're retained."
+function _lower_with_eos(eqs, t, cvars, Tparam)
+    Rparam = _r_param()                            # shared with K_c (Task 4 memoized singleton)
+    Pvar = _attach_unit(only(@variables P(t)), ChemUnits.press)
+    obs = [Pvar ~ sum(cvars) * Rparam * Tparam]
+    # auto-discover the RHS params, then add observed-only R (and T if not already in RHS)
+    @named _tmp = System(eqs, t)
+    rhsparams = ModelingToolkit.parameters(_tmp)
+    rhsnames = Set(ModelingToolkit.getname(p) for p in rhsparams)
+    extras = [Rparam]
+    ModelingToolkit.getname(Tparam) in rhsnames || push!(extras, Tparam)
+    allparams = [rhsparams; extras]
+    @named raw = System(eqs, t, cvars, allparams; observed=obs)
     return mtkcompile(raw)
 end
 
