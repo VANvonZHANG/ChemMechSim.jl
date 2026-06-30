@@ -10,10 +10,14 @@ end
 ValidationReport() = ValidationReport(String[], String[], String[])
 
 "Run scientific-reliability checks on a Mechanism. Returns a ValidationReport."
-function validate(mech::Mechanism)
+function validate(mech::Mechanism; T_range::Union{Tuple{Float64,Float64},Nothing}=nothing)
     rep = ValidationReport()
     _check_element_conservation(mech, rep)
     _check_molecular_weights(mech, rep)
+    _check_nasa_temp_range(mech, rep, T_range)
+    _check_thirdbody_efficiencies(mech, rep)
+    _check_duplicate_reactions(mech, rep)
+    _check_reverse_consistency(mech, rep)
     return rep
 end
 
@@ -59,6 +63,64 @@ function _check_molecular_weights(mech::Mechanism, rep::ValidationReport)
                   "(required for EOS / mass-fraction state basis; spec §5.3.4).")
     end
 end
+
+function _check_nasa_temp_range(mech::Mechanism, rep::ValidationReport, T_range)
+    T_range === nothing && return
+    Tmin, Tmax = T_range
+    for sp in mech.species
+        sp.thermo isa NASA7 || continue
+        n = sp.thermo
+        (n.Tlow <= Tmin && Tmax <= n.Thigh) ||
+            push!(rep.warnings,
+                  "species $(sp.name) (id $(sp.id)) NASA range [$(n.Tlow),$(n.Thigh)] does not " *
+                  "cover the simulation T range [$Tmin,$Tmax]; results outside the fit are unreliable.")
+    end
+end
+
+function _check_thirdbody_efficiencies(mech::Mechanism, rep::ValidationReport)
+    ids = Set(sp.id for sp in mech.species)
+    for (j, rx) in enumerate(mech.reactions)
+        eff = _efficiencies_of(rx.kinetics)
+        eff === nothing && continue
+        for sid in keys(eff)
+            sid in ids ||
+                push!(rep.errors,
+                      "reaction #$j third-body efficiency references unknown species id $sid.")
+        end
+    end
+end
+_efficiencies_of(::ElementaryArrhenius) = nothing
+_efficiencies_of(k::ThirdBodyArrhenius) = k.efficiencies
+_efficiencies_of(k::AbstractFalloff) = k.efficiencies
+_efficiencies_of(::AbstractKinetics) = nothing
+
+function _check_duplicate_reactions(mech::Mechanism, rep::ValidationReport)
+    sigs = [_stoich_signature(rx) for rx in mech.reactions]
+    for i in eachindex(mech.reactions)
+        rx = mech.reactions[i]
+        has_twin = any(j != i && sigs[j] == sigs[i] for j in eachindex(mech.reactions))
+        if has_twin && !rx.meta.duplicate
+            push!(rep.warnings,
+                  "reaction #$i has the same stoichiometry as another reaction but is not marked " *
+                  "`duplicate` (ReactionMeta); CHEMKIN requires duplicate pairs to both carry the flag.")
+        end
+    end
+end
+_stoich_signature(rx::ReactionData) =
+    (sort(collect(rx.reactants)), sort(collect(rx.products)))
+
+function _check_reverse_consistency(mech::Mechanism, rep::ValidationReport)
+    for (j, rx) in enumerate(mech.reactions)
+        if rx.reverse_policy isa ThermoReverse
+            any(sid -> _species_by_id(mech, sid).thermo === nothing,
+                union(keys(rx.reactants), keys(rx.products))) &&
+                push!(rep.errors,
+                      "reaction #$j is ThermoReverse but a participating species lacks NASA thermo " *
+                      "(K_c needs thermo on all reactants/products).")
+        end
+    end
+end
+_species_by_id(mech::Mechanism, sid) = species_by_id(mech, sid)
 
 "Float-robust Dict{String,Float64} equality for element-count comparison (review M5):
  same keys and all values isapprox within atol=1e-9."
