@@ -54,6 +54,14 @@ _needs_T(mech::Mechanism) =
 _reverse_needs_T(::ThermoReverse) = true
 _reverse_needs_T(::ReverseRatePolicy) = false
 
+# Lowering-scoped singletons for the thermo constants R and P° (shared across all K_c uses, so
+# every reaction's (P°/RT)^Δν factor references the SAME parameter — no duplicate-name params).
+# Reset at the start of each lower_to_mtk call.
+const _PSTD_PARAM = Ref{Any}(nothing)
+const _RGAS_PARAM = Ref{Any}(nothing)
+_p_std_param() = _PSTD_PARAM[] === nothing ? (_PSTD_PARAM[] = rate_param(:P_std, P_STD, u"Pa")) : _PSTD_PARAM[]
+_r_param()     = _RGAS_PARAM[] === nothing ? (_RGAS_PARAM[] = rate_param(:R_gas, R_GAS, u"J/(mol*K)")) : _RGAS_PARAM[]
+
 "Mass-action product ∏ c[sid]^ν over a stoichiometry map."
 function _mass_action(stoich::Dict{SpeciesID,Float64}, cvar)
     ma = 1.0
@@ -187,10 +195,6 @@ _reverse_rate(::Irreversible, rx, mech, cvar, T, kf) = 0.0
 function _reverse_rate(::ThermoReverse, rx, mech, cvar, T, kf)
     T === nothing &&
         error("_reverse_rate(ThermoReverse): K_c(T) needs a T parameter, but none exists.")
-    dnu = sum(values(rx.products)) - sum(values(rx.reactants))
-    dnu == 0 ||
-        error("_reverse_rate(ThermoReverse): Δν≠0 ($dnu) concentration-basis K_c is not supported " *
-              "in this spike (only Δν=0, e.g. isomerization A<->B); the general (P°/RT)^Δν factor is deferred.")
     Kc = _equilibrium_constant(mech, rx, T)
     return (kf / Kc) * _mass_action(rx.products, cvar)
 end
@@ -206,10 +210,15 @@ function _reverse_rate(policy::ExplicitReverse, rx::ReactionData, mech, cvar, T,
     return kr * _mass_action(rx.products, cvar)
 end
 
-"Equilibrium constant K_c(T) = exp(-Δg°/RT) from NASA7 thermo (§3.4 #4). Δg°/RT is
- dimensionless, so exp is dimensionless — passes the dim check under units (verified
- 2026-06-26). The general (P°/RT)^Δν factor for Δν≠0 is deferred."
-_equilibrium_constant(mech::Mechanism, rx::ReactionData, T) = exp(-_delta_g_over_RT(mech, rx, T))
+"Equilibrium constant K_c(T) = exp(-Δg°/RT)·(P°/(R·T))^Δν (spec §3.4 #4, §4.2).
+ Δν = Σν_products − Σν_reactants. Δν=0 → factor is 1 (the existing behavior; current tests unaffected).
+ Δg°/RT is dimensionless and (P°/RT)^Δν carries the concentration-basis unit — both pass the dim check."
+function _equilibrium_constant(mech::Mechanism, rx::ReactionData, T)
+    dnu = sum(values(rx.products)) - sum(values(rx.reactants))
+    base = exp(-_delta_g_over_RT(mech, rx, T))
+    iszero(dnu) && return base
+    return base * (_p_std_param() / (_r_param() * T))^dnu
+end
 
 function _delta_g_over_RT(mech::Mechanism, rx::ReactionData, T)
     g = 0.0
@@ -287,6 +296,8 @@ end
  ThermoReverse. Each reaction's rate constant is a unit-bearing parameter (default = stored
  value), so MTK's dimension check fires at System construction (§5.6)."
 function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig())
+    _PSTD_PARAM[] = nothing        # reset lowering-scoped thermo-constant singletons
+    _RGAS_PARAM[] = nothing
     _is_zero_point(config) ||
         error("lower_to_mtk: only the :kinetic zero-point config (MechanismConfig()) is supported so far; " *
               "energy/EOS/thermo layers arrive in later phases.")

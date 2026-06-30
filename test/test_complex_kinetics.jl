@@ -88,15 +88,26 @@ end
     @test A_end + B_end ≈ 1.0   atol = 1e-6
 end
 
-@testset "ThermoReverse: Δν≠0 is rejected (concentration-basis K_c deferred)" begin
-    a = SpeciesData(id=1, name="A", thermo=NASA7((2.5,0,0,0,0,0.0,0.0),(2.5,0,0,0,0,0.0,0.0),200.0,1000.0,3500.0))
-    b = SpeciesData(id=2, name="B", thermo=NASA7((2.5,0,0,0,0,0.0,0.0),(2.5,0,0,0,0,0.0,0.0),200.0,1000.0,3500.0))
-    c = SpeciesData(id=3, name="C", thermo=NASA7((2.5,0,0,0,0,0.0,0.0),(2.5,0,0,0,0,0.0,0.0),200.0,1000.0,3500.0))
-    # A + B <-> C  (Δν = 1 - 2 = -1)
-    rxn = ReactionData(reactants=Dict(1 => 1.0, 2 => 1.0), products=Dict(3 => 1.0),
-                       kinetics=ElementaryArrhenius(1.0, 0.0, 0.0), reverse_policy=ThermoReverse())
-    mech = Mechanism(species=[a, b, c], reactions=[rxn])
-    @test_throws ErrorException ChemPhaseSystem(mech)   # lowering hits _reverse_rate -> Δν guard
+@testset "K_c Δν≠0: A+B<->C, K_c = exp(-Δg°/RT)·(P°/RT)^Δν" begin
+    # all-zero NASA7 coeffs → g/RT = 0 for every species → Δg° = 0 → exp term = 1 (any stoich).
+    # Δν = 1 − 2 = −1, so K_c = (P°/RT)^(−1) = RT/P°. At T=1000: 8.314·1000/1e5 = 0.08314 (m³/mol).
+    n = NASA7((0.0,0,0,0,0,0.0,0.0),(0.0,0,0,0,0,0.0,0.0),200.0,1000.0,3500.0)
+    A = SpeciesData(id=1,name="A",thermo=n); B = SpeciesData(id=2,name="B",thermo=n); C = SpeciesData(id=3,name="C",thermo=n)
+    rxn = ReactionData(reactants=Dict(1=>1.0,2=>1.0), products=Dict(3=>1.0),
+                       kinetics=ElementaryArrhenius(1.0,0.0,0.0), reverse_policy=ThermoReverse())
+    mech = Mechanism(species=[A,B,C], reactions=[rxn])
+    phase = ChemPhaseSystem(mech); sys = extract_system(phase)
+    Av = unknowns(sys)[findfirst(s -> String(getname(s))=="A", unknowns(sys))]
+    Bv = unknowns(sys)[findfirst(s -> String(getname(s))=="B", unknowns(sys))]
+    Cv = unknowns(sys)[findfirst(s -> String(getname(s))=="C", unknowns(sys))]
+    Tp = parameters(sys)[findfirst(p -> String(getname(p))=="T", parameters(sys))]
+    Tv = 1000.0
+    sol = simulate(phase, (0.0,200.0); u0=Dict("A"=>1.0,"B"=>1.0,"C"=>0.0),
+                   params=[Tp=>Tv], reltol=1e-10, abstol=1e-12)
+    Ca, Cb, Cc = sol(200.0; idxs=Av), sol(200.0; idxs=Bv), sol(200.0; idxs=Cv)
+    Kc_truth = 8.314 * Tv / 1.0e5                        # RT/P° for Δν=−1, Δg°=0
+    @test Cc / (Ca * Cb) ≈ Kc_truth  rtol=1e-2           # equilibrium [C]/([A][B]) = K_c
+    @test Ca + Cc ≈ 1.0  atol=1e-6                        # A mass conserved (A+B→C, B=A by symmetry)
 end
 
 @testset "ThermoReverse: distinct low/high NASA7 coeffs switch at Tmid" begin

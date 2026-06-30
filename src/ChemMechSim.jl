@@ -8,8 +8,8 @@ using .ChemUnits: canonical
 export canonical
 
 # —— Data layer (pure Julia, no MTK dependency) ——
-include("data/types.jl")         # SpeciesID, SpeciesRole, R_GAS
-export SpeciesID, SpeciesRole, R_GAS
+include("data/types.jl")         # SpeciesID, SpeciesRole, R_GAS, P_STD
+export SpeciesID, SpeciesRole, R_GAS, P_STD
 
 include("data/thermo.jl")         # ThermoModel (abstract), ThermoDatabase, NASA7
 export ThermoModel, ThermoDatabase,
