@@ -164,15 +164,23 @@ end
 
 # ThermoReverse net rate: forward minus reverse (Task 6, §3.4 #4).
 
-"Net rate = forward - reverse for a reversible reaction (direct path)."
+"Net rate = forward − reverse for a reversible reaction (direct path). ExplicitReverse uses the
+ general forward dispatch (_direct_rate) since its reverse is independent of the forward k_f.
+ ThermoReverse needs the forward k_f (for k_r = k_f/K_c), so it keeps the elementary-forward path."
 function _net_rate(rx::ReactionData, mech, cvar, T, j)
+    policy = rx.reverse_policy
+    if policy isa ExplicitReverse
+        fwd = _direct_rate(rx.kinetics, rx, mech, cvar, T, j)
+        return fwd - _reverse_rate(policy, rx, mech, cvar, T, j)
+    end
+    # ThermoReverse (and any future policy needing k_f)
     rx.kinetics isa ElementaryArrhenius ||
-        error("_net_rate: reverse rates for non-elementary kinetics ($(typeof(rx.kinetics))) " *
-              "are not supported in this spike; use Irreversible or an explicit reverse.")
+        error("_net_rate: reverse with non-elementary forward kinetics ($(typeof(rx.kinetics))) " *
+              "is not supported; use Irreversible, ExplicitReverse, or an elementary forward.")
     order = sum(values(rx.reactants))
     kf = _arrhenius_k_param(rx.kinetics, order, "k_$j", T)
     fwd = kf * _mass_action(rx.reactants, cvar)
-    return fwd - _reverse_rate(rx.reverse_policy, rx, mech, cvar, T, kf)
+    return fwd - _reverse_rate(policy, rx, mech, cvar, T, kf)
 end
 
 _reverse_rate(::Irreversible, rx, mech, cvar, T, kf) = 0.0
@@ -185,6 +193,17 @@ function _reverse_rate(::ThermoReverse, rx, mech, cvar, T, kf)
               "in this spike (only Δν=0, e.g. isomerization A<->B); the general (P°/RT)^Δν factor is deferred.")
     Kc = _equilibrium_constant(mech, rx, T)
     return (kf / Kc) * _mass_action(rx.products, cvar)
+end
+
+"Reverse rate for an ExplicitReverse policy: kr(T)·∏products, kr from the policy's own rate law.
+ Phase 3 supports policy.rate::ElementaryArrhenius (the common explicit-reverse form)."
+function _reverse_rate(policy::ExplicitReverse, rx::ReactionData, mech, cvar, T, j)
+    policy.rate isa ElementaryArrhenius ||
+        error("_reverse_rate(ExplicitReverse): non-Arrhenius reverse rate ($(typeof(policy.rate))) " *
+              "deferred; use ElementaryArrhenius.")
+    order = sum(values(rx.products))                       # reverse "reactants" = forward products
+    kr = _arrhenius_k_param(policy.rate, order, "k_$(j)_rev", T)   # _rev suffix avoids name clash
+    return kr * _mass_action(rx.products, cvar)
 end
 
 "Equilibrium constant K_c(T) = exp(-Δg°/RT) from NASA7 thermo (§3.4 #4). Δg°/RT is

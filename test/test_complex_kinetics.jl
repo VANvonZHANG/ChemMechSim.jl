@@ -121,3 +121,18 @@ end
     @test eq_ratio(300.0)  ≈ 2.0  rtol=1e-3   # low range  (K_c = exp(ln2) = 2)
     @test eq_ratio(1500.0) ≈ 5.0  rtol=1e-3   # high range (K_c = exp(ln5) = 5)
 end
+
+@testset "ExplicitReverse: A<->B equilibrium [B]/[A] = kf/kr" begin
+    # forward A->B kf=2.0; explicit reverse B->A kr=0.5 → equilibrium [B]/[A] = kf/kr = 4
+    a = SpeciesData(id=1, name="A"); b = SpeciesData(id=2, name="B")
+    rxn = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
+                       kinetics=ElementaryArrhenius(2.0,0.0,0.0),
+                       reverse_policy=ExplicitReverse(ElementaryArrhenius(0.5,0.0,0.0)))
+    mech = Mechanism(species=[a,b], reactions=[rxn])
+    phase = ChemPhaseSystem(mech); sys = extract_system(phase)
+    Avar = unknowns(sys)[findfirst(s -> String(getname(s))=="A", unknowns(sys))]
+    Bvar = unknowns(sys)[findfirst(s -> String(getname(s))=="B", unknowns(sys))]
+    sol = simulate(phase, (0.0,50.0); u0=Dict("A"=>1.0,"B"=>0.0), reltol=1e-10, abstol=1e-12)
+    @test sol(50.0; idxs=Bvar) / sol(50.0; idxs=Avar) ≈ 4.0  rtol=1e-3
+    @test sol(50.0; idxs=Avar) + sol(50.0; idxs=Bvar) ≈ 1.0  atol=1e-6   # mass conserved
+end
