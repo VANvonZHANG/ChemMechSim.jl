@@ -130,3 +130,16 @@ end
     @test du[idx["X"]] ≈ -3.0                    # 1 - 4·2 + (2²)·1 = -3
     @test du[idx["Y"]] ≈  2.0                    # 3·2 - (2²)·1 = 2
 end
+
+@testset "M1: no spurious theta param when b!=0, Ea=0" begin
+    # k(T) = A·T^b with b=0.5, Ea=0 → power-law, no exp term, no theta param.
+    x = SpeciesData(id=1, name="X"); y = SpeciesData(id=2, name="Y")
+    rxn = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
+                       kinetics=ElementaryArrhenius(1.0e6, 0.5, 0.0))
+    mech = Mechanism(species=[x,y], reactions=[rxn])
+    sys = extract_system(ChemPhaseSystem(mech))
+    pnames = [String(getname(p)) for p in parameters(sys)]
+    @test !any(occursin("theta", n) for n in pnames)   # no theta param (was spurious before)
+    @test any(occursin("_A", n)   for n in pnames)      # A param present
+    @test "T" in pnames                                  # T retained (T-dependent)
+end

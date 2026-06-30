@@ -34,10 +34,9 @@ _k_unit(order, b) = ChemUnits.conc^(1 - order) * u"s^-1" / (u"K"^b)
 function _arrhenius_k_param(kin::ElementaryArrhenius, order::Real, nameprefix::AbstractString, T)
     b = kin.b
     A = rate_param(Symbol(nameprefix, "_A"), kin.A, _k_unit(order, b))
-    if iszero(b) && iszero(kin.Ea)
-        return A                                   # constant rate, no T dependence
-    end
-    # T-dependent: k = A·T^b·exp(-θ/T), θ = Ea/R (K) so the exponent is dimensionless
+    iszero(b) && iszero(kin.Ea) && return A              # constant rate, no T dependence
+    iszero(kin.Ea) && return A * T^b                      # Ea=0, b≠0: power-law k=A·T^b, no θ
+    # general: k = A·T^b·exp(-θ/T), θ = Ea/R (K) so the exponent is dimensionless
     θ = rate_param(Symbol(nameprefix, "_theta"), kin.Ea / R_GAS, u"K")
     return A * T^b * exp(-θ / T)
 end
