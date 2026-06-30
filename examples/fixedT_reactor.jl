@@ -2,7 +2,7 @@
 # Run:  julia --project=. examples/fixedT_reactor.jl
 using ChemMechSim
 using ModelingToolkit: equations, unknowns, parameters, getname, observed
-using OrdinaryDiffEq
+using OrdinaryDiffEq: Rodas5P
 
 # H2 + OH <-> H + H2O  (Δν=0 isomerization-like, ExplicitReverse; T-dependent forward)
 H2  = SpeciesData(id=1, name="H2")
@@ -19,7 +19,7 @@ sys = extract_system(r)
 println("observed: ", [getname(o.lhs) for o in observed(sys)])
 Tp = parameters(sys)[findfirst(p -> String(getname(p))=="T", parameters(sys))]
 sol = simulate(r, (0.0, 1e-3); u0=Dict("H2"=>2.0,"OH"=>1.0,"H"=>0.0,"H2O"=>0.0),
-               params=[Tp => 1200.0], reltol=1e-9, abstol=1e-12)
+               params=[Tp => 1200.0], solver=Rodas5P(), reltol=1e-9, abstol=1e-12)
 Pvar = [o.lhs for o in observed(sys) if getname(o.lhs)==:P][1]
 for n in ["H2","OH","H","H2O"]
     s = unknowns(sys)[findfirst(x -> String(getname(x))==n, unknowns(sys))]
