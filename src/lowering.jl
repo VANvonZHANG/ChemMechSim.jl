@@ -212,16 +212,13 @@ end
  in Julia, so the symbolic method is dispatched via T::Num (more specific than Real)."
 _g_over_RT(m::NASA7, T::Real, sid) = g_over_RT(m, T)
 
-"Known limitation (review I1): piecewise NASA7 — the low/high coefficient range switch at
- Tmid — is NOT robustly supported for symbolic T. This method builds both branches eagerly
- via Symbolics `ifelse`, which does not reliably lower as an ODE rate expression for real
- codegen; with distinct low/high coeffs across Tmid it can silently pick the wrong branch
- or fail. The Task 6 tests pass only because the test species use IDENTICAL low/high coeff
- sets (`NASA7(base, base, …)`), so both branches coincide. Real-species mechanisms with
- distinct low/high NASA7 coeffs must revisit this (deferred — the §3.4 spike uses
- constructed identical-coeff species). The implementation assumes a single representative
- coefficient set; no attempt is made here to fix the range switching, which is a
- fundamental symbolic-T limitation out of scope for the spike."
+"Dimensionless g/RT from NASA7 thermo for a symbolic/unit-bearing T (the K-param in lowering).
+ Each coefficient is a unit-bearing parameter, selected by `ifelse(T <= Tmid, lo, hi)`; a6 has
+ unit K (so a6/T is dimensionless), a2..a5 absorb K^-n, a1/a7 are dimensionless, Tmid is K, and
+ Tref=1 K makes log(T/Tref) dimensionless. The bare `ifelse` (Base.ifelse, Symbolics-extended)
+ LOWERS to a correct runtime `if (T <= Tmid) … else …` branch and the dimension check passes
+ (verified 2026-06-29: distinct low/high coeffs give K_c=2 below Tmid, K_c=5 above, exact match).
+ Num <: Real, so this method dispatches via T::Num (more specific than the ::Real data-layer method)."
 function _g_over_RT(m::NASA7, T::Num, sid)
     Tmid_K = rate_param(Symbol("Tmid_sp", sid), m.Tmid, u"K")  # K-typed so T <= Tmid is unit-consistent
     T_ref = rate_param(Symbol("Tref_sp", sid), 1.0, u"K")     # 1 K reference so log(T/T_ref) is dimensionless

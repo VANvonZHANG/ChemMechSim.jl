@@ -98,3 +98,26 @@ end
     mech = Mechanism(species=[a, b, c], reactions=[rxn])
     @test_throws ErrorException ChemPhaseSystem(mech)   # lowering hits _reverse_rate -> Δν guard
 end
+
+@testset "ThermoReverse: distinct low/high NASA7 coeffs switch at Tmid" begin
+    # A <-> B (Δν=0). B has DISTINCT coeffs: low a7=ln2 (K_c=2), high a7=ln5 (K_c=5); Tmid=1000.
+    a1 = 2.5
+    baseA = (a1, 0.0, 0.0, 0.0, 0.0, -a1 * 1000.0, 0.0)
+    nA = NASA7(baseA, baseA, 200.0, 1000.0, 3500.0)
+    nB = NASA7((a1,0,0,0,0,-a1*1000.0,log(2.0)), (a1,0,0,0,0,-a1*1000.0,log(5.0)), 200.0, 1000.0, 3500.0)
+    spA = SpeciesData(id=1, name="A", thermo=nA)
+    spB = SpeciesData(id=2, name="B", thermo=nB)
+    rxn = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
+                       kinetics=ElementaryArrhenius(1.0,0.0,0.0), reverse_policy=ThermoReverse())
+    mech = Mechanism(species=[spA,spB], reactions=[rxn])
+    phase = ChemPhaseSystem(mech); sys = extract_system(phase)
+    Avar = unknowns(sys)[findfirst(s -> String(getname(s))=="A", unknowns(sys))]
+    Bvar = unknowns(sys)[findfirst(s -> String(getname(s))=="B", unknowns(sys))]
+    Tp   = parameters(sys)[findfirst(p -> String(getname(p))=="T", parameters(sys))]
+    eq_ratio(Tv) = let sol = simulate(phase, (0.0,400.0); u0=Dict("A"=>1.0,"B"=>0.0),
+                                        params=[Tp=>Tv], reltol=1e-10, abstol=1e-12)
+        sol(400.0; idxs=Bvar) / sol(400.0; idxs=Avar)
+    end
+    @test eq_ratio(300.0)  ≈ 2.0  rtol=1e-3   # low range  (K_c = exp(ln2) = 2)
+    @test eq_ratio(1500.0) ≈ 5.0  rtol=1e-3   # high range (K_c = exp(ln5) = 5)
+end
