@@ -16,3 +16,8 @@ const SpeciesRole = Symbol
 # Lives in the data layer so src/data/thermo.jl can use it WITHOUT `using` MTK;
 # types.jl is included before both thermo.jl and lowering.jl.
 const R_GAS = 8.314   # J/(mol·K)
+
+# Standard-state pressure for NASA-polynomial thermo (spec §4.2 / §5.6).
+# 1 bar = 1e5 Pa (modern Cantera/GRI30 ideal-gas convention; CHEMKIN historical = 1 atm = 101325).
+# Revisit at Phase 5 (Cantera validation) if ignition-delay comparison shows a systematic offset.
+const P_STD = 1.0e5   # Pa

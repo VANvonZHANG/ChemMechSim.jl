@@ -34,10 +34,9 @@ _k_unit(order, b) = ChemUnits.conc^(1 - order) * u"s^-1" / (u"K"^b)
 function _arrhenius_k_param(kin::ElementaryArrhenius, order::Real, nameprefix::AbstractString, T)
     b = kin.b
     A = rate_param(Symbol(nameprefix, "_A"), kin.A, _k_unit(order, b))
-    if iszero(b) && iszero(kin.Ea)
-        return A                                   # constant rate, no T dependence
-    end
-    # T-dependent: k = A·T^b·exp(-θ/T), θ = Ea/R (K) so the exponent is dimensionless
+    iszero(b) && iszero(kin.Ea) && return A              # constant rate, no T dependence
+    iszero(kin.Ea) && return A * T^b                      # Ea=0, b≠0: power-law k=A·T^b, no θ
+    # general: k = A·T^b·exp(-θ/T), θ = Ea/R (K) so the exponent is dimensionless
     θ = rate_param(Symbol(nameprefix, "_theta"), kin.Ea / R_GAS, u"K")
     return A * T^b * exp(-θ / T)
 end
@@ -54,6 +53,14 @@ _needs_T(mech::Mechanism) =
     any(_is_T_dependent(rx.kinetics) || _reverse_needs_T(rx.reverse_policy) for rx in mech.reactions)
 _reverse_needs_T(::ThermoReverse) = true
 _reverse_needs_T(::ReverseRatePolicy) = false
+
+# Lowering-scoped singletons for the thermo constants R and P° (shared across all K_c uses, so
+# every reaction's (P°/RT)^Δν factor references the SAME parameter — no duplicate-name params).
+# Reset at the start of each lower_to_mtk call.
+const _PSTD_PARAM = Ref{Any}(nothing)
+const _RGAS_PARAM = Ref{Any}(nothing)
+_p_std_param() = _PSTD_PARAM[] === nothing ? (_PSTD_PARAM[] = rate_param(:P_std, P_STD, u"Pa")) : _PSTD_PARAM[]
+_r_param()     = _RGAS_PARAM[] === nothing ? (_RGAS_PARAM[] = rate_param(:R_gas, R_GAS, u"J/(mol*K)")) : _RGAS_PARAM[]
 
 "Mass-action product ∏ c[sid]^ν over a stoichiometry map."
 function _mass_action(stoich::Dict{SpeciesID,Float64}, cvar)
@@ -165,33 +172,53 @@ end
 
 # ThermoReverse net rate: forward minus reverse (Task 6, §3.4 #4).
 
-"Net rate = forward - reverse for a reversible reaction (direct path)."
+"Net rate = forward − reverse for a reversible reaction (direct path). ExplicitReverse uses the
+ general forward dispatch (_direct_rate) since its reverse is independent of the forward k_f.
+ ThermoReverse needs the forward k_f (for k_r = k_f/K_c), so it keeps the elementary-forward path."
 function _net_rate(rx::ReactionData, mech, cvar, T, j)
+    policy = rx.reverse_policy
+    if policy isa ExplicitReverse
+        fwd = _direct_rate(rx.kinetics, rx, mech, cvar, T, j)
+        return fwd - _reverse_rate(policy, rx, mech, cvar, T, j)
+    end
+    # ThermoReverse (and any future policy needing k_f)
     rx.kinetics isa ElementaryArrhenius ||
-        error("_net_rate: reverse rates for non-elementary kinetics ($(typeof(rx.kinetics))) " *
-              "are not supported in this spike; use Irreversible or an explicit reverse.")
+        error("_net_rate: reverse with non-elementary forward kinetics ($(typeof(rx.kinetics))) " *
+              "is not supported; use Irreversible, ExplicitReverse, or an elementary forward.")
     order = sum(values(rx.reactants))
     kf = _arrhenius_k_param(rx.kinetics, order, "k_$j", T)
     fwd = kf * _mass_action(rx.reactants, cvar)
-    return fwd - _reverse_rate(rx.reverse_policy, rx, mech, cvar, T, kf)
+    return fwd - _reverse_rate(policy, rx, mech, cvar, T, kf)
 end
 
 _reverse_rate(::Irreversible, rx, mech, cvar, T, kf) = 0.0
 function _reverse_rate(::ThermoReverse, rx, mech, cvar, T, kf)
     T === nothing &&
         error("_reverse_rate(ThermoReverse): K_c(T) needs a T parameter, but none exists.")
-    dnu = sum(values(rx.products)) - sum(values(rx.reactants))
-    dnu == 0 ||
-        error("_reverse_rate(ThermoReverse): Δν≠0 ($dnu) concentration-basis K_c is not supported " *
-              "in this spike (only Δν=0, e.g. isomerization A<->B); the general (P°/RT)^Δν factor is deferred.")
     Kc = _equilibrium_constant(mech, rx, T)
     return (kf / Kc) * _mass_action(rx.products, cvar)
 end
 
-"Equilibrium constant K_c(T) = exp(-Δg°/RT) from NASA7 thermo (§3.4 #4). Δg°/RT is
- dimensionless, so exp is dimensionless — passes the dim check under units (verified
- 2026-06-26). The general (P°/RT)^Δν factor for Δν≠0 is deferred."
-_equilibrium_constant(mech::Mechanism, rx::ReactionData, T) = exp(-_delta_g_over_RT(mech, rx, T))
+"Reverse rate for an ExplicitReverse policy: kr(T)·∏products, kr from the policy's own rate law.
+ Phase 3 supports policy.rate::ElementaryArrhenius (the common explicit-reverse form)."
+function _reverse_rate(policy::ExplicitReverse, rx::ReactionData, mech, cvar, T, j)
+    policy.rate isa ElementaryArrhenius ||
+        error("_reverse_rate(ExplicitReverse): non-Arrhenius reverse rate ($(typeof(policy.rate))) " *
+              "deferred; use ElementaryArrhenius.")
+    order = sum(values(rx.products))                       # reverse "reactants" = forward products
+    kr = _arrhenius_k_param(policy.rate, order, "k_$(j)_rev", T)   # _rev suffix avoids name clash
+    return kr * _mass_action(rx.products, cvar)
+end
+
+"Equilibrium constant K_c(T) = exp(-Δg°/RT)·(P°/(R·T))^Δν (spec §3.4 #4, §4.2).
+ Δν = Σν_products − Σν_reactants. Δν=0 → factor is 1 (the existing behavior; current tests unaffected).
+ Δg°/RT is dimensionless and (P°/RT)^Δν carries the concentration-basis unit — both pass the dim check."
+function _equilibrium_constant(mech::Mechanism, rx::ReactionData, T)
+    dnu = sum(values(rx.products)) - sum(values(rx.reactants))
+    base = exp(-_delta_g_over_RT(mech, rx, T))
+    iszero(dnu) && return base
+    return base * (_p_std_param() / (_r_param() * T))^dnu
+end
 
 function _delta_g_over_RT(mech::Mechanism, rx::ReactionData, T)
     g = 0.0
@@ -212,16 +239,13 @@ end
  in Julia, so the symbolic method is dispatched via T::Num (more specific than Real)."
 _g_over_RT(m::NASA7, T::Real, sid) = g_over_RT(m, T)
 
-"Known limitation (review I1): piecewise NASA7 — the low/high coefficient range switch at
- Tmid — is NOT robustly supported for symbolic T. This method builds both branches eagerly
- via Symbolics `ifelse`, which does not reliably lower as an ODE rate expression for real
- codegen; with distinct low/high coeffs across Tmid it can silently pick the wrong branch
- or fail. The Task 6 tests pass only because the test species use IDENTICAL low/high coeff
- sets (`NASA7(base, base, …)`), so both branches coincide. Real-species mechanisms with
- distinct low/high NASA7 coeffs must revisit this (deferred — the §3.4 spike uses
- constructed identical-coeff species). The implementation assumes a single representative
- coefficient set; no attempt is made here to fix the range switching, which is a
- fundamental symbolic-T limitation out of scope for the spike."
+"Dimensionless g/RT from NASA7 thermo for a symbolic/unit-bearing T (the K-param in lowering).
+ Each coefficient is a unit-bearing parameter, selected by `ifelse(T <= Tmid, lo, hi)`; a6 has
+ unit K (so a6/T is dimensionless), a2..a5 absorb K^-n, a1/a7 are dimensionless, Tmid is K, and
+ Tref=1 K makes log(T/Tref) dimensionless. The bare `ifelse` (Base.ifelse, Symbolics-extended)
+ LOWERS to a correct runtime `if (T <= Tmid) … else …` branch and the dimension check passes
+ (verified 2026-06-29: distinct low/high coeffs give K_c=2 below Tmid, K_c=5 above, exact match).
+ Num <: Real, so this method dispatches via T::Num (more specific than the ::Real data-layer method)."
 function _g_over_RT(m::NASA7, T::Num, sid)
     Tmid_K = rate_param(Symbol("Tmid_sp", sid), m.Tmid, u"K")  # K-typed so T <= Tmid is unit-consistent
     T_ref = rate_param(Symbol("Tref_sp", sid), 1.0, u"K")     # 1 K reference so log(T/T_ref) is dimensionless
@@ -260,32 +284,57 @@ function _species_rhs(sid::SpeciesID, mech::Mechanism, rates)
     return rhs
 end
 
-"True iff `config` is the :kinetic zero-point (the only config lowered so far)."
-function _is_zero_point(c::MechanismConfig)
-    return c.energy === :isothermal && c.constraint === :none && c.eos === :off &&
-           c.thermo_data === :none && c.reverse_rate === :irreversible &&
-           c.state_basis === :concentration
-end
+"True iff `config` is lowerable in Phase 3: isothermal, concentration basis, const-V or unconstrained,
+ with EOS off OR ideal-gas-as-observed. (The :kinetic zero-point and :fixedT are the common cases.)"
+_lowerable(c::MechanismConfig) =
+    c.energy === :isothermal && c.state_basis === :concentration &&
+    c.constraint in (:none, :constant_volume) && c.eos in (:off, :ideal_gas)
 
 "Lower a Mechanism into a structural_simplify'd MTK ODESystem (unit-aware, zero-point).
  Species get [unit=conc]; T [unit=K] is created iff any reaction is T-dependent or
  ThermoReverse. Each reaction's rate constant is a unit-bearing parameter (default = stored
  value), so MTK's dimension check fires at System construction (§5.6)."
 function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig())
-    _is_zero_point(config) ||
-        error("lower_to_mtk: only the :kinetic zero-point config (MechanismConfig()) is supported so far; " *
-              "energy/EOS/thermo layers arrive in later phases.")
+    _PSTD_PARAM[] = nothing        # reset lowering-scoped thermo-constant singletons (Task 4)
+    _RGAS_PARAM[] = nothing
+    _lowerable(config) ||
+        error("lower_to_mtk: config not supported in Phase 3 (energy=:adiabatic, EOS-as-DAE, " *
+              ":constant_pressure, and non-concentration bases arrive in Phase 4). " *
+              "Got: energy=$(config.energy) constraint=$(config.constraint) eos=$(config.eos) " *
+              "basis=$(config.state_basis). Use MechanismConfig() (:kinetic) or convenience_config(:fixedT).")
     t = ModelingToolkit.t
     D = ModelingToolkit.D
     cvars = [_attach_unit(only(@species ($(Symbol(sp.name)))(t)), ChemUnits.conc)
              for sp in mech.species]
     cvar = Dict(mech.species[i].id => cvars[i] for i in eachindex(mech.species))
-    Tparam = _needs_T(mech) ? rate_param(:T, 300.0, u"K") : nothing
+    # T exists iff any reaction is T-dependent OR EOS needs it (P = Σc·R·T)
+    Tparam = (_needs_T(mech) || config.eos === :ideal_gas) ? rate_param(:T, 300.0, u"K") : nothing
     rates = [lower_reaction(rx, mech, cvar, Tparam, config, j)
              for (j, rx) in enumerate(mech.reactions)]
     eqs = [D(cvars[i]) ~ _species_rhs(mech.species[i].id, mech, rates)
            for i in eachindex(mech.species)]
-    @named raw = System(eqs, t)          # dimension check fires here (ValidationError on mismatch)
+    if config.eos === :ideal_gas
+        return _lower_with_eos(eqs, t, cvars, Tparam)
+    end
+    @named raw = System(eqs, t)          # zero-point / isothermal-no-EOS: auto-discover (unchanged)
+    return mtkcompile(raw)
+end
+
+"Build the system with EOS observed P ~ (Σc)·R·T. R and T appear in the observed equation, so they
+ are dropped by mtkcompile under auto-discover — rebuild with EXPLICIT params so they're retained."
+function _lower_with_eos(eqs, t, cvars, Tparam)
+    Rparam = _r_param()                            # shared with K_c (Task 4 memoized singleton)
+    Pvar = _attach_unit(only(@variables P(t)), ChemUnits.press)
+    obs = [Pvar ~ sum(cvars) * Rparam * Tparam]
+    # auto-discover the RHS params, then add observed-only R (and T if not already in RHS)
+    @named _tmp = System(eqs, t)
+    rhsparams = ModelingToolkit.parameters(_tmp)
+    rhsnames = Set(ModelingToolkit.getname(p) for p in rhsparams)
+    extras = Any[]
+    ModelingToolkit.getname(Rparam) in rhsnames || push!(extras, Rparam)
+    ModelingToolkit.getname(Tparam) in rhsnames || push!(extras, Tparam)
+    allparams = [rhsparams; extras]
+    @named raw = System(eqs, t, cvars, allparams; observed=obs)
     return mtkcompile(raw)
 end
 

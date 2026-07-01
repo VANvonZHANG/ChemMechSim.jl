@@ -54,6 +54,14 @@ end
 "Generate standalone RHS Julia code from a BatchReactor's system."
 generate_function(r::BatchReactor) = generate_function(extract_system(r))
 
-"Generate standalone Jacobian Julia code. (stub — Phase 3)"
-generate_jacobian(sys; kwargs...) =
-    error("generate_jacobian: not implemented yet; see the Phase 3 plan.")
+"Generate standalone Jacobian code from a BatchReactor's system."
+generate_jacobian(r::BatchReactor; kwargs...) = generate_jacobian(extract_system(r); kwargs...)
+
+"Generate standalone Jacobian Julia code from an MTK system (mirror of generate_function).
+ `sparse=true` emits SparseMatrixCSC codegen (for large mechanisms — GRI-30 prep, Phase 5)."
+function generate_jacobian(sys; sparse::Bool=false)
+    jac = ModelingToolkit.calculate_jacobian(sys; sparse=sparse)
+    return first(ModelingToolkit.build_function(jac,
+                ModelingToolkit.unknowns(sys), ModelingToolkit.parameters(sys),
+                [ModelingToolkit.t_nounits]))
+end
