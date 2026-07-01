@@ -147,3 +147,28 @@ end
     @test sol(50.0; idxs=Bvar) / sol(50.0; idxs=Avar) ≈ 4.0  rtol=1e-3
     @test sol(50.0; idxs=Avar) + sol(50.0; idxs=Bvar) ≈ 1.0  atol=1e-6   # mass conserved
 end
+
+@testset ":fixedT + ThermoReverse Δν≠0 + EOS (cross-cutting)" begin
+    # A + B <-> C (Δν = -1). all-zero NASA7 → Δg°=0 → K_c = (P°/RT)^(-1) = RT/P°.
+    # :fixedT mode (isothermal + const-V + ideal-gas EOS). Exercises K_c Δν≠0 (Task 4) + EOS observed (Task 7) together.
+    n = NASA7((0.0,0,0,0,0,0.0,0.0),(0.0,0,0,0,0,0.0,0.0),200.0,1000.0,3500.0)
+    A = SpeciesData(id=1,name="A",thermo=n); B = SpeciesData(id=2,name="B",thermo=n); C = SpeciesData(id=3,name="C",thermo=n)
+    rxn = ReactionData(reactants=Dict(1=>1.0,2=>1.0), products=Dict(3=>1.0),
+                       kinetics=ElementaryArrhenius(1.0,0.0,0.0), reverse_policy=ThermoReverse())
+    mech = Mechanism(species=[A,B,C], reactions=[rxn])
+    phase = ChemPhaseSystem(mech; config=convenience_config(:fixedT))
+    sys = extract_system(phase)
+    @test :P in [getname(o.lhs) for o in observed(sys)]            # EOS observed present
+    Av = unknowns(sys)[findfirst(s -> String(getname(s))=="A", unknowns(sys))]
+    Bv = unknowns(sys)[findfirst(s -> String(getname(s))=="B", unknowns(sys))]
+    Cv = unknowns(sys)[findfirst(s -> String(getname(s))=="C", unknowns(sys))]
+    Tp = parameters(sys)[findfirst(p -> String(getname(p))=="T", parameters(sys))]
+    Pvar = [o.lhs for o in observed(sys) if getname(o.lhs)==:P][1]
+    Tv = 1000.0
+    sol = simulate(phase, (0.0,200.0); u0=Dict("A"=>1.0,"B"=>1.0,"C"=>0.0),
+                   params=[Tp=>Tv], solver=Rodas5P(), reltol=1e-9, abstol=1e-12)
+    Ca, Cb, Cc = sol(200.0; idxs=Av), sol(200.0; idxs=Bv), sol(200.0; idxs=Cv)
+    @test Cc/(Ca*Cb) ≈ 8.314*Tv/1.0e5  rtol=1e-2                   # K_c = RT/P° (Δν=-1, Δg°=0)
+    csum = Ca + Cb + Cc
+    @test sol(200.0; idxs=Pvar) ≈ csum*8.314*Tv  rtol=1e-4        # P = (Σc)·R·T observed
+end

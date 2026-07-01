@@ -110,12 +110,14 @@ _stoich_signature(rx::ReactionData) =
     (sort(collect(rx.reactants)), sort(collect(rx.products)))
 
 function _check_reverse_consistency(mech::Mechanism, rep::ValidationReport)
+    ids = Set(sp.id for sp in mech.species)
     for (j, rx) in enumerate(mech.reactions)
-        if rx.reverse_policy isa ThermoReverse
-            any(sid -> _species_by_id(mech, sid).thermo === nothing,
-                union(keys(rx.reactants), keys(rx.products))) &&
+        rx.reverse_policy isa ThermoReverse || continue
+        for sid in union(keys(rx.reactants), keys(rx.products))
+            sid in ids || continue                      # dangling id: skip (not this check's concern)
+            _species_by_id(mech, sid).thermo === nothing &&
                 push!(rep.errors,
-                      "reaction #$j is ThermoReverse but a participating species lacks NASA thermo " *
+                      "reaction #$j is ThermoReverse but species id $sid lacks NASA thermo " *
                       "(K_c needs thermo on all reactants/products).")
         end
     end

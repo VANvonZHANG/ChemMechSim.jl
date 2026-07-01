@@ -330,7 +330,8 @@ function _lower_with_eos(eqs, t, cvars, Tparam)
     @named _tmp = System(eqs, t)
     rhsparams = ModelingToolkit.parameters(_tmp)
     rhsnames = Set(ModelingToolkit.getname(p) for p in rhsparams)
-    extras = [Rparam]
+    extras = Any[]
+    ModelingToolkit.getname(Rparam) in rhsnames || push!(extras, Rparam)
     ModelingToolkit.getname(Tparam) in rhsnames || push!(extras, Tparam)
     allparams = [rhsparams; extras]
     @named raw = System(eqs, t, cvars, allparams; observed=obs)
