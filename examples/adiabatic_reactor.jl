@@ -22,9 +22,12 @@ sol = simulate(reactor, (0.0, 10.0);
 sys = extract_system(reactor)
 Tvar = unknowns(sys)[findfirst(s -> String(getname(s)) == "T", unknowns(sys))]
 Avar = unknowns(sys)[findfirst(s -> String(getname(s)) == "A", unknowns(sys))]
+Bvar = unknowns(sys)[findfirst(s -> String(getname(s)) == "B", unknowns(sys))]
 println("retcode          = ", sol.retcode)
 println("T  300 K  →  ", round(Float64(sol(10.0; idxs=Tvar)), digits=1), " K  (exothermic rise)")
 println("A  1.0    →  ", round(Float64(sol(10.0; idxs=Avar)), digits=4), " mol/m³")
-println("ΔU/V (should be ≈ 0): ",
-        round(u_molar(nB, Float64(sol(10.0; idxs=Tvar))) -
-              u_molar(nA, 300.0); digits=3), " J/m³")
+# Total internal energy U/V = Σᵢ cᵢ·ūᵢ(T) is the adiabatic-const-V invariant (ūᵢ = h̄ᵢ − RT).
+Tf = Float64(sol(10.0; idxs=Tvar)); Af = Float64(sol(10.0; idxs=Avar)); Bf = Float64(sol(10.0; idxs=Bvar))
+Uinit = 1.0 * u_molar(nA, 300.0)                       # only A present initially
+Ufin  = Af * u_molar(nA, Tf) + Bf * u_molar(nB, Tf)
+println("ΔU/V (energy conservation, should be ≈ 0): ", round(Ufin - Uinit, digits=3), " J/m³")
