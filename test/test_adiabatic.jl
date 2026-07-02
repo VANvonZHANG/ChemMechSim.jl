@@ -66,3 +66,21 @@ end
     @test !isequal(0.0, jac[idx["T"], idx["T"]])           # ∂(dT/dt)/∂T  ≠ 0 (cp/cv + Arrhenius)
     @test !isequal(0.0, jac[idx["A"], idx["T"]])           # ∂(dc_A/dt)/∂T ≠ 0 (rate T-coupling)
 end
+
+@testset "validate: :adiabatic requires NASA7 thermo on all species (§5.3.4)" begin
+    # species WITHOUT thermo → validate reports an error under :adiabatic_constV
+    x = SpeciesData(id=1, name="X"); y = SpeciesData(id=2, name="Y")
+    rxn = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
+                       kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))
+    mech_noThermo = Mechanism(species=[x, y], reactions=[rxn])
+    rep = validate(mech_noThermo; config=convenience_config(:adiabatic_constV))
+    @test !isempty(rep.errors)
+    @test any(occursin("adiabatic requires NASA7", e) for e in rep.errors)
+    # with thermo → no error from this check
+    mech_ok = _exothermic_ab_mech()
+    rep2 = validate(mech_ok; config=convenience_config(:adiabatic_constV))
+    @test !any(occursin("adiabatic requires NASA7", e) for e in rep2.errors)
+    # isothermal config → thermo-not-required (no error even without thermo)
+    rep3 = validate(mech_noThermo; config=convenience_config(:fixedT))
+    @test !any(occursin("adiabatic requires NASA7", e) for e in rep3.errors)
+end

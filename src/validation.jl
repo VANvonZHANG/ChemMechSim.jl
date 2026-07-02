@@ -9,8 +9,12 @@ struct ValidationReport
 end
 ValidationReport() = ValidationReport(String[], String[], String[])
 
-"Run scientific-reliability checks on a Mechanism. Returns a ValidationReport."
-function validate(mech::Mechanism; T_range::Union{Tuple{Float64,Float64},Nothing}=nothing)
+"Run scientific-reliability checks on a Mechanism. Returns a ValidationReport.
+ `config` (optional): when supplied with energy=:adiabatic, verifies every species has NASA7
+ thermo (spec §5.3.4 progressive data requirement). `T_range`: NASA temperature-range coverage check."
+function validate(mech::Mechanism;
+                  config::Union{MechanismConfig,Nothing}=nothing,
+                  T_range::Union{Tuple{Float64,Float64},Nothing}=nothing)
     rep = ValidationReport()
     _check_element_conservation(mech, rep)
     _check_molecular_weights(mech, rep)
@@ -18,6 +22,7 @@ function validate(mech::Mechanism; T_range::Union{Tuple{Float64,Float64},Nothing
     _check_thirdbody_efficiencies(mech, rep)
     _check_duplicate_reactions(mech, rep)
     _check_reverse_consistency(mech, rep)
+    config === nothing || _check_energy_thermo(mech, config, rep)
     return rep
 end
 
@@ -123,6 +128,20 @@ function _check_reverse_consistency(mech::Mechanism, rep::ValidationReport)
     end
 end
 _species_by_id(mech::Mechanism, sid) = species_by_id(mech, sid)
+
+"Phase 4a: energy=:adiabatic needs NASA7 thermo on every species (the energy equation uses
+ cp/cv/h of each). Reports one error per offending species (spec §5.3.4)."
+function _check_energy_thermo(mech::Mechanism, config::MechanismConfig, rep::ValidationReport)
+    config.energy === :adiabatic || return
+    for sp in mech.species
+        sp.thermo isa NASA7 ||
+            push!(rep.errors,
+                  "energy=:adiabatic requires NASA7 thermo on all species, but $(sp.name) " *
+                  "(id $(sp.id)) has $(sp.thermo === nothing ? "no thermo" :
+                                      "non-NASA7 thermo ($(typeof(sp.thermo)))"). " *
+                  "Provide NASA7 thermo or use energy=:isothermal (spec §5.3.4).")
+    end
+end
 
 "Float-robust Dict{String,Float64} equality for element-count comparison (review M5):
  same keys and all values isapprox within atol=1e-9."
