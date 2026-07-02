@@ -15,7 +15,8 @@ include("data/thermo.jl")         # ThermoModel (abstract), ThermoDatabase, NASA
 export ThermoModel, ThermoDatabase,
        NASA7,
        cp_over_R, h_over_RT, s_over_R, g_over_RT,
-       cp_molar, h_molar, s_molar, g_molar
+       cp_molar, h_molar, s_molar, g_molar,
+       u_molar, cv_molar, u_over_RT, cv_over_R
 
 include("data/kinetics.jl")       # AbstractKinetics hierarchy
 export AbstractKinetics, AbstractFalloff,
