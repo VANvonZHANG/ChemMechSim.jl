@@ -84,3 +84,20 @@ end
     rep3 = validate(mech_noThermo; config=convenience_config(:fixedT))
     @test !any(occursin("adiabatic requires NASA7", e) for e in rep3.errors)
 end
+
+@testset ":adiabatic_constV via BatchReactor (example smoke)" begin
+    a1 = 2.5; a6A = -a1 * 298.15; a6B = a6A - 10000.0 / R4A
+    nA = NASA7((a1,0,0,0,0,a6A,0.0),(a1,0,0,0,0,a6A,0.0), 200.0, 1000.0, 3500.0)
+    nB = NASA7((a1,0,0,0,0,a6B,0.0),(a1,0,0,0,0,a6B,0.0), 200.0, 1000.0, 3500.0)
+    spA = SpeciesData(id=1, name="A", thermo=nA); spB = SpeciesData(id=2, name="B", thermo=nB)
+    rxn = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
+                       kinetics=ElementaryArrhenius(0.5, 0.0, 0.0))
+    mech = Mechanism(species=[spA, spB], reactions=[rxn])
+    reactor = BatchReactor(mech; mode=:adiabatic_constV)        # Layer-1 API the example uses
+    sys = extract_system(reactor)
+    sol = simulate(reactor, (0.0, 10.0);
+                   u0=Dict("A"=>1.0, "B"=>0.0, "T"=>300.0),
+                   solver=Rodas5P(), reltol=1e-8, abstol=1e-10)
+    @test sol.retcode == ReturnCode.Success
+    @test Float64(sol(10.0; idxs=_var(sys,"T"))) > 300.0
+end
