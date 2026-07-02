@@ -163,3 +163,23 @@ end
     @test sol(2.0; idxs=Pvar) ≈ csum * 8.314 * Tv  rtol=1e-4               # P = (Σc)·R·T
     @test csum ≈ 1.0  atol=1e-6                                            # mass conserved
 end
+
+@testset ":adiabatic_constV lowers with T as a state (Phase 4a)" begin
+    # exothermic A -> B, both species carry NASA7 thermo
+    a1 = 2.5; a6A = -a1 * 298.15; a6B = a6A - 10000.0 / 8.314
+    nA = NASA7((a1,0,0,0,0,a6A,0.0),(a1,0,0,0,0,a6A,0.0), 200.0, 1000.0, 3500.0)
+    nB = NASA7((a1,0,0,0,0,a6B,0.0),(a1,0,0,0,0,a6B,0.0), 200.0, 1000.0, 3500.0)
+    spA = SpeciesData(id=1, name="A", thermo=nA); spB = SpeciesData(id=2, name="B", thermo=nB)
+    rxn = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
+                       kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))
+    mech = Mechanism(species=[spA, spB], reactions=[rxn])
+    phase = ChemPhaseSystem(mech; config=convenience_config(:adiabatic_constV))
+    sys = extract_system(phase)
+    names = [String(getname(s)) for s in unknowns(sys)]
+    @test "T" in names                       # T is a state, not a parameter
+    @test length(unknowns(sys)) == 3         # A, B, T
+    @test !any(String(getname(p)) == "T" for p in parameters(sys))  # T not in params
+    # EOS observed pressure present
+    obs_names = [String(getname(o.lhs)) for o in ModelingToolkit.observed(sys)]
+    @test "P" in obs_names
+end

@@ -312,11 +312,15 @@ function _species_rhs(sid::SpeciesID, mech::Mechanism, rates)
     return rhs
 end
 
-"True iff `config` is lowerable in Phase 3: isothermal, concentration basis, const-V or unconstrained,
- with EOS off OR ideal-gas-as-observed. (The :kinetic zero-point and :fixedT are the common cases.)"
+"True iff `config` is lowerable in Phase 4a: concentration basis; energy ∈ {:isothermal,:adiabatic};
+ :adiabatic requires :constant_volume (const-P is Phase 4b); :isothermal allows :none|:constant_volume;
+ eos ∈ {:off,:ideal_gas}. (The :kinetic zero-point and :fixedT/:adiabatic_constV are the common cases.)"
 _lowerable(c::MechanismConfig) =
-    c.energy === :isothermal && c.state_basis === :concentration &&
-    c.constraint in (:none, :constant_volume) && c.eos in (:off, :ideal_gas)
+    c.state_basis === :concentration &&
+    c.energy in (:isothermal, :adiabatic) &&
+    (c.energy === :adiabatic ? c.constraint === :constant_volume
+                             : c.constraint in (:none, :constant_volume)) &&
+    c.eos in (:off, :ideal_gas)
 
 "Lower a Mechanism into a structural_simplify'd MTK ODESystem (unit-aware, zero-point).
  Species get [unit=conc]; T [unit=K] is created iff any reaction is T-dependent or
@@ -327,48 +331,96 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
     _RGAS_PARAM[] = nothing
     _COEFF_CACHE[] = Dict{Int,Any}()   # per-species NASA7 coeff cache (Phase 4a)
     _lowerable(config) ||
-        error("lower_to_mtk: config not supported in Phase 3 (energy=:adiabatic, EOS-as-DAE, " *
-              ":constant_pressure, and non-concentration bases arrive in Phase 4). " *
+        error("lower_to_mtk: config not supported in Phase 4a. Supported: energy∈{:isothermal,:adiabatic}, " *
+              "state_basis=:concentration, eos∈{:off,:ideal_gas}; constraint must be :constant_volume for " *
+              ":adiabatic (:constant_pressure / EOS-as-DAE / non-concentration bases arrive in Phase 4b). " *
               "Got: energy=$(config.energy) constraint=$(config.constraint) eos=$(config.eos) " *
-              "basis=$(config.state_basis). Use MechanismConfig() (:kinetic) or convenience_config(:fixedT).")
+              "basis=$(config.state_basis). Use MechanismConfig() (:kinetic), convenience_config(:fixedT), " *
+              "or convenience_config(:adiabatic_constV).")
     t = ModelingToolkit.t
     D = ModelingToolkit.D
     cvars = [_attach_unit(only(@species ($(Symbol(sp.name)))(t)), ChemUnits.conc)
              for sp in mech.species]
     cvar = Dict(mech.species[i].id => cvars[i] for i in eachindex(mech.species))
-    # T exists iff any reaction is T-dependent OR EOS needs it (P = Σc·R·T)
-    Tparam = (_needs_T(mech) || config.eos === :ideal_gas) ? rate_param(:T, 300.0, u"K") : nothing
+    is_adiabatic = config.energy === :adiabatic
+    # T exists iff any reaction is T-dependent, EOS needs it, OR the energy layer makes it a state.
+    # Under :adiabatic T is a STATE (@variables); otherwise a unit-bearing parameter.
+    needs_T = _needs_T(mech) || config.eos === :ideal_gas || is_adiabatic
+    Tparam = if !needs_T
+        nothing
+    elseif is_adiabatic
+        _attach_unit(only(@variables T(t)), u"K")     # temperature STATE
+    else
+        rate_param(:T, 300.0, u"K")                    # temperature parameter (isothermal)
+    end
     rates = [lower_reaction(rx, mech, cvar, Tparam, config, j)
              for (j, rx) in enumerate(mech.reactions)]
     eqs = [D(cvars[i]) ~ _species_rhs(mech.species[i].id, mech, rates)
            for i in eachindex(mech.species)]
+    # Constraint-layer assembly (energy layer adds the const-V dT/dt under :adiabatic; spec §5.4).
+    eqs = append_constraint_layers!(eqs, mech, config, cvar, Tparam, rates)
     if config.eos === :ideal_gas
-        return _lower_with_eos(eqs, t, cvars, Tparam)
+        return _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic)
     end
-    @named raw = System(eqs, t)          # zero-point / isothermal-no-EOS: auto-discover (unchanged)
+    @named raw = System(eqs, t)          # auto-discovers states [c₁..cₙ, T] and RHS params
     return mtkcompile(raw)
 end
 
-"Build the system with EOS observed P ~ (Σc)·R·T. R and T appear in the observed equation, so they
- are dropped by mtkcompile under auto-discover — rebuild with EXPLICIT params so they're retained."
-function _lower_with_eos(eqs, t, cvars, Tparam)
-    Rparam = _r_param()                            # shared with K_c (Task 4 memoized singleton)
+"Build the system with EOS observed P ~ (Σc)·R·T. Under :adiabatic T is a STATE (included in
+ `states`); under :isothermal T is a parameter retained via the observed-param fix (Phase 3).
+ R appears in the energy-equation RHS under :adiabatic so it is retained automatically."
+function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool)
+    Rparam = _r_param()                            # shared with K_c / energy eq (memoized singleton)
     Pvar = _attach_unit(only(@variables P(t)), ChemUnits.press)
     obs = [Pvar ~ sum(cvars) * Rparam * Tparam]
-    # auto-discover the RHS params, then add observed-only R (and T if not already in RHS)
-    @named _tmp = System(eqs, t)
+    states = is_adiabatic ? [cvars; Tparam] : cvars   # T is a state under :adiabatic
+    @named _tmp = System(eqs, t)                   # auto-discover RHS params
     rhsparams = ModelingToolkit.parameters(_tmp)
     rhsnames = Set(ModelingToolkit.getname(p) for p in rhsparams)
     extras = Any[]
     ModelingToolkit.getname(Rparam) in rhsnames || push!(extras, Rparam)
-    ModelingToolkit.getname(Tparam) in rhsnames || push!(extras, Tparam)
-    allparams = [rhsparams; extras]
-    @named raw = System(eqs, t, cvars, allparams; observed=obs)
+    is_adiabatic || (ModelingToolkit.getname(Tparam) in rhsnames || push!(extras, Tparam))  # T param only when isothermal
+    @named raw = System(eqs, t, states, [rhsparams; extras]; observed=obs)
     return mtkcompile(raw)
 end
 
-# —— Constraint-layer assembly (stub until Phase 4) ——
+# —— Constraint-layer assembly (Phase 4a: energy layer; EOS-as-DAE + const-P arrive in 4b) ——
 
-"Append energy/EOS/reactor constraint layers to the equation set. (stub — Phase 4)"
-append_constraint_layers!(eqs, mech, config) =
-    error("append_constraint_layers!: not implemented; see the Phase 4 plan.")
+"Append energy/reactor constraint layers to the equation set (spec §5.4). Phase 4a: the energy
+ layer (:adiabatic) adds the const-V energy ODE for T. `cvar`/`T`/`rates` are the shared species
+ vars, the temperature symbol, and the per-reaction symbolic net rates from lower_to_mtk."
+function append_constraint_layers!(eqs, mech, config, cvar, T, rates)
+    config.energy === :adiabatic && push!(eqs, _energy_ode_constV(mech, cvar, T, rates))
+    return eqs
+end
+
+"Constant-volume adiabatic energy equation (spec §5.3, §11 Phase 4; verified 2026-07-02):
+ dT/dt = -Σⱼ rⱼ·Δūⱼ / Σᵢ cᵢ·cvᵢ, with ūᵢ=(h/RT-1)·R·T and cvᵢ=(cp/R-1)·R (ideal gas).
+ All species must carry NASA7 thermo (spec §5.3.4 — clear error otherwise)."
+function _energy_ode_constV(mech::Mechanism, cvar, T, rates)
+    D = ModelingToolkit.D
+    R = _r_param()
+    for sp in mech.species
+        sp.thermo isa NASA7 ||
+            error("_energy_ode_constV: species $(sp.name) (id $(sp.id)) has no NASA7 thermo; " *
+                  ":adiabatic requires NASA7 thermo on all species (spec §5.3.4). " *
+                  "Use energy=:isothermal or provide NASA7 thermo.")
+    end
+    # Σᵢ cᵢ·cvᵢ  [J/(m³·K)]
+    cv_sum = sum(cvar[sp.id] * (_cp_over_R(sp.thermo, T, sp.id) - 1) * R for sp in mech.species)
+    # -Σⱼ rⱼ·Δūⱼ  [J/(m³·s)],  Δūⱼ = Σ_products ν·ū − Σ_reactants ν·ū
+    src = 0.0
+    for (j, rx) in enumerate(mech.reactions)
+        delta_u = 0.0
+        for (sid, nu) in rx.products
+            th = _species_by_id(mech, sid).thermo
+            delta_u += nu * (_h_over_RT(th, T, sid) - 1) * R * T
+        end
+        for (sid, nu) in rx.reactants
+            th = _species_by_id(mech, sid).thermo
+            delta_u -= nu * (_h_over_RT(th, T, sid) - 1) * R * T
+        end
+        src += rates[j] * (-delta_u)
+    end
+    return D(T) ~ src / cv_sum
+end
