@@ -62,3 +62,16 @@ end
         @test _equilibrium_constant(mech, rxn, T) ≈ 2.0  rtol = 1e-9   # K_c = exp(δ) = 2
     end
 end
+
+@testset "NASA7: internal energy + cv (u = h − RT, cv = cp − R)" begin
+    a1 = 3.5
+    coeffs = (a1, 1.0e-3, -5.0e-7, 0.0, 0.0, -a1 * 298.15, -a1 * log(298.15))
+    m = NASA7(coeffs, coeffs, 200.0, 1000.0, 3500.0)
+    for T in (400.0, 800.0, 1500.0)
+        @test u_molar(m, T)    ≈ h_molar(m, T) - R_THERMO * T
+        @test cv_molar(m, T)   ≈ cp_molar(m, T) - R_THERMO
+        @test u_over_RT(m, T)  ≈ h_over_RT(m, T) - 1
+        @test cv_over_R(m, T)  ≈ cp_over_R(m, T) - 1
+        @test u_molar(m, T)    ≈ u_over_RT(m, T) * R_THERMO * T     # consistency of the pair
+    end
+end

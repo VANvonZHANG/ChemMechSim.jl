@@ -58,6 +58,18 @@ s_molar(m::NASA7, T::Real) = s_over_R(m, T) * R_GAS
 "Molar g = (g/RT)·R·T  [J/mol] (equivalently h - T·s)."
 g_molar(m::NASA7, T::Real) = g_over_RT(m, T) * R_GAS * T
 
+"Molar internal energy ū = h̄ − R·T  [J/mol] (ideal gas; const-V energy equation, Phase 4a)."
+u_molar(m::NASA7, T::Real) = h_molar(m, T) - R_GAS * T
+
+"Molar constant-volume heat capacity cv = cp − R  [J/(mol·K)] (ideal gas)."
+cv_molar(m::NASA7, T::Real) = cp_molar(m, T) - R_GAS
+
+"Dimensionless ū/(RT) = h/RT − 1."
+u_over_RT(m::NASA7, T::Real) = h_over_RT(m, T) - 1
+
+"Dimensionless cv/R = cp/R − 1."
+cv_over_R(m::NASA7, T::Real) = cp_over_R(m, T) - 1
+
 "A species-keyed collection of ThermoModel entries (the NASA-coefficient store)."
 struct ThermoDatabase
     entries::Dict{String,ThermoModel}
