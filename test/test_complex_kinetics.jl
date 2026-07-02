@@ -3,6 +3,7 @@ using ChemMechSim
 using ModelingToolkit
 using ModelingToolkit: unknowns, getname
 using OrdinaryDiffEq
+using DynamicQuantities
 
 @testset "third-body: [M]_eff rate (all-species convention) and trajectory" begin
     # H + O2 + M -> HO2 + M ; rate = k*[H]*[O2]*[M]_eff, [M]_eff = Σ all species (α=1 default)
@@ -171,4 +172,20 @@ end
     @test Cc/(Ca*Cb) ≈ 8.314*Tv/1.0e5  rtol=1e-2                   # K_c = RT/P° (Δν=-1, Δg°=0)
     csum = Ca + Cb + Cc
     @test sol(200.0; idxs=Pvar) ≈ csum*8.314*Tv  rtol=1e-4        # P = (Σc)·R·T observed
+end
+
+@testset "symbolic cp/R + h/RT build (Phase 4a energy-eq building blocks)" begin
+    import ChemMechSim: _cp_over_R, _h_over_RT, rate_param
+    # distinct low/high coeffs so the ifelse range switch is exercised
+    m = NASA7((3.5,1.0e-3,0.0,0.0,0.0,-100.0,0.5),
+             (3.5,2.0e-3,1.0e-6,0.0,0.0,-200.0,0.8), 200.0, 1000.0, 3500.0)
+    T = rate_param(:T, 500.0, u"K")
+    cp = _cp_over_R(m, T, 1)
+    hh = _h_over_RT(m, T, 1)
+    @test cp isa Num                       # builds a symbolic expression
+    @test hh isa Num
+    # both reference the per-species coeff params (range switch present)
+    pnames = [String(ModelingToolkit.getname(p)) for p in ModelingToolkit.get_variables(cp)]
+    @test any(occursin("sp1_a1", n) for n in pnames)   # coeff param present
+    @test any(occursin("Tmid_sp1", n) for n in pnames) # range-switch Tmid present
 end

@@ -62,6 +62,11 @@ const _RGAS_PARAM = Ref{Any}(nothing)
 _p_std_param() = _PSTD_PARAM[] === nothing ? (_PSTD_PARAM[] = rate_param(:P_std, P_STD, u"Pa")) : _PSTD_PARAM[]
 _r_param()     = _RGAS_PARAM[] === nothing ? (_RGAS_PARAM[] = rate_param(:R_gas, R_GAS, u"J/(mol*K)")) : _RGAS_PARAM[]
 
+# Per-species NASA7 coefficient cache (Phase 4a). cp/R, h/RT and g/RT for one species share
+# ONE coefficient set; without this, calling each separately creates duplicate-name params
+# (sp{sid}_a1l, …). Reset at the start of each lower_to_mtk call.
+const _COEFF_CACHE = Ref{Dict{Int,Any}}(Dict{Int,Any}())
+
 "Mass-action product ∏ c[sid]^ν over a stoichiometry map."
 function _mass_action(stoich::Dict{SpeciesID,Float64}, cvar)
     ma = 1.0
@@ -239,25 +244,48 @@ end
  in Julia, so the symbolic method is dispatched via T::Num (more specific than Real)."
 _g_over_RT(m::NASA7, T::Real, sid) = g_over_RT(m, T)
 
-"Dimensionless g/RT from NASA7 thermo for a symbolic/unit-bearing T (the K-param in lowering).
- Each coefficient is a unit-bearing parameter, selected by `ifelse(T <= Tmid, lo, hi)`; a6 has
- unit K (so a6/T is dimensionless), a2..a5 absorb K^-n, a1/a7 are dimensionless, Tmid is K, and
- Tref=1 K makes log(T/Tref) dimensionless. The bare `ifelse` (Base.ifelse, Symbolics-extended)
- LOWERS to a correct runtime `if (T <= Tmid) … else …` branch and the dimension check passes
- (verified 2026-06-29: distinct low/high coeffs give K_c=2 below Tmid, K_c=5 above, exact match).
- Num <: Real, so this method dispatches via T::Num (more specific than the ::Real data-layer method)."
-function _g_over_RT(m::NASA7, T::Num, sid)
-    Tmid_K = rate_param(Symbol("Tmid_sp", sid), m.Tmid, u"K")  # K-typed so T <= Tmid is unit-consistent
-    T_ref = rate_param(Symbol("Tref_sp", sid), 1.0, u"K")     # 1 K reference so log(T/T_ref) is dimensionless
+"Build NASA7's 7 unit-bearing symbolic coefficients for species `sid`, selected by
+ `ifelse(T <= Tmid, lo, hi)`. a_i·T^(i-1) is dimensionless (i=1..5), a6∈K makes a6/T and a6
+ dimensionless via the 1/T and (h/RT) terms, a1/a7 are dimensionless, Tmid∈K makes the range
+ test unit-consistent, Tref=1 K makes log(T/Tref) dimensionless. Cached per sid within one
+ lower_to_mtk call so cp/R, h/RT, g/RT share one coefficient set (no duplicate-name params).
+ Returns ((a1..a7), Tmid_K, T_ref). Verified 2026-07-02."
+function _nasa7_coeffs_sym(m::NASA7, T, sid)
+    c = get(_COEFF_CACHE[], sid, nothing)
+    c === nothing || return c
+    Tmid_K = rate_param(Symbol("Tmid_sp", sid), m.Tmid, u"K")
+    T_ref  = rate_param(Symbol("Tref_sp", sid), 1.0, u"K")
     lo, hi = m.low_coeffs, m.high_coeffs
-    # Coeffs as unit-bearing params: a_i·T^(i-1) dimensionless for i=1..5; a6·(1/T) dimensionless
-    a1 = ifelse(T <= Tmid_K, _sp(sid, :a1l, lo[1], u"1"),       _sp(sid, :a1h, hi[1], u"1"))
-    a2 = ifelse(T <= Tmid_K, _sp(sid, :a2l, lo[2], u"K^-1"),    _sp(sid, :a2h, hi[2], u"K^-1"))
-    a3 = ifelse(T <= Tmid_K, _sp(sid, :a3l, lo[3], u"K^-2"),    _sp(sid, :a3h, hi[3], u"K^-2"))
-    a4 = ifelse(T <= Tmid_K, _sp(sid, :a4l, lo[4], u"K^-3"),    _sp(sid, :a4h, hi[4], u"K^-3"))
-    a5 = ifelse(T <= Tmid_K, _sp(sid, :a5l, lo[5], u"K^-4"),    _sp(sid, :a5h, hi[5], u"K^-4"))
-    a6 = ifelse(T <= Tmid_K, _sp(sid, :a6l, lo[6], u"K"),       _sp(sid, :a6h, hi[6], u"K"))
-    a7 = ifelse(T <= Tmid_K, _sp(sid, :a7l, lo[7], u"1"),       _sp(sid, :a7h, hi[7], u"1"))
+    a1 = ifelse(T <= Tmid_K, _sp(sid, :a1l, lo[1], u"1"),    _sp(sid, :a1h, hi[1], u"1"))
+    a2 = ifelse(T <= Tmid_K, _sp(sid, :a2l, lo[2], u"K^-1"), _sp(sid, :a2h, hi[2], u"K^-1"))
+    a3 = ifelse(T <= Tmid_K, _sp(sid, :a3l, lo[3], u"K^-2"), _sp(sid, :a3h, hi[3], u"K^-2"))
+    a4 = ifelse(T <= Tmid_K, _sp(sid, :a4l, lo[4], u"K^-3"), _sp(sid, :a4h, hi[4], u"K^-3"))
+    a5 = ifelse(T <= Tmid_K, _sp(sid, :a5l, lo[5], u"K^-4"), _sp(sid, :a5h, hi[5], u"K^-4"))
+    a6 = ifelse(T <= Tmid_K, _sp(sid, :a6l, lo[6], u"K"),    _sp(sid, :a6h, hi[6], u"K"))
+    a7 = ifelse(T <= Tmid_K, _sp(sid, :a7l, lo[7], u"1"),    _sp(sid, :a7h, hi[7], u"1"))
+    c = ((a1, a2, a3, a4, a5, a6, a7), Tmid_K, T_ref)
+    _COEFF_CACHE[][sid] = c
+    return c
+end
+
+"Symbolic dimensionless cp/R for a unit-bearing T (energy equation, Phase 4a)."
+function _cp_over_R(m::NASA7, T::Num, sid)
+    (a1, a2, a3, a4, a5, a6, a7), _, _ = _nasa7_coeffs_sym(m, T, sid)
+    return a1 + a2 * T + a3 * T^2 + a4 * T^3 + a5 * T^4
+end
+
+"Symbolic dimensionless h/RT for a unit-bearing T (energy equation, Phase 4a)."
+function _h_over_RT(m::NASA7, T::Num, sid)
+    (a1, a2, a3, a4, a5, a6, a7), _, _ = _nasa7_coeffs_sym(m, T, sid)
+    return a1 + a2 * T / 2 + a3 * T^2 / 3 + a4 * T^3 / 4 + a5 * T^4 / 5 + a6 / T
+end
+
+"Dimensionless g/RT from NASA7 thermo for a symbolic/unit-bearing T (the K-param in lowering).
+ Refactored Phase 4a to share `_nasa7_coeffs_sym` with cp/R and h/RT. The bare `ifelse`
+ LOWERS to a correct runtime `if (T <= Tmid) … else …` branch and the dimension check passes
+ (verified 2026-06-29: distinct low/high coeffs give K_c=2 below Tmid, K_c=5 above, exact match)."
+function _g_over_RT(m::NASA7, T::Num, sid)
+    (a1, a2, a3, a4, a5, a6, a7), _, T_ref = _nasa7_coeffs_sym(m, T, sid)
     h_RT = a1 + a2 * T / 2 + a3 * T^2 / 3 + a4 * T^3 / 4 + a5 * T^4 / 5 + a6 / T
     s_R  = a1 * log(T / T_ref) + a2 * T + a3 * T^2 / 2 + a4 * T^3 / 3 + a5 * T^4 / 4 + a7
     return h_RT - s_R
@@ -297,6 +325,7 @@ _lowerable(c::MechanismConfig) =
 function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig())
     _PSTD_PARAM[] = nothing        # reset lowering-scoped thermo-constant singletons (Task 4)
     _RGAS_PARAM[] = nothing
+    _COEFF_CACHE[] = Dict{Int,Any}()   # per-species NASA7 coeff cache (Phase 4a)
     _lowerable(config) ||
         error("lower_to_mtk: config not supported in Phase 3 (energy=:adiabatic, EOS-as-DAE, " *
               ":constant_pressure, and non-concentration bases arrive in Phase 4). " *
