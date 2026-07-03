@@ -9,6 +9,7 @@ module ChemUnits
     const vol       = u"m^3"       # volume
     const molmass   = u"kg/mol"    # molar mass (H2O = 0.018015 kg/mol)
     const molenergy = u"J/mol"     # molar energy (Ea, h, g)
+    const mol        = u"mol"      # amount of substance (state basis :moles / const-P moles state)
 
     """
         canonical(q, ref)
@@ -30,5 +31,5 @@ module ChemUnits
     end
     canonical(x::Real, ref) = x
 
-    export canonical, conc, temp, press, vol, molmass, molenergy
+    export canonical, conc, temp, press, vol, molmass, molenergy, mol
 end # module

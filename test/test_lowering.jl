@@ -3,6 +3,7 @@ using ChemMechSim
 using ModelingToolkit
 using ModelingToolkit: unknowns, getname
 using Catalyst
+using OrdinaryDiffEq
 import ChemMechSim: catalyst_native, catalyst_lowering, direct_mtk_lowering
 
 @testset "lower_to_mtk: first-order A -> B" begin
@@ -182,4 +183,27 @@ end
     # EOS observed pressure present
     obs_names = [String(getname(o.lhs)) for o in ModelingToolkit.observed(sys)]
     @test "P" in obs_names
+end
+
+@testset "const-P isothermal: moles state, V/c observed, analytic n_A(t)=exp(-kt)" begin
+    A = SpeciesData(id=1, name="A"); B = SpeciesData(id=2, name="B")
+    rx = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>2.0),   # A → 2B (moles grow → V grows)
+                      kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))     # k=1, no T-dep
+    mech = Mechanism(species=[A, B], reactions=[rx])
+    config = MechanismConfig(energy=:isothermal, constraint=:constant_pressure, eos=:ideal_gas)
+    phase = ChemPhaseSystem(mech; config=config)
+    sys = extract_system(phase); idx = _state_index(sys)
+    # states = [n_A, n_B] only (pure ODE); V, A, B (concentrations) are observed
+    @test sort(collect(keys(idx))) == ["n_A", "n_B"]
+    obsnames = Set(String(getname(o.lhs)) for o in observed(sys))
+    @test "V" in obsnames && "A" in obsnames && "B" in obsnames
+    @test "P" in Set(String(getname(p)) for p in parameters(sys))      # P retained (in V=(Σn)RT/P)
+    # solve: dn_A/dt = V·(-k·c_A) = -k·n_A  ⟹  n_A(t) = exp(-t)
+    sol = simulate(phase, (0.0, 5.0); u0=Dict("n_A"=>1.0, "n_B"=>0.0),
+                   reltol=1e-10, abstol=1e-12)
+    @test sol.retcode == OrdinaryDiffEq.ReturnCode.Success
+    @test Float64(sol(5.0; idxs=_var(sys,"n_A"))) ≈ exp(-5.0)  rtol=1e-6
+    # V grows (A→2B increases moles at const P)
+    Vobs = [o.lhs for o in observed(sys) if getname(o.lhs)==:V][1]
+    @test Float64(sol(5.0; idxs=Vobs)) > Float64(sol(0.0; idxs=Vobs))
 end
