@@ -153,3 +153,32 @@ end
     # generate_jacobian (code-export path) builds for const-P
     @test !isempty(string(ChemMechSim.generate_jacobian(sys)))
 end
+
+@testset ":adiabatic_constP via BatchReactor — end-to-end (ignition-like T rise)" begin
+    # H2 + OH ↔ H + H2O style: exothermic, T-dependent, reversible via ExplicitReverse.
+    a1 = 3.5; a6H2 = -a1*298.15; a6OH = -a1*500.0
+    a6H  = -a1*298.15 - 5000.0/R4B;  a6H2O = -a1*298.15 - 12000.0/R4B   # H2O lowest (exothermic forward)
+    nH2  = NASA7((a1,0,0,0,0,a6H2,0.0),(a1,0,0,0,0,a6H2,0.0), 200.0,1000.0,3500.0)
+    nOH  = NASA7((a1,0,0,0,0,a6OH,0.0),(a1,0,0,0,0,a6OH,0.0), 200.0,1000.0,3500.0)
+    nH   = NASA7((a1,0,0,0,0,a6H,0.0), (a1,0,0,0,0,a6H,0.0),  200.0,1000.0,3500.0)
+    nH2O = NASA7((a1,0,0,0,0,a6H2O,0.0),(a1,0,0,0,0,a6H2O,0.0),200.0,1000.0,3500.0)
+    sp = [SpeciesData(id=1,name="H2",thermo=nH2), SpeciesData(id=2,name="OH",thermo=nOH),
+          SpeciesData(id=3,name="H",thermo=nH),  SpeciesData(id=4,name="H2O",thermo=nH2O)]
+    fwd = ElementaryArrhenius(1.0e2, 0.0, R4B*3000.0)                  # θ = Ea/R = 3000 K (T-dependent)
+    rev = ElementaryArrhenius(5.0e1, 0.0, R4B*3000.0)
+    rxn = ReactionData(reactants=Dict(1=>1.0,2=>1.0), products=Dict(3=>1.0,4=>1.0),
+                       kinetics=fwd, reverse_policy=ExplicitReverse(rev))
+    mech = Mechanism(species=sp, reactions=[rxn])
+    reactor = BatchReactor(mech; mode=:adiabatic_constP)               # Layer-1 API
+    sys = extract_system(reactor); idx = _state_index(sys)
+    @test Set(keys(idx)) == Set(["n_H2","n_OH","n_H","n_H2O","T"])     # 4 moles + T
+    sol = simulate(reactor, (0.0, 5.0);
+                   u0=Dict("n_H2"=>1.0,"n_OH"=>1.0,"n_H"=>0.0,"n_H2O"=>0.0,"T"=>1500.0),
+                   solver=Rodas5P(), reltol=1e-8, abstol=1e-10)
+    @test sol.retcode == ReturnCode.Success
+    @test Float64(sol(5.0; idxs=_var(sys,"T"))) > 1500.0               # exothermic → T rises at const P
+    @test Float64(sol(5.0; idxs=_var(sys,"n_H2O"))) > 0.0              # H2O produced
+    # V grows with T at const P (Σn ≈ const for this mole-neutral reaction, so V ∝ T)
+    Vobs = [o.lhs for o in observed(sys) if getname(o.lhs)==:V][1]
+    @test Float64(sol(5.0; idxs=Vobs)) > Float64(sol(0.0; idxs=Vobs))
+end
