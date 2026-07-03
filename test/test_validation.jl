@@ -90,3 +90,15 @@ end
     errs = validate(mech_bad).errors
     @test !isempty(errs) && any(occursin("thermo", l) for l in errs)
 end
+
+@testset "validate: :adiabatic_constP requires NASA7 thermo on all species" begin
+    x = SpeciesData(id=1, name="X"); y = SpeciesData(id=2, name="Y")
+    rxn = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0), kinetics=ElementaryArrhenius(1.0,0.0,0.0))
+    mech_noThermo = Mechanism(species=[x, y], reactions=[rxn])
+    rep = validate(mech_noThermo; config=convenience_config(:adiabatic_constP))
+    @test !isempty(rep.errors)
+    @test any(occursin("adiabatic requires NASA7", e) for e in rep.errors)
+    # isothermal const-P does NOT require thermo (no energy equation)
+    rep2 = validate(mech_noThermo; config=MechanismConfig(energy=:isothermal, constraint=:constant_pressure, eos=:ideal_gas))
+    @test !any(occursin("adiabatic requires NASA7", e) for e in rep2.errors)
+end
