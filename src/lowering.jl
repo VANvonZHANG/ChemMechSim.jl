@@ -428,9 +428,32 @@ function append_constraint_layers!(eqs, mech, config, cvar, T, rates; nvar=nothi
     return eqs
 end
 
-"Const-P adiabatic enthalpy energy equation (Task 2 fills this in)."
-_energy_ode_constP(mech, nvar, Vvar, T, rates) =
-    error("_energy_ode_constP: implemented in Task 2 (const-P adiabatic).")
+"Constant-pressure adiabatic energy equation (spec §5.3/§11 Phase 4; probed 2026-07-03 P2):
+ dT/dt = -V·Σⱼ rⱼ·Δh̄ⱼ / Σᵢ nᵢ·cpᵢ, with Δh̄ⱼ = Σ_prod ν·h̄ − Σ_react ν·h̄ and cpᵢ = (cp/R)·R (ideal gas).
+ All species must carry NASA7 thermo (spec §5.3.4 — clear error otherwise). H = Σnᵢh̄ᵢ(T) is conserved."
+function _energy_ode_constP(mech::Mechanism, nvar, Vvar, T, rates)
+    D = ModelingToolkit.D
+    R = _r_param()
+    for sp in mech.species
+        sp.thermo isa NASA7 ||
+            error("_energy_ode_constP: species $(sp.name) (id $(sp.id)) has no NASA7 thermo; " *
+                  ":adiabatic requires NASA7 thermo on all species (spec §5.3.4). " *
+                  "Use energy=:isothermal or provide NASA7 thermo.")
+    end
+    cp_sum = sum(nvar[sp.id] * _cp_over_R(sp.thermo, T, sp.id) * R for sp in mech.species)   # [J/K]
+    src = 0.0
+    for (j, rx) in enumerate(mech.reactions)
+        delta_h = 0.0
+        for (sid, nu) in rx.products
+            delta_h += nu * _h_over_RT(_species_by_id(mech, sid).thermo, T, sid) * R * T
+        end
+        for (sid, nu) in rx.reactants
+            delta_h -= nu * _h_over_RT(_species_by_id(mech, sid).thermo, T, sid) * R * T
+        end
+        src += rates[j] * (-delta_h)                                  # Σⱼ rⱼ·(-Δh̄ⱼ)  [J/(m³·s)]
+    end
+    return D(T) ~ Vvar * src / cp_sum
+end
 
 "Constant-volume adiabatic energy equation (spec §5.3, §11 Phase 4; verified 2026-07-02):
  dT/dt = -Σⱼ rⱼ·Δūⱼ / Σᵢ cᵢ·cvᵢ, with ūᵢ=(h/RT-1)·R·T and cvᵢ=(cp/R-1)·R (ideal gas).
