@@ -140,3 +140,16 @@ end
     scale = max(abs(H0), abs(nBv * h_molar(nB_th, Tv)), 1.0)         # H terms are O(1e4–1e5); check RELATIVE drift
     @test abs(H(Tv, nAv, nBv) - H0) / scale < 1e-6
 end
+
+@testset ":adiabatic_constP: Jacobian carries T- and n-coupling" begin
+    mech = _exothermic_ab_constP_mech(; A=1.0e3, HEAT=R4B * 3000.0)   # T-dependent Arrhenius (θ = 3000 K)
+    sys = extract_system(ChemPhaseSystem(mech; config=convenience_config(:adiabatic_constP)))
+    jac = ModelingToolkit.calculate_jacobian(sys)
+    @test size(jac) == (3, 3)
+    idx = _state_index(sys)
+    @test !isequal(0.0, jac[idx["T"],   idx["T"]])    # ∂(Ṫ/∂T)   ≠ 0 (cp/h + Arrhenius)
+    @test !isequal(0.0, jac[idx["n_A"], idx["T"]])    # ∂(ṅ_A/∂T) ≠ 0 (rate T-coupling via c=n/V)
+    @test !isequal(0.0, jac[idx["T"],   idx["n_A"]])  # ∂(Ṫ/∂n_A) ≠ 0 (cp_sum + Δh̄ source depend on n_A)
+    # generate_jacobian (code-export path) builds for const-P
+    @test !isempty(string(ChemMechSim.generate_jacobian(sys)))
+end
