@@ -312,15 +312,16 @@ function _species_rhs(sid::SpeciesID, mech::Mechanism, rates)
     return rhs
 end
 
-"True iff `config` is lowerable in Phase 4a: concentration basis; energy ∈ {:isothermal,:adiabatic};
- :adiabatic requires :constant_volume (const-P is Phase 4b); :isothermal allows :none|:constant_volume;
- eos ∈ {:off,:ideal_gas}. (The :kinetic zero-point and :fixedT/:adiabatic_constV are the common cases.)"
+"True iff `config` is lowerable: concentration basis; energy ∈ {:isothermal,:adiabatic};
+ constraint ∈ {:none,:constant_volume,:constant_pressure}; :adiabatic allows const-V or const-P,
+ :isothermal allows any constraint; eos ∈ {:off,:ideal_gas}; :constant_pressure REQUIRES :ideal_gas
+ (V is defined by the EOS). Phase 4b adds const-P (path A, pure ODE)."
 _lowerable(c::MechanismConfig) =
     c.state_basis === :concentration &&
     c.energy in (:isothermal, :adiabatic) &&
-    (c.energy === :adiabatic ? c.constraint === :constant_volume
-                             : c.constraint in (:none, :constant_volume)) &&
-    c.eos in (:off, :ideal_gas)
+    (c.energy === :adiabatic ? c.constraint in (:constant_volume, :constant_pressure)
+                             : c.constraint in (:none, :constant_volume, :constant_pressure)) &&
+    (c.constraint === :constant_pressure ? c.eos === :ideal_gas : c.eos in (:off, :ideal_gas))
 
 "Lower a Mechanism into a structural_simplify'd MTK ODESystem (unit-aware, zero-point).
  Species get [unit=conc]; T [unit=K] is created iff any reaction is T-dependent or
@@ -333,10 +334,11 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
     _lowerable(config) ||
         error("lower_to_mtk: config not supported in Phase 4a. Supported: energy∈{:isothermal,:adiabatic}, " *
               "state_basis=:concentration, eos∈{:off,:ideal_gas}; constraint must be :constant_volume for " *
-              ":adiabatic (:constant_pressure / EOS-as-DAE / non-concentration bases arrive in Phase 4b). " *
-              "Got: energy=$(config.energy) constraint=$(config.constraint) eos=$(config.eos) " *
+              ":adiabatic; non-concentration bases arrive in Phase 4b+. Got: " *
+              "energy=$(config.energy) constraint=$(config.constraint) eos=$(config.eos) " *
               "basis=$(config.state_basis). Use MechanismConfig() (:kinetic), convenience_config(:fixedT), " *
               "or convenience_config(:adiabatic_constV).")
+    config.constraint === :constant_pressure && return _lower_constP(mech, config)
     t = ModelingToolkit.t
     D = ModelingToolkit.D
     cvars = [_attach_unit(only(@species ($(Symbol(sp.name)))(t)), ChemUnits.conc)
@@ -384,14 +386,73 @@ function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool)
     return mtkcompile(raw)
 end
 
+"Lower under :constant_pressure — path A, PURE ODE (probed 2026-07-03 P1/P2).
+ Moles `nᵢ` are the states; `V ~ (Σn)RT/P` and concentrations `cᵢ ~ nᵢ/V` are observed (structural_simplify
+ flattens them). The rate laws consume `cvar` (concentrations) UNCHANGED — only the outer assembly differs
+ from the concentration-state path. :adiabatic adds the enthalpy energy equation via append_constraint_layers!."
+function _lower_constP(mech::Mechanism, config::MechanismConfig)
+    t = ModelingToolkit.t; D = ModelingToolkit.D
+    is_adiabatic = config.energy === :adiabatic
+    cvars = [_attach_unit(only(@species ($(Symbol(sp.name)))(t)), ChemUnits.conc) for sp in mech.species]
+    cvar  = Dict(mech.species[i].id => cvars[i] for i in eachindex(mech.species))
+    nvars = [_attach_unit(only(@species ($(Symbol("n_", sp.name)))(t)), ChemUnits.mol) for sp in mech.species]
+    nvar  = Dict(mech.species[i].id => nvars[i] for i in eachindex(mech.species))
+    Pparam = rate_param(:P, P_STD, ChemUnits.press)
+    Tsym   = is_adiabatic ? _attach_unit(only(@variables T(t)), u"K") : rate_param(:T, 300.0, u"K")
+    Rparam = _r_param()
+    Vvar   = _attach_unit(only(@variables V(t)), ChemUnits.vol)
+    rates  = [lower_reaction(rx, mech, cvar, Tsym, config, j) for (j, rx) in enumerate(mech.reactions)]
+    eqs = Equation[D(nvars[i]) ~ Vvar * _species_rhs(mech.species[i].id, mech, rates)
+              for i in eachindex(mech.species)]
+    push!(eqs, Vvar ~ sum(nvars) * Rparam * Tsym / Pparam)            # EOS → observed V
+    for i in eachindex(mech.species)
+        push!(eqs, cvars[i] ~ nvars[i] / Vvar)                        # observed concentrations (rate-law input)
+    end
+    eqs = append_constraint_layers!(eqs, mech, config, cvar, Tsym, rates; nvar=nvar, Vvar=Vvar)
+    @named raw = System(eqs, t)
+    return mtkcompile(raw)
+end
+
 # —— Constraint-layer assembly (Phase 4a: energy layer; EOS-as-DAE + const-P arrive in 4b) ——
 
 "Append energy/reactor constraint layers to the equation set (spec §5.4). Phase 4a: the energy
  layer (:adiabatic) adds the const-V energy ODE for T. `cvar`/`T`/`rates` are the shared species
  vars, the temperature symbol, and the per-reaction symbolic net rates from lower_to_mtk."
-function append_constraint_layers!(eqs, mech, config, cvar, T, rates)
-    config.energy === :adiabatic && push!(eqs, _energy_ode_constV(mech, cvar, T, rates))
+function append_constraint_layers!(eqs, mech, config, cvar, T, rates; nvar=nothing, Vvar=nothing)
+    config.energy === :adiabatic || return eqs
+    if config.constraint === :constant_pressure
+        push!(eqs, _energy_ode_constP(mech, nvar, Vvar, T, rates))    # Task 2
+    else
+        push!(eqs, _energy_ode_constV(mech, cvar, T, rates))
+    end
     return eqs
+end
+
+"Constant-pressure adiabatic energy equation (spec §5.3/§11 Phase 4; probed 2026-07-03 P2):
+ dT/dt = -V·Σⱼ rⱼ·Δh̄ⱼ / Σᵢ nᵢ·cpᵢ, with Δh̄ⱼ = Σ_prod ν·h̄ − Σ_react ν·h̄ and cpᵢ = (cp/R)·R (ideal gas).
+ All species must carry NASA7 thermo (spec §5.3.4 — clear error otherwise). H = Σnᵢh̄ᵢ(T) is conserved."
+function _energy_ode_constP(mech::Mechanism, nvar, Vvar, T, rates)
+    D = ModelingToolkit.D
+    R = _r_param()
+    for sp in mech.species
+        sp.thermo isa NASA7 ||
+            error("_energy_ode_constP: species $(sp.name) (id $(sp.id)) has no NASA7 thermo; " *
+                  ":adiabatic requires NASA7 thermo on all species (spec §5.3.4). " *
+                  "Use energy=:isothermal or provide NASA7 thermo.")
+    end
+    cp_sum = sum(nvar[sp.id] * _cp_over_R(sp.thermo, T, sp.id) * R for sp in mech.species)   # [J/K]
+    src = 0.0
+    for (j, rx) in enumerate(mech.reactions)
+        delta_h = 0.0
+        for (sid, nu) in rx.products
+            delta_h += nu * _h_over_RT(_species_by_id(mech, sid).thermo, T, sid) * R * T
+        end
+        for (sid, nu) in rx.reactants
+            delta_h -= nu * _h_over_RT(_species_by_id(mech, sid).thermo, T, sid) * R * T
+        end
+        src += rates[j] * (-delta_h)                                  # Σⱼ rⱼ·(-Δh̄ⱼ)  [J/(m³·s)]
+    end
+    return D(T) ~ Vvar * src / cp_sum
 end
 
 "Constant-volume adiabatic energy equation (spec §5.3, §11 Phase 4; verified 2026-07-02):

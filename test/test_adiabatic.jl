@@ -101,3 +101,84 @@ end
     @test sol.retcode == ReturnCode.Success
     @test Float64(sol(10.0; idxs=_var(sys,"T"))) > 300.0
 end
+
+const R4B = 8.314
+
+"Exothermic A → B with NASA7 thermo (constant cp = 2.5 R); B is HEAT J/mol lower in enthalpy. (const-P test)"
+function _exothermic_ab_constP_mech(; A=1.0, HEAT=10000.0)
+    a1 = 2.5; a6A = -a1 * 298.15; a6B = a6A - HEAT / R4B
+    nA = NASA7((a1,0,0,0,0,a6A,0.0),(a1,0,0,0,0,a6A,0.0), 200.0, 1000.0, 3500.0)
+    nB = NASA7((a1,0,0,0,0,a6B,0.0),(a1,0,0,0,0,a6B,0.0), 200.0, 1000.0, 3500.0)
+    spA = SpeciesData(id=1, name="A", thermo=nA); spB = SpeciesData(id=2, name="B", thermo=nB)
+    rxn = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0), kinetics=ElementaryArrhenius(A, 0.0, 0.0))
+    Mechanism(species=[spA, spB], reactions=[rxn])
+end
+
+@testset ":adiabatic_constP: dT/dt analytic + T rises + enthalpy H conserved" begin
+    HEAT = 10000.0
+    mech = _exothermic_ab_constP_mech(; A=1.0, HEAT=HEAT)            # k = 1 s⁻¹ (constant)
+    phase = ChemPhaseSystem(mech; config=convenience_config(:adiabatic_constP))
+    sys = extract_system(phase); idx = _state_index(sys)
+    @test sort(collect(keys(idx))) == sort(["n_A", "n_B", "T"])      # 3 states (T is a state under :adiabatic)
+    # analytic dT/dt at t=0: dn_A/dt = V·(-k·c_A) = -k·n_A; V·r = k·n_A0 = 1.
+    # dT/dt = V·r·HEAT / (Σn·cp); cp = 2.5·R; Σn·cp = 1·2.5·R  ⟹  dT/dt = HEAT/(2.5·R)
+    dT_analytic = HEAT / (2.5 * R4B)
+    f = ODEFunction(sys); du = zeros(length(idx))
+    u0 = zeros(length(idx)); u0[idx["n_A"]] = 1.0; u0[idx["n_B"]] = 0.0; u0[idx["T"]] = 300.0
+    f(du, u0, _pvals(sys), 0.0)
+    @test du[idx["T"]] ≈ dT_analytic  rtol=1e-9
+    # solve: T rises; n_A depletes; enthalpy H = Σ nᵢ·h̄ᵢ(T) conserved (const-P adiabatic invariant)
+    sol = simulate(phase, (0.0, 5.0); u0=Dict("n_A"=>1.0,"n_B"=>0.0,"T"=>300.0),
+                   solver=Rodas5P(), reltol=1e-8, abstol=1e-10)
+    @test sol.retcode == ReturnCode.Success
+    nAv = Float64(sol(5.0; idxs=_var(sys,"n_A"))); nBv = Float64(sol(5.0; idxs=_var(sys,"n_B")))
+    Tv  = Float64(sol(5.0; idxs=_var(sys,"T")))
+    @test Tv > 300.0 && nAv < 0.1 && nBv > 0.9
+    nA_th = mech.species[1].thermo; nB_th = mech.species[2].thermo
+    H(T2,a,b2) = a * h_molar(nA_th, T2) + b2 * h_molar(nB_th, T2)
+    H0 = H(300.0, 1.0, 0.0)
+    scale = max(abs(H0), abs(nBv * h_molar(nB_th, Tv)), 1.0)         # H terms are O(1e4–1e5); check RELATIVE drift
+    @test abs(H(Tv, nAv, nBv) - H0) / scale < 1e-6
+end
+
+@testset ":adiabatic_constP: Jacobian carries T- and n-coupling" begin
+    mech = _exothermic_ab_constP_mech(; A=1.0e3, HEAT=R4B * 3000.0)   # T-dependent Arrhenius (θ = 3000 K)
+    sys = extract_system(ChemPhaseSystem(mech; config=convenience_config(:adiabatic_constP)))
+    jac = ModelingToolkit.calculate_jacobian(sys)
+    @test size(jac) == (3, 3)
+    idx = _state_index(sys)
+    @test !isequal(0.0, jac[idx["T"],   idx["T"]])    # ∂(Ṫ/∂T)   ≠ 0 (cp/h + Arrhenius)
+    @test !isequal(0.0, jac[idx["n_A"], idx["T"]])    # ∂(ṅ_A/∂T) ≠ 0 (rate T-coupling via c=n/V)
+    @test !isequal(0.0, jac[idx["T"],   idx["n_A"]])  # ∂(Ṫ/∂n_A) ≠ 0 (cp_sum + Δh̄ source depend on n_A)
+    # generate_jacobian (code-export path) builds for const-P
+    @test !isempty(string(ChemMechSim.generate_jacobian(sys)))
+end
+
+@testset ":adiabatic_constP via BatchReactor — end-to-end (ignition-like T rise)" begin
+    # H2 + OH ↔ H + H2O style: exothermic, T-dependent, reversible via ExplicitReverse.
+    a1 = 3.5; a6H2 = -a1*298.15; a6OH = -a1*500.0
+    a6H  = -a1*298.15 - 5000.0/R4B;  a6H2O = -a1*298.15 - 12000.0/R4B   # H2O lowest (exothermic forward)
+    nH2  = NASA7((a1,0,0,0,0,a6H2,0.0),(a1,0,0,0,0,a6H2,0.0), 200.0,1000.0,3500.0)
+    nOH  = NASA7((a1,0,0,0,0,a6OH,0.0),(a1,0,0,0,0,a6OH,0.0), 200.0,1000.0,3500.0)
+    nH   = NASA7((a1,0,0,0,0,a6H,0.0), (a1,0,0,0,0,a6H,0.0),  200.0,1000.0,3500.0)
+    nH2O = NASA7((a1,0,0,0,0,a6H2O,0.0),(a1,0,0,0,0,a6H2O,0.0),200.0,1000.0,3500.0)
+    sp = [SpeciesData(id=1,name="H2",thermo=nH2), SpeciesData(id=2,name="OH",thermo=nOH),
+          SpeciesData(id=3,name="H",thermo=nH),  SpeciesData(id=4,name="H2O",thermo=nH2O)]
+    fwd = ElementaryArrhenius(1.0e2, 0.0, R4B*3000.0)                  # θ = Ea/R = 3000 K (T-dependent)
+    rev = ElementaryArrhenius(5.0e1, 0.0, R4B*3000.0)
+    rxn = ReactionData(reactants=Dict(1=>1.0,2=>1.0), products=Dict(3=>1.0,4=>1.0),
+                       kinetics=fwd, reverse_policy=ExplicitReverse(rev))
+    mech = Mechanism(species=sp, reactions=[rxn])
+    reactor = BatchReactor(mech; mode=:adiabatic_constP)               # Layer-1 API
+    sys = extract_system(reactor); idx = _state_index(sys)
+    @test Set(keys(idx)) == Set(["n_H2","n_OH","n_H","n_H2O","T"])     # 4 moles + T
+    sol = simulate(reactor, (0.0, 5.0);
+                   u0=Dict("n_H2"=>1.0,"n_OH"=>1.0,"n_H"=>0.0,"n_H2O"=>0.0,"T"=>1500.0),
+                   solver=Rodas5P(), reltol=1e-8, abstol=1e-10)
+    @test sol.retcode == ReturnCode.Success
+    @test Float64(sol(5.0; idxs=_var(sys,"T"))) > 1500.0               # exothermic → T rises at const P
+    @test Float64(sol(5.0; idxs=_var(sys,"n_H2O"))) > 0.0              # H2O produced
+    # V grows with T at const P (Σn ≈ const for this mole-neutral reaction, so V ∝ T)
+    Vobs = [o.lhs for o in observed(sys) if getname(o.lhs)==:V][1]
+    @test Float64(sol(5.0; idxs=Vobs)) > Float64(sol(0.0; idxs=Vobs))
+end
