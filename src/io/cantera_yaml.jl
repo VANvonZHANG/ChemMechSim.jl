@@ -137,3 +137,103 @@ function _parse_species(species_list, name_to_id::Dict{String,SpeciesID})
     end
     return species, ThermoDatabase(thermo_entries)
 end
+
+# —— Reaction parsing (dispatch on `type`) ——————————————————————————
+
+"Convert Dict(name=>coeff) to Dict(SpeciesID=>coeff). Errors on unknown species."
+function _names_to_ids(name_coeff::Dict{String,Float64}, name_to_id::Dict{String,SpeciesID})
+    out = Dict{SpeciesID,Float64}()
+    for (name, coeff) in name_coeff
+        haskey(name_to_id, name) ||
+            error("load_mechanism: reaction references unknown species \"$name\"")
+        out[name_to_id[name]] = coeff
+    end
+    return out
+end
+
+"Parse efficiencies dict (species name -> α). Defaults to 1.0 for unlisted species."
+function _parse_efficiencies(eff_dict::Union{Dict,Nothing}, name_to_id::Dict{String,SpeciesID})
+    out = Dict{SpeciesID,Float64}()
+    eff_dict === nothing && return out
+    for (name, α) in eff_dict
+        haskey(name_to_id, String(name)) ||
+            error("load_mechanism: efficiency references unknown species \"$name\"")
+        out[name_to_id[String(name)]] = Float64(α)
+    end
+    return out
+end
+
+"Build an ElementaryArrhenius from a Cantera rate-constant dict, converting units."
+function _arrhenius_from_rc(rc, ctx::_UnitCtx, order::Real)
+    A  = _convert_A(Float64(rc["A"]), ctx, order)
+    b  = Float64(rc["b"])
+    Ea = Float64(rc["Ea"]) * ctx.ea_J_per_mol
+    return ElementaryArrhenius(A, b, Ea)
+end
+
+"Parse one reaction dict into ReactionData. Returns nothing (skipped + warning) for
+ unsupported types (PLOG/Chebyshev/etc., Phase 6)."
+function _parse_reaction(rxn_dict, name_to_id::Dict{String,SpeciesID}, ctx::_UnitCtx)
+    eq = String(rxn_dict["equation"])
+    parsed = _parse_equation(eq)
+    reactants = _names_to_ids(parsed.reactants, name_to_id)
+    products  = _names_to_ids(parsed.products,  name_to_id)
+    rtype = get(rxn_dict, "type", "elementary")
+
+    if rtype == "elementary"
+        order = sum(values(reactants))
+        kin = _arrhenius_from_rc(rxn_dict["rate-constant"], ctx, order)
+    elseif rtype == "three-body"
+        order = sum(values(reactants)) + 1                  # +1 for [M]
+        base = _arrhenius_from_rc(rxn_dict["rate-constant"], ctx, order)
+        eff  = _parse_efficiencies(get(rxn_dict, "efficiencies", nothing), name_to_id)
+        kin = ThirdBodyArrhenius(base, eff)
+    elseif rtype == "falloff"
+        base_order = sum(values(reactants))                 # excludes (+M)
+        high_rate = _arrhenius_from_rc(rxn_dict["high-P-rate-constant"], ctx, base_order)
+        low_rate  = _arrhenius_from_rc(rxn_dict["low-P-rate-constant"],  ctx, base_order + 1)
+        eff = _parse_efficiencies(get(rxn_dict, "efficiencies", nothing), name_to_id)
+        if haskey(rxn_dict, "Troe")
+            t = rxn_dict["Troe"]
+            # Cantera {A,T3,T1,T2} -> TroeParams(α=A, T1, T2, T3) — field-aligned, NO reorder (spec T1;
+            # lowering.jl:141 formula Fcent=(1-α)exp(-T/T3)+α·exp(-T/T1)+exp(-T/T2) confirmed)
+            tp = TroeParams(Float64(t["A"]), Float64(t["T1"]), Float64(t["T2"]), Float64(t["T3"]))
+            kin = TroeFalloff(low_rate, high_rate, eff, tp)
+        else
+            kin = LindemannFalloff(low_rate, high_rate, eff)
+        end
+    else
+        @warn "load_mechanism: skipping $rtype reaction (Phase 6): $eq"
+        return nothing
+    end
+
+    # reversibility: <=> → ThermoReverse (default); => → Irreversible
+    reverse_policy = parsed.reversible ? ThermoReverse() : Irreversible()
+    duplicate = Bool(get(rxn_dict, "duplicate", false))
+    meta = ReactionMeta(duplicate=duplicate)
+    return ReactionData(reactants=reactants, products=products,
+                        kinetics=kin, reverse_policy=reverse_policy, meta=meta)
+end
+
+# —— Entry point ———————————————————————————————————————————————————
+
+"Load a Cantera YAML mechanism file into a Mechanism (spec §5.1, Phase 5a).
+ Covers: elementary / three-body / falloff(Troe/Lindemann). PLOG/Chebyshev/etc.
+ are skipped with a warning (Phase 6). Selects the first ideal-gas phase (or the
+ named one via `phase`)."
+function load_mechanism(path::AbstractString; phase::Union{Nothing,String}=nothing)::Mechanism
+    dict = YAML.load_file(path)
+    ctx = _parse_units(get(dict, "units", nothing))
+    phase_dict = _select_phase(dict["phases"], phase)
+    # name -> SpeciesID (1-based by declaration order in the phase)
+    species_names = String.(phase_dict["species"])
+    name_to_id = Dict{String,SpeciesID}(name => SpeciesID(i) for (i, name) in enumerate(species_names))
+    elements = String.(phase_dict["elements"])
+    species, thermo_db = _parse_species(dict["species"], name_to_id)
+    reactions = ReactionData[]
+    for rxn_dict in dict["reactions"]
+        r = _parse_reaction(rxn_dict, name_to_id, ctx)
+        r === nothing || push!(reactions, r)
+    end
+    return Mechanism(; species=species, reactions=reactions, thermo=thermo_db, elements=elements)
+end

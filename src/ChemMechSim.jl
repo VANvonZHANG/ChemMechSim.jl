@@ -54,6 +54,7 @@ include("api.jl")
 export lower_to_mtk, lower_reaction, rate_param, import_from_catalyst,
        ChemPhaseSystem, BatchReactor, convenience_config,
        validate, ValidationReport,
-       simulate, build_problem, extract_system, generate_function, generate_jacobian
+       simulate, build_problem, extract_system, generate_function, generate_jacobian,
+       load_mechanism
 
 end # module
