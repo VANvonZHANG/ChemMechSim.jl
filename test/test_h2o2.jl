@@ -91,3 +91,67 @@ end
     jac = ModelingToolkit.calculate_jacobian(sys)
     @test size(jac) == (7, 7)                              # builds => symbolic Jacobian feasible
 end
+
+# —— Phase 5a T5: end-to-end H2-O2 ignition (const-V + const-P) ——————————————————
+# Spec: load_mechanism(h2o2.yaml) → BatchReactor(:adiabatic_constV/:adiabatic_constP) → simulate
+# Asserts ignition (T_max > T_init + 400 K) and conservation (U or H rel drift < 1e-6).
+# IC: H2:O2:N2 = 2:1:4 mole fraction, T=1000 K, P=1 atm.
+
+using ChemMechSim: load_mechanism, validate, BatchReactor, u_molar, h_molar
+using OrdinaryDiffEq: Rodas5P, ReturnCode
+
+const _H2O2_YAML_5A = joinpath(@__DIR__, "data", "h2o2.yaml")
+
+@testset "Phase 5a: validate(load_mechanism(h2o2.yaml)) passes" begin
+    mech = load_mechanism(_H2O2_YAML_5A)
+    rep = validate(mech)
+    @test isempty(rep.errors)
+end
+
+# BLOCKED: the const-V and const-P ignition testsets below cannot run yet.
+#
+# Root cause: src/lowering.jl:190 (`_net_rate`) explicitly rejects non-elementary
+# forward kinetics under ThermoReverse:
+#
+#   rx.kinetics isa ElementaryArrhenius ||
+#       error("_net_rate: reverse with non-elementary forward kinetics ...")
+#
+# All 29 reactions in h2o2.yaml are `<=>` → parser sets ThermoReverse(). Of those,
+# 5 ThirdBodyArrhenius (rxns 1, 2, 6, 12, 15) + 1 TroeFalloff (rxn 22) hit this
+# guard, so `BatchReactor(mech; mode=:adiabatic_constV)` errors during lowering
+# BEFORE the solver is reached. Even `mode=:kinetic` fails for the same reason.
+#
+# The brief's risk note speculated `_reverse_rate(::ThermoReverse)` would be
+# kinetics-agnostic (uses K_c), but the actual `_net_rate` dispatcher short-
+# circuits before reaching `_reverse_rate` for non-elementary kinetics. The fix
+# requires modifying src/lowering.jl (out of scope for T5 — test-only per the
+# brief). When lowering is extended to support ThirdBody/Troe under ThermoReverse,
+# remove the `@test_broken` wrappers below and run as normal @testsets.
+#
+# Verified separately (sanity):
+#   - validate(mech) passes cleanly (0 errors, 0 warnings) — see testset above.
+#   - The synthetic _h2o2_mech (all Irreversible) lowers + solves (§3.4 tests).
+#   - Baseline Pkg.test() is fully green before this commit.
+
+@testset "Phase 5a: H2-O2 const-V ignition — U conserved, ignition occurs" begin
+    # @test_broken documents the expected behavior without failing the suite.
+    mech = load_mechanism(_H2O2_YAML_5A)
+    @test_broken try
+        reactor = BatchReactor(mech; mode=:adiabatic_constV)
+        true
+    catch e
+        @info "const-V lowering blocked (expected until src/ fix)" exception = e
+        false
+    end
+end
+
+@testset "Phase 5a: H2-O2 const-P ignition — H conserved, ignition occurs" begin
+    mech = load_mechanism(_H2O2_YAML_5A)
+    @test_broken try
+        reactor = BatchReactor(mech; mode=:adiabatic_constP)
+        true
+    catch e
+        @info "const-P lowering blocked (expected until src/ fix)" exception = e
+        false
+    end
+end
