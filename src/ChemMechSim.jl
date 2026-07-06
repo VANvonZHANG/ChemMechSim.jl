@@ -48,6 +48,7 @@ include("lowering.jl")
 include("catalyst_interop.jl")
 include("reactor.jl")
 include("validation.jl")
+include("io/cantera_yaml.jl")
 include("api.jl")
 
 export lower_to_mtk, lower_reaction, rate_param, import_from_catalyst,
