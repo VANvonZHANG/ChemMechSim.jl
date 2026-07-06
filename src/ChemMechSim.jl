@@ -31,6 +31,9 @@ export ReverseRatePolicy, Irreversible, ExplicitReverse, ThermoReverse,
 include("data/species.jl")        # SpeciesData
 export SpeciesData
 
+include("data/elements.jl")      # atomic masses + molecular_weight
+export molecular_weight, ATOMIC_MASSES
+
 include("data/mechanism.jl")      # Mechanism
 export Mechanism
 
