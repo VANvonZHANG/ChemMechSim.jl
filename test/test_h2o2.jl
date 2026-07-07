@@ -91,3 +91,80 @@ end
     jac = ModelingToolkit.calculate_jacobian(sys)
     @test size(jac) == (7, 7)                              # builds => symbolic Jacobian feasible
 end
+
+# —— Phase 5a T5: end-to-end H2-O2 ignition (const-V + const-P) ——————————————————
+# Spec: load_mechanism(h2o2.yaml) → BatchReactor(:adiabatic_constV/:adiabatic_constP) → simulate
+# Asserts ignition (T_max > T_init + 400 K) and conservation (U or H rel drift < 1e-6).
+# IC: H2:O2:N2 = 2:1:4 mole fraction, T=1000 K, P=1 atm.
+
+using ChemMechSim: load_mechanism, validate, BatchReactor, u_molar, h_molar
+using OrdinaryDiffEq: Rodas5P, ReturnCode
+
+const _H2O2_YAML_5A = joinpath(@__DIR__, "data", "h2o2.yaml")
+
+# IC: stoichiometric H2-O2 diluted with N2. mole fractions H2:O2:N2 = 2:1:4.
+# T_init = 1000 K, P_init = 1 atm. Solver: Rodas5P, reltol=1e-8, abstol=1e-12.
+const _R5A    = 8.314
+const _P_STD  = 101325.0
+const _T_INIT = 1000.0
+const _Y_H2_5A, _Y_O2_5A, _Y_N2_5A = 2/7, 1/7, 4/7
+
+@testset "Phase 5a: validate(load_mechanism(h2o2.yaml)) passes" begin
+    mech = load_mechanism(_H2O2_YAML_5A)
+    rep = validate(mech)
+    @test isempty(rep.errors)
+end
+
+@testset "Phase 5a: H2-O2 const-V ignition — U conserved, ignition occurs" begin
+    mech = load_mechanism(_H2O2_YAML_5A)
+    reactor = BatchReactor(mech; mode=:adiabatic_constV)
+    sys = extract_system(reactor)
+    c_tot = _P_STD / (_R5A * _T_INIT)
+    u0 = Dict("H2"=>_Y_H2_5A*c_tot, "O2"=>_Y_O2_5A*c_tot, "N2"=>_Y_N2_5A*c_tot, "T"=>_T_INIT,
+              "H"=>0.0, "O"=>0.0, "OH"=>0.0, "H2O"=>0.0, "HO2"=>0.0, "H2O2"=>0.0, "AR"=>0.0)
+    sol = simulate(reactor, (0.0, 1.0); u0=u0, solver=Rodas5P(), reltol=1e-8, abstol=1e-12)
+    @test sol.retcode == ReturnCode.Success
+    # ignition: T_max > T_init + 400 K
+    T_end = Float64(sol(1.0; idxs=_var(sys,"T")))
+    T_max = maximum(Float64(sol(t; idxs=_var(sys,"T"))) for t in 0.0:0.01:1.0)
+    @test T_max > _T_INIT + 400.0
+    # U conservation (relative drift): U = Σ cᵢ·ūᵢ(T)
+    function U_at(t)
+        Tv = Float64(sol(t; idxs=_var(sys,"T")))
+        u = 0.0
+        for sp in mech.species
+            u += Float64(sol(t; idxs=_var(sys, sp.name))) * u_molar(sp.thermo, Tv)
+        end
+        return u
+    end
+    U0 = U_at(0.0); U1 = U_at(1.0)
+    @test abs(U1 - U0) / abs(U0) < 1e-6
+    @info "const-V ignition" T_max=T_max T_end=T_end U_drift_rel=abs(U1-U0)/abs(U0)
+end
+
+@testset "Phase 5a: H2-O2 const-P ignition — H conserved, ignition occurs" begin
+    mech = load_mechanism(_H2O2_YAML_5A)
+    reactor = BatchReactor(mech; mode=:adiabatic_constP)
+    sys = extract_system(reactor)
+    n_tot = 1.0
+    u0 = Dict("n_H2"=>_Y_H2_5A*n_tot, "n_O2"=>_Y_O2_5A*n_tot, "n_N2"=>_Y_N2_5A*n_tot, "T"=>_T_INIT,
+              "n_H"=>0.0, "n_O"=>0.0, "n_OH"=>0.0, "n_H2O"=>0.0, "n_HO2"=>0.0, "n_H2O2"=>0.0, "n_AR"=>0.0)
+    sol = simulate(reactor, (0.0, 1.0); u0=u0, solver=Rodas5P(), reltol=1e-8, abstol=1e-12)
+    @test sol.retcode == ReturnCode.Success
+    # ignition: T_max > T_init + 400 K
+    T_end = Float64(sol(1.0; idxs=_var(sys,"T")))
+    T_max = maximum(Float64(sol(t; idxs=_var(sys,"T"))) for t in 0.0:0.01:1.0)
+    @test T_max > _T_INIT + 400.0
+    # H conservation (relative drift): H = Σ nᵢ·h̄ᵢ(T)
+    function H_at(t)
+        Tv = Float64(sol(t; idxs=_var(sys,"T")))
+        h = 0.0
+        for sp in mech.species
+            h += Float64(sol(t; idxs=_var(sys, "n_"*sp.name))) * h_molar(sp.thermo, Tv)
+        end
+        return h
+    end
+    H0 = H_at(0.0); H1 = H_at(1.0)
+    @test abs(H1 - H0) / abs(H0) < 1e-6
+    @info "const-P ignition" T_max=T_max T_end=T_end H_drift_rel=abs(H1-H0)/abs(H0)
+end

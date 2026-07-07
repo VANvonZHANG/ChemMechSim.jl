@@ -96,22 +96,17 @@ end
 direct_mtk_lowering(rx::ReactionData, mech::Mechanism, cvar, T, j::Int) =
     _direct_rate(rx.kinetics, rx, mech, cvar, T, j)
 
-"Elementary Arrhenius forward rate: k(T)·∏ reactants. k is a unit-bearing rate_param."
-function _direct_rate(kin::ElementaryArrhenius, rx, mech, cvar, T, j)
-    order = sum(values(rx.reactants))
-    k = _arrhenius_k_param(kin, order, "k_$j", T)
-    return k * _mass_action(rx.reactants, cvar)
-end
+"Elementary Arrhenius forward rate: k(T)·∏ reactants. k is a unit-bearing rate_param.
+ Thin wrapper over `_direct_kf` (DRY): rate = kf · mass_action(reactants)."
+_direct_rate(kin::ElementaryArrhenius, rx, mech, cvar, T, j) =
+    _direct_kf(kin, rx, mech, cvar, T, j) * _mass_action(rx.reactants, cvar)
 
 "Third-body enhanced rate (spec §5.2): k_base(T)·∏ reactants·[M]_eff. The third body is
  NOT a reactant — it enters via the efficiencies map. k_base carries a unit one order higher
- than the elementary base (the [M]_eff factor adds one concentration)."
-function _direct_rate(kin::ThirdBodyArrhenius, rx, mech, cvar, T, j)
-    base_order = sum(values(rx.reactants))
-    order = base_order + 1                              # +1 for the [M]_eff factor
-    k = _arrhenius_k_param(kin.base, order, "k_$j", T)
-    return k * _mass_action(rx.reactants, cvar) * _meff(mech, kin.efficiencies, cvar)
-end
+ than the elementary base (the [M]_eff factor adds one concentration).
+ Thin wrapper over `_direct_kf` (DRY): rate = kf · mass_action(reactants)."
+_direct_rate(kin::ThirdBodyArrhenius, rx, mech, cvar, T, j) =
+    _direct_kf(kin, rx, mech, cvar, T, j) * _mass_action(rx.reactants, cvar)
 
 "Troe falloff forward rate (spec §5.2, §3.4 #2). k_blend = kinf·(Pr/(1+Pr))·F_Troe, with
  Pr = k0·[M]_eff/kinf (dimensionless). kinf carries the high-pressure (Σν-reactant) unit;
@@ -119,15 +114,40 @@ end
  mtkCompile and the dimension check passes (Pr dimensionless)."
 function _direct_rate(kin::TroeFalloff, rx, mech, cvar, T, j)
     T === nothing && error("_direct_rate(TroeFalloff): falloff is T-dependent but no T parameter exists.")
+    return _direct_kf(kin, rx, mech, cvar, T, j) * _mass_action(rx.reactants, cvar)
+end
+
+# —— Effective forward rate constant (for ThermoReverse: kr = kf/Kc) ————————————
+# `_direct_kf` returns the rate-constant factor EXCLUDING the reactant mass-action term,
+# so `_reverse_rate(::ThermoReverse)` can compute kr = kf/Kc consistently.
+# DRY: `_direct_rate = _direct_kf * _mass_action(rx.reactants, cvar)` for each kinetics type.
+# Phase 5a T5fix: previously _net_rate hardcoded an ElementaryArrhenius guard; now any
+# kinetics with a _direct_kf method is accepted (ThirdBody, Troe, Elementary).
+
+"_direct_kf for ElementaryArrhenius: k(T) = A·T^b·exp(-θ/T) with the reactant-order unit."
+_direct_kf(kin::ElementaryArrhenius, rx, mech, cvar, T, j) =
+    _arrhenius_k_param(kin, sum(values(rx.reactants)), "k_$j", T)
+
+"_direct_kf for ThirdBodyArrhenius: k_base(T)·[M]_eff (order = Σ reactants + 1 for [M]_eff)."
+function _direct_kf(kin::ThirdBodyArrhenius, rx, mech, cvar, T, j)
+    order = sum(values(rx.reactants)) + 1                  # +1 for [M]_eff
+    return _arrhenius_k_param(kin.base, order, "k_$j", T) * _meff(mech, kin.efficiencies, cvar)
+end
+
+"_direct_kf for TroeFalloff: kinf·(Pr/(1+Pr))·F_Troe with Pr = k0·[M]_eff/kinf."
+function _direct_kf(kin::TroeFalloff, rx, mech, cvar, T, j)
+    T === nothing && error("_direct_kf(TroeFalloff): falloff is T-dependent but no T parameter exists.")
     base_order = sum(values(rx.reactants))
     kinf = _arrhenius_k_param(kin.high_rate, base_order,     "k_$j" * "_high", T)
     k0   = _arrhenius_k_param(kin.low_rate,  base_order + 1, "k_$j" * "_low",  T)
     meff = _meff(mech, kin.efficiencies, cvar)
     Pr   = k0 * meff / kinf
     F    = _troe_F(kin.troe, Pr, T, j)
-    k    = kinf * (Pr / (1 + Pr)) * F
-    return k * _mass_action(rx.reactants, cvar)
+    return kinf * (Pr / (1 + Pr)) * F
 end
+
+_direct_kf(kin::AbstractKinetics, rx, mech, cvar, T, j) =
+    error("_direct_kf: not implemented for $(typeof(kin)); arrives in Phase 6.")
 
 "Troe center-broadening factor F (TroeParams α, T1, T2, T3). T1/T2/T3 are temperatures
  (K); under units they MUST be K-params so T/T1 etc. are dimensionless — a bare Float64
@@ -179,21 +199,22 @@ end
 
 "Net rate = forward − reverse for a reversible reaction (direct path). ExplicitReverse uses the
  general forward dispatch (_direct_rate) since its reverse is independent of the forward k_f.
- ThermoReverse needs the forward k_f (for k_r = k_f/K_c), so it keeps the elementary-forward path."
+ ThermoReverse needs the forward k_f (for k_r = k_f/K_c); `_direct_kf` provides the per-kinetics
+ effective rate constant (elementary, ThirdBody, or Troe) so K_c-based reverse works for any
+ forward kinetics type. Phase 5a T5fix removed the elementary-only guard that previously blocked
+ ThirdBody/Troe under ThermoReverse."
 function _net_rate(rx::ReactionData, mech, cvar, T, j)
     policy = rx.reverse_policy
     if policy isa ExplicitReverse
         fwd = _direct_rate(rx.kinetics, rx, mech, cvar, T, j)
         return fwd - _reverse_rate(policy, rx, mech, cvar, T, j)
     end
-    # ThermoReverse (and any future policy needing k_f)
-    rx.kinetics isa ElementaryArrhenius ||
-        error("_net_rate: reverse with non-elementary forward kinetics ($(typeof(rx.kinetics))) " *
-              "is not supported; use Irreversible, ExplicitReverse, or an elementary forward.")
-    order = sum(values(rx.reactants))
-    kf = _arrhenius_k_param(rx.kinetics, order, "k_$j", T)
-    fwd = kf * _mass_action(rx.reactants, cvar)
-    return fwd - _reverse_rate(policy, rx, mech, cvar, T, kf)
+    if policy isa ThermoReverse
+        kf = _direct_kf(rx.kinetics, rx, mech, cvar, T, j)
+        fwd = kf * _mass_action(rx.reactants, cvar)
+        return fwd - _reverse_rate(policy, rx, mech, cvar, T, kf)
+    end
+    error("_net_rate: unsupported policy $(typeof(policy))")
 end
 
 _reverse_rate(::Irreversible, rx, mech, cvar, T, kf) = 0.0

@@ -189,3 +189,69 @@ end
     @test any(occursin("sp1_a1", n) for n in pnames)   # coeff param present
     @test any(occursin("Tmid_sp1", n) for n in pnames) # range-switch Tmid present
 end
+
+# —— T5fix: non-elementary forward kinetics under ThermoReverse (Phase 3 legacy gap) ——
+# ThirdBody and Troe previously hit a guard in _net_rate that required ElementaryArrhenius
+# for ThermoReverse. The K_c machinery (_reverse_rate) is kinetics-agnostic — it just needs
+# the right kf fed to it. These tests confirm the guard is gone and lowering + integration work.
+
+"NASA7 with all-zero coeffs → Δg° = 0 → K_c = (P°/RT)^Δν (independent of T within a range)."
+_zero_nasa7() = NASA7((0.0,0,0,0,0,0.0,0.0),(0.0,0,0,0,0,0.0,0.0),200.0,1000.0,3500.0)
+
+@testset "T5fix: ThirdBodyArrhenius + ThermoReverse lowers and integrates" begin
+    # A + B + M <-> C + M  (net: A + B <-> C ; Δν = 1 - 2 = -1).
+    # kf_eff = k_base·[M]_eff ; kr = kf_eff / K_c ; K_c = RT/P° (Δg°=0, Δν=-1).
+    n = _zero_nasa7()
+    A = SpeciesData(id=1, name="A", thermo=n)
+    B = SpeciesData(id=2, name="B", thermo=n)
+    C = SpeciesData(id=3, name="C", thermo=n)
+    M = SpeciesData(id=4, name="M", thermo=n)
+    rxn = ReactionData(reactants=Dict(1=>1.0, 2=>1.0), products=Dict(3=>1.0),
+                       kinetics=ThirdBodyArrhenius(ElementaryArrhenius(1.0,0.0,0.0),
+                                                   Dict(4=>1.0)),
+                       reverse_policy=ThermoReverse())
+    mech = Mechanism(species=[A,B,C,M], reactions=[rxn])
+    # lowering succeeds (this used to error in _net_rate guard)
+    phase = ChemPhaseSystem(mech; config=convenience_config(:fixedT))
+    sys = extract_system(phase)
+    @test length(unknowns(sys)) == 4
+    # integrate to equilibrium and check K_c is satisfied:
+    # at equilibrium  kf_eff·[A][B] = kr·[C]  →  [C]/([A][B]) = kf_eff/kr = K_c = RT/P°
+    Av = unknowns(sys)[findfirst(s -> String(getname(s))=="A", unknowns(sys))]
+    Bv = unknowns(sys)[findfirst(s -> String(getname(s))=="B", unknowns(sys))]
+    Cv = unknowns(sys)[findfirst(s -> String(getname(s))=="C", unknowns(sys))]
+    Tp = parameters(sys)[findfirst(p -> String(getname(p))=="T", parameters(sys))]
+    Tv = 1000.0
+    sol = simulate(phase, (0.0,500.0); u0=Dict("A"=>1.0,"B"=>1.0,"C"=>0.0,"M"=>2.0),
+                   params=[Tp=>Tv], reltol=1e-10, abstol=1e-12)
+    Ca, Cb, Cc = sol(500.0; idxs=Av), sol(500.0; idxs=Bv), sol(500.0; idxs=Cv)
+    Kc_truth = 8.314 * Tv / 1.0e5
+    @test Cc / (Ca * Cb) ≈ Kc_truth  rtol=1e-2
+    # mass conservation: A atoms (A + C) and B atoms (B + C) conserved
+    @test Ca + Cc ≈ 1.0  atol=1e-6
+    @test Cb + Cc ≈ 1.0  atol=1e-6
+end
+
+@testset "T5fix: TroeFalloff + ThermoReverse lowers" begin
+    # 2A (+M) <-> A2 (+M)  (net: 2A <-> A2 ; Δν = 1 - 2 = -1). Troe falloff forward kinetics.
+    n = _zero_nasa7()
+    A = SpeciesData(id=1, name="A", thermo=n)
+    A2 = SpeciesData(id=2, name="A2", thermo=n)
+    M = SpeciesData(id=3, name="M", thermo=n)
+    rxn = ReactionData(reactants=Dict(1=>2.0), products=Dict(2=>1.0),
+                       kinetics=TroeFalloff(ElementaryArrhenius(1.0e10,-1.0,0.0),   # low (k0)
+                                            ElementaryArrhenius(1.0e8,-1.0,0.0),    # high (kinf)
+                                            Dict(3=>1.0),
+                                            TroeParams(0.5, 1.0e-30, 1.0e30, 1.0e30)),
+                       reverse_policy=ThermoReverse())
+    mech = Mechanism(species=[A,A2,M], reactions=[rxn])
+    # lowering succeeds (Troe under ThermoReverse used to error in _net_rate guard)
+    phase = ChemPhaseSystem(mech; config=convenience_config(:fixedT))
+    sys = extract_system(phase)
+    @test length(unknowns(sys)) == 3
+    # smoke integrate (no equilibrium assertion — Troe kf is complex; just verify it runs)
+    Tp = parameters(sys)[findfirst(p -> String(getname(p))=="T", parameters(sys))]
+    sol = simulate(phase, (0.0,1.0e-3); u0=Dict("A"=>1.0,"A2"=>0.0,"M"=>1.0e3),
+                   params=[Tp=>1000.0], reltol=1e-9, abstol=1e-12, dt=1.0e-7)
+    @test all(isfinite, sol.u[end])
+end

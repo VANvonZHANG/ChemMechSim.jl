@@ -31,6 +31,9 @@ export ReverseRatePolicy, Irreversible, ExplicitReverse, ThermoReverse,
 include("data/species.jl")        # SpeciesData
 export SpeciesData
 
+include("data/elements.jl")      # atomic masses + molecular_weight
+export molecular_weight, ATOMIC_MASSES
+
 include("data/mechanism.jl")      # Mechanism
 export Mechanism
 
@@ -45,11 +48,13 @@ include("lowering.jl")
 include("catalyst_interop.jl")
 include("reactor.jl")
 include("validation.jl")
+include("io/cantera_yaml.jl")
 include("api.jl")
 
 export lower_to_mtk, lower_reaction, rate_param, import_from_catalyst,
        ChemPhaseSystem, BatchReactor, convenience_config,
        validate, ValidationReport,
-       simulate, build_problem, extract_system, generate_function, generate_jacobian
+       simulate, build_problem, extract_system, generate_function, generate_jacobian,
+       load_mechanism
 
 end # module
