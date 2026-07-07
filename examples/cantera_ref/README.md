@@ -20,7 +20,9 @@ Produces `h2o2_ref_constV.csv` and `h2o2_ref_constP.csv` (ignored by git).
     julia --project=. examples/h2o2_ignition.jl
 
 This reads the YAML, simulates both reactors, loads the reference CSVs (if present),
-and reports ignition-delay comparison + plots.
+reports ignition-delay comparison, and saves a 4-panel CairoMakie plot to
+`examples/cantera_ref/h2o2_ignition.png` (top row: T(t) vs Cantera for const-V/const-P;
+bottom row: H2/O2/H2O/OH mole-fraction evolution).
 
 ## Ignition-delay metric
 
