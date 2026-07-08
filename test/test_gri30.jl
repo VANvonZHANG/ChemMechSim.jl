@@ -60,3 +60,38 @@ end
         @test du[idx[n]] ≈ dc[i]  rtol = 1e-7             # CS-order du vs id-order dc, by name
     end
 end
+
+# —— Phase 5b Task 2: GRI30 scale characterization ————————————————————————————
+
+const _GRI30_YAML = joinpath(@__DIR__, "data", "gri30.yaml")
+
+@testset "Phase 5b: GRI30 load + validate + structure" begin
+    mech = load_mechanism(_GRI30_YAML)
+    @test length(mech.species) == 53
+    @test length(mech.reactions) == 325
+    counts = Dict{DataType,Int}()
+    for r in mech.reactions
+        counts[typeof(r.kinetics)] = get(counts, typeof(r.kinetics), 0) + 1
+    end
+    @test counts[ElementaryArrhenius]  == 284
+    @test counts[ThirdBodyArrhenius]   == 12
+    @test counts[TroeFalloff]          == 26
+    @test counts[LindemannFalloff]     == 3
+    @test count(r -> r.meta.duplicate, mech.reactions) == 6
+    # validate under the adiabatic-constV config the ignition test uses (Task 3);
+    # T_range trimmed to [300,3000] to avoid the over-conservative low-end NASA warnings.
+    rep = validate(mech; config=convenience_config(:adiabatic_constV), T_range=(300.0, 3000.0))
+    @test isempty(rep.errors)
+    @info "GRI30 validate" n_errors=length(rep.errors) n_warnings=length(rep.warnings)
+end
+
+@testset "Phase 5b: GRI30 lowers + compiles + dense Jacobian builds" begin
+    mech = load_mechanism(_GRI30_YAML)
+    sys = lower_to_mtk(mech; config=convenience_config(:adiabatic_constV))
+    @test length(unknowns(sys)) == 54                 # 53 concentrations + T
+    @test length(equations(sys)) == 54
+    # Dense Jacobian = the production path (sparse codegen is pathological — Task 4).
+    jac = ModelingToolkit.calculate_jacobian(sys; sparse=false)
+    @test size(jac) == (54, 54)
+    @test !isempty(string(generate_jacobian(sys; sparse=false)))
+end
