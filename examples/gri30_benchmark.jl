@@ -2,7 +2,7 @@
 using ChemMechSim
 using ChemMechSim: lower_to_mtk, convenience_config, generate_jacobian
 using ModelingToolkit: calculate_jacobian, unknowns
-using OrdinaryDiffEq: FBDF, ReturnCode
+using OrdinaryDiffEq: FBDF
 using SparseArrays: nnz
 
 const YAML = joinpath(@__DIR__, "data", "gri30.yaml")

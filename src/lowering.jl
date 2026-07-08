@@ -157,6 +157,7 @@ end
 "_direct_kf for LindemannFalloff: kinf·Pr/(1+Pr) with Pr = k0·[M]_eff/kinf (F≡1, no Troe center
  broadening). kinf carries the high-pressure (Σν-reactant) unit; k0 carries one order higher."
 function _direct_kf(kin::LindemannFalloff, rx, mech, cvar, T, j)
+    T === nothing && error("_direct_kf(LindemannFalloff): falloff is T-dependent but no T parameter exists.")
     base_order = sum(values(rx.reactants))
     kinf = _arrhenius_k_param(kin.high_rate, base_order,     "k_$j" * "_high", T)
     k0   = _arrhenius_k_param(kin.low_rate,  base_order + 1, "k_$j" * "_low",  T)

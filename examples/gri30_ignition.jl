@@ -2,7 +2,7 @@
 # Run: julia --project=. examples/gri30_ignition.jl
 # Requires examples/cantera_ref/gri30_ref_constV.csv (run the .py first).
 using ChemMechSim
-using OrdinaryDiffEq: FBDF, ReturnCode
+using OrdinaryDiffEq: FBDF
 using ModelingToolkit: unknowns, getname
 using DelimitedFiles
 using CairoMakie
@@ -48,7 +48,7 @@ else
     println("(no Cantera ref at $REF_CSV — run examples/cantera_ref/gri30_ref.py first)")
 end
 
-# 4-panel plot: T(t) vs Cantera + key species (CH4, O2, CO2, OH)
+# 2-panel plot: T(t) vs Cantera + key species (CH4, O2, CO2, OH)
 fig = Figure(size=(1000, 700))
 axT = Axis(fig[1, 1:2]; xlabel="time (ms)", ylabel="T (K)", title="GRI30 CH4-air ignition (const-V adiabatic)")
 lines!(axT, ts .* 1e3, Ts; label="ChemMechSim", linewidth=2)
