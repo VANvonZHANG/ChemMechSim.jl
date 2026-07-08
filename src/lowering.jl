@@ -177,7 +177,7 @@ function _troe_F(tp::TroeParams, Pr, T, j)
     T1 = rate_param(Symbol("k_", j, "_troeT1"), tp.T1, u"K")
     T2 = rate_param(Symbol("k_", j, "_troeT2"), tp.T2, u"K")
     T3 = rate_param(Symbol("k_", j, "_troeT3"), tp.T3, u"K")
-    Fcent = (1 - α) * exp(-T / T3) + α * exp(-T / T1) + exp(-T / T2)
+    Fcent = (1 - α) * exp(-T / T3) + α * exp(-T / T1) + exp(-T2 / T)
     lFc = log10(Fcent); lPr = log10(Pr)
     c = -0.4 - 0.67 * lFc; N = 0.75 - 1.27 * lFc
     f1 = lPr + c; f2 = N - 0.14 * f1
