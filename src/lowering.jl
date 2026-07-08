@@ -117,6 +117,14 @@ function _direct_rate(kin::TroeFalloff, rx, mech, cvar, T, j)
     return _direct_kf(kin, rx, mech, cvar, T, j) * _mass_action(rx.reactants, cvar)
 end
 
+"Lindemann falloff forward rate (spec §5.2). F≡1 (no center broadening), so the rate is
+ kinf·(Pr/(1+Pr))·∏reactants. Dispatched like TroeFalloff; _direct_kf provides the effective
+ forward rate constant so ThermoReverse can compute kr = kf/Kc consistently."
+function _direct_rate(kin::LindemannFalloff, rx, mech, cvar, T, j)
+    T === nothing && error("_direct_rate(LindemannFalloff): falloff is T-dependent but no T parameter exists.")
+    return _direct_kf(kin, rx, mech, cvar, T, j) * _mass_action(rx.reactants, cvar)
+end
+
 # —— Effective forward rate constant (for ThermoReverse: kr = kf/Kc) ————————————
 # `_direct_kf` returns the rate-constant factor EXCLUDING the reactant mass-action term,
 # so `_reverse_rate(::ThermoReverse)` can compute kr = kf/Kc consistently.
@@ -144,6 +152,17 @@ function _direct_kf(kin::TroeFalloff, rx, mech, cvar, T, j)
     Pr   = k0 * meff / kinf
     F    = _troe_F(kin.troe, Pr, T, j)
     return kinf * (Pr / (1 + Pr)) * F
+end
+
+"_direct_kf for LindemannFalloff: kinf·Pr/(1+Pr) with Pr = k0·[M]_eff/kinf (F≡1, no Troe center
+ broadening). kinf carries the high-pressure (Σν-reactant) unit; k0 carries one order higher."
+function _direct_kf(kin::LindemannFalloff, rx, mech, cvar, T, j)
+    base_order = sum(values(rx.reactants))
+    kinf = _arrhenius_k_param(kin.high_rate, base_order,     "k_$j" * "_high", T)
+    k0   = _arrhenius_k_param(kin.low_rate,  base_order + 1, "k_$j" * "_low",  T)
+    meff = _meff(mech, kin.efficiencies, cvar)
+    Pr   = k0 * meff / kinf
+    return kinf * (Pr / (1 + Pr))
 end
 
 _direct_kf(kin::AbstractKinetics, rx, mech, cvar, T, j) =

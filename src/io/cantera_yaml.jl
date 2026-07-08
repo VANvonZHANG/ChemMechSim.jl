@@ -17,8 +17,9 @@ function _parse_terms(s::AbstractString)
     for term in split(s, "+")
         term = strip(term)
         isempty(term) && continue
-        # optional leading coefficient (int/float) then species name (letter-led)
-        m = match(r"^(\d+\.?\d*|\.\d+)?\s*([A-Za-z][A-Za-z0-9]*)$", term)
+        # optional leading coefficient (int/float) then species name (letter-led).
+        # Parens allowed for labelled/excited states (e.g. GRI30's CH2(S) singlet methylene).
+        m = match(r"^(\d+\.?\d*|\.\d+)?\s*([A-Za-z][A-Za-z0-9()]*)$", term)
         m === nothing && error("_parse_terms: cannot parse term \"$term\"")
         coef = isnothing(m.captures[1]) ? 1.0 : parse(Float64, m.captures[1])
         name = m.captures[2]
