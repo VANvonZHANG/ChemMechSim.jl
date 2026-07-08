@@ -17,8 +17,9 @@ function _parse_terms(s::AbstractString)
     for term in split(s, "+")
         term = strip(term)
         isempty(term) && continue
-        # optional leading coefficient (int/float) then species name (letter-led)
-        m = match(r"^(\d+\.?\d*|\.\d+)?\s*([A-Za-z][A-Za-z0-9]*)$", term)
+        # optional leading coefficient (int/float) then species name (letter-led).
+        # Parens allowed for labelled/excited states (e.g. GRI30's CH2(S) singlet methylene).
+        m = match(r"^(\d+\.?\d*|\.\d+)?\s*([A-Za-z][A-Za-z0-9()]*)$", term)
         m === nothing && error("_parse_terms: cannot parse term \"$term\"")
         coef = isnothing(m.captures[1]) ? 1.0 : parse(Float64, m.captures[1])
         name = m.captures[2]
@@ -196,7 +197,7 @@ function _parse_reaction(rxn_dict, name_to_id::Dict{String,SpeciesID}, ctx::_Uni
         if haskey(rxn_dict, "Troe")
             t = rxn_dict["Troe"]
             # Cantera {A,T3,T1,T2} -> TroeParams(α=A, T1, T2, T3) — field-aligned, NO reorder (spec T1;
-            # lowering.jl:141 formula Fcent=(1-α)exp(-T/T3)+α·exp(-T/T1)+exp(-T/T2) confirmed)
+            # lowering.jl _troe_F formula Fcent=(1-α)exp(-T/T3)+α·exp(-T/T1)+exp(-T2/T) confirmed)
             tp = TroeParams(Float64(t["A"]), Float64(t["T1"]), Float64(t["T2"]), Float64(t["T3"]))
             kin = TroeFalloff(low_rate, high_rate, eff, tp)
         else

@@ -61,12 +61,59 @@ end
     # hand-computed Troe k (see _direct_rate(::TroeFalloff)); [M]_eff = Hv+O2v+0+Mv
     kinf = Ah * Tv^bh * exp(-Eah / (8.314 * Tv)); k0 = Al * Tv^bl * exp(-Eal / (8.314 * Tv))
     Meff = Hv + O2v + Mv; Pr = k0 * Meff / kinf
-    Fc = (1 - α) * exp(-Tv / T3) + α * exp(-Tv / T1) + exp(-Tv / T2)
+    Fc = (1 - α) * exp(-Tv / T3) + α * exp(-Tv / T1) + exp(-T2 / Tv)
     lFc, lPr = log10(Fc), log10(Pr)
     cT = -0.4 - 0.67 * lFc; NT = 0.75 - 1.27 * lFc
     f1 = lPr + cT; f2 = NT - 0.14 * f1
     F = 10^(lFc / (1 + (f1 / f2)^2))
     @test k_cs ≈ kinf * (Pr / (1 + Pr)) * F  rtol = 1e-6
+end
+
+# Regression test: Troe F_cent third term MUST be exp(-T2/T), not exp(-T/T2).
+# With T2=5000 K and T=1000 K:
+#   buggy  exp(-T/T2)  = exp(-1000/5000) = exp(-0.2) ≈ 0.8187
+#   canonical exp(-T2/T) = exp(-5000/1000) = exp(-5)   ≈ 0.006738
+# This large difference makes the test FAIL on the old buggy code and PASS on the fix.
+@testset "Troe F_cent canonical form regression (exp(-T2/T) not exp(-T/T2))" begin
+    # A + B (+M) <=> C (+M), single Troe falloff reaction.
+    A  = SpeciesData(id=1, name="A")
+    B  = SpeciesData(id=2, name="B")
+    C  = SpeciesData(id=3, name="C")
+    M  = SpeciesData(id=4, name="M")
+    # Arrhenius params: simple constants for easy hand-computation.
+    Ah, bh, Eah = 1.0e10, 0.0, 0.0       # high-pressure limit (kinf)
+    Al, bl, Eal = 1.0e15, 0.0, 0.0       # low-pressure limit  (k0)
+    # Troe params chosen so the bug matters: α=0 (so α·exp(-T/T1)=0), T1=1e-30 (irrelevant),
+    # T3=1e-30 (exp(-T/T3) underflows to 0), T2=5000.
+    α, T1, T2, T3 = 0.0, 1.0e-30, 5000.0, 1.0e-30
+    rxn = ReactionData(reactants=Dict(1 => 1.0, 2 => 1.0), products=Dict(3 => 1.0),
+        kinetics=TroeFalloff(ElementaryArrhenius(Al, bl, Eal),
+                             ElementaryArrhenius(Ah, bh, Eah),
+                             Dict(4 => 1.0), TroeParams(α, T1, T2, T3)))
+    mech = Mechanism(species=[A, B, C, M], reactions=[rxn])
+    phase = ChemPhaseSystem(mech)
+    sys = extract_system(phase)
+    # Evaluate kf at T=1000 K, [A]=2, [B]=3, [C]=0, [M]=5.
+    Tv = 1000.0
+    idx = _state_index(sys)
+    u = zeros(4); u[idx["A"]] = 2.0; u[idx["B"]] = 3.0; u[idx["M"]] = 5.0
+    du = zeros(4)
+    ODEFunction(sys)(du, u, _pvals(sys) |> x -> replace_T(x, sys, Tv), 0.0)
+    k_cs = du[idx["C"]] / (2.0 * 3.0)   # dc_C/dt = +kf·[A][B] → kf = dc_C/dt/([A][B])
+    # Hand-compute kf using the CANONICAL F_cent = exp(-T2/T):
+    #   Fcent = (1-0)·exp(-1000/1e-30) + 0·exp(-1000/1e-30) + exp(-5000/1000)
+    #         ≈ 0 + 0 + exp(-5) ≈ 0.006737947
+    kinf = Ah * Tv^bh * exp(-Eah / (8.314 * Tv))
+    k0   = Al * Tv^bl * exp(-Eal / (8.314 * Tv))
+    Meff = 2.0 + 3.0 + 5.0              # [A]+[B]+[C=0]+[M]
+    Pr = k0 * Meff / kinf
+    Fc = (1 - α) * exp(-Tv / T3) + α * exp(-Tv / T1) + exp(-T2 / Tv)
+    lFc, lPr = log10(Fc), log10(Pr)
+    cT = -0.4 - 0.67 * lFc; NT = 0.75 - 1.27 * lFc
+    f1 = lPr + cT; f2 = NT - 0.14 * f1
+    F = 10^(lFc / (1 + (f1 / f2)^2))
+    k_canonical = kinf * (Pr / (1 + Pr)) * F
+    @test k_cs ≈ k_canonical  rtol = 1e-6
 end
 
 @testset "ThermoReverse: A<->B equilibrates at [B]/[A] = K_c" begin

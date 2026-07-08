@@ -117,6 +117,14 @@ function _direct_rate(kin::TroeFalloff, rx, mech, cvar, T, j)
     return _direct_kf(kin, rx, mech, cvar, T, j) * _mass_action(rx.reactants, cvar)
 end
 
+"Lindemann falloff forward rate (spec §5.2). F≡1 (no center broadening), so the rate is
+ kinf·(Pr/(1+Pr))·∏reactants. Dispatched like TroeFalloff; _direct_kf provides the effective
+ forward rate constant so ThermoReverse can compute kr = kf/Kc consistently."
+function _direct_rate(kin::LindemannFalloff, rx, mech, cvar, T, j)
+    T === nothing && error("_direct_rate(LindemannFalloff): falloff is T-dependent but no T parameter exists.")
+    return _direct_kf(kin, rx, mech, cvar, T, j) * _mass_action(rx.reactants, cvar)
+end
+
 # —— Effective forward rate constant (for ThermoReverse: kr = kf/Kc) ————————————
 # `_direct_kf` returns the rate-constant factor EXCLUDING the reactant mass-action term,
 # so `_reverse_rate(::ThermoReverse)` can compute kr = kf/Kc consistently.
@@ -146,6 +154,18 @@ function _direct_kf(kin::TroeFalloff, rx, mech, cvar, T, j)
     return kinf * (Pr / (1 + Pr)) * F
 end
 
+"_direct_kf for LindemannFalloff: kinf·Pr/(1+Pr) with Pr = k0·[M]_eff/kinf (F≡1, no Troe center
+ broadening). kinf carries the high-pressure (Σν-reactant) unit; k0 carries one order higher."
+function _direct_kf(kin::LindemannFalloff, rx, mech, cvar, T, j)
+    T === nothing && error("_direct_kf(LindemannFalloff): falloff is T-dependent but no T parameter exists.")
+    base_order = sum(values(rx.reactants))
+    kinf = _arrhenius_k_param(kin.high_rate, base_order,     "k_$j" * "_high", T)
+    k0   = _arrhenius_k_param(kin.low_rate,  base_order + 1, "k_$j" * "_low",  T)
+    meff = _meff(mech, kin.efficiencies, cvar)
+    Pr   = k0 * meff / kinf
+    return kinf * (Pr / (1 + Pr))
+end
+
 _direct_kf(kin::AbstractKinetics, rx, mech, cvar, T, j) =
     error("_direct_kf: not implemented for $(typeof(kin)); arrives in Phase 6.")
 
@@ -158,7 +178,7 @@ function _troe_F(tp::TroeParams, Pr, T, j)
     T1 = rate_param(Symbol("k_", j, "_troeT1"), tp.T1, u"K")
     T2 = rate_param(Symbol("k_", j, "_troeT2"), tp.T2, u"K")
     T3 = rate_param(Symbol("k_", j, "_troeT3"), tp.T3, u"K")
-    Fcent = (1 - α) * exp(-T / T3) + α * exp(-T / T1) + exp(-T / T2)
+    Fcent = (1 - α) * exp(-T / T3) + α * exp(-T / T1) + exp(-T2 / T)
     lFc = log10(Fcent); lPr = log10(Pr)
     c = -0.4 - 0.67 * lFc; N = 0.75 - 1.27 * lFc
     f1 = lPr + c; f2 = N - 0.14 * f1

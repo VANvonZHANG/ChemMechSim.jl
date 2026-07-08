@@ -37,7 +37,7 @@ function _h2o2_rhs!(dc, c, T)
     Meff = sum(c)
     kinf, k0 = 1.0e6, 1.0e9                      # kinf=high=1e6, k0=low=1e9
     Pr = k0 * Meff / kinf
-    Fcent = (1-0.5)*exp(-T/1.0e30) + 0.5*exp(-T/1.0e-30) + exp(-T/1.0e30)
+    Fcent = (1-0.5)*exp(-T/1.0e30) + 0.5*exp(-T/1.0e-30) + exp(-1.0e30/T)
     lFc, lPr = log10(Fcent), log10(Pr)
     cT = -0.4 - 0.67*lFc; NT = 0.75 - 1.27*lFc
     f1 = lPr + cT; f2 = NT - 0.14*f1
