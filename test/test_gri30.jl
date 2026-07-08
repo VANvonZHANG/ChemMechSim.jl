@@ -138,3 +138,21 @@ const _X_CH4_5B, _X_O2_5B, _X_N2_5B = 1.0/10.52, 2.0/10.52, 7.52/10.52
     @test abs(U1 - U0) / abs(U0) < 1.0e-4
     @info "GRI30 CH4-air ignition" T_end=T_end t_ignition_ms=round(t_ign*1e3, digits=3) U_drift_rel=abs(U1-U0)/abs(U0)
 end
+
+# —— Phase 5b Task 4: Jacobian density + sparse-codegen known issue —————————————
+
+@testset "Phase 5b: GRI30 Jacobian is dense (sparse codegen pathological — known issue)" begin
+    mech = load_mechanism(_GRI30_YAML)
+    sys = lower_to_mtk(mech; config=convenience_config(:adiabatic_constV))
+    jac_sp = ModelingToolkit.calculate_jacobian(sys; sparse=true)   # cheap: ~10 s, small object
+    n = length(unknowns(sys))
+    density = nnz(jac_sp) / n^2
+    @test density > 0.5                                             # probe: 87.8% — sparse not worthwhile
+    @info "GRI30 Jacobian density" n=n nnz=nnz(jac_sp) density_pct=round(density*100, digits=1)
+    # KNOWN ISSUE (do NOT invoke in tests): generate_jacobian(sys; sparse=true) produces a
+    # ~4.2 GB string (~57 s) at GRI30 scale — ModelingToolkit.build_function does not CSE the
+    # NASA7 ifelse(T<=Tmid, lo, hi) branches across the 54×54 Jacobian entries. Use the DENSE
+    # path (calculate_jacobian(sparse=false) / generate_jacobian(sparse=false)), characterized
+    # in Task 2. Investigation tracked in docs/superpowers/plans/2026-07-07-phase5b-gri30-scaling.md
+    # and .superpowers/sdd/progress.md. Remove this comment if a future MTK version fixes it.
+end
