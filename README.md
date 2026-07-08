@@ -19,3 +19,17 @@ using ChemMechSim
 - 单位系统：`ChemUnits`（DynamicQuantities，SI/mol）
 - 配置：`MechanismConfig`
 - 接口 stub（待实现）：`lower_to_mtk`、`simulate`、`extract_system` 等
+
+## Performance — GRI-Mech 3.0 (53 species / 325 reactions)
+
+Cold-start (first run, incl. precompilation); warm numbers are lower.
+
+| stage | time |
+|-------|------|
+| lower + mtkcompile (`:adiabatic_constV`) | 34.75 s |
+| dense Jacobian (symbolic calc) | 12.07 s |
+| dense Jacobian codegen | 61.43 s |
+| CH₄-air ignition solve, `FBDF`, 5 ms | 45.99 s |
+
+Jacobian is dense (≈87.8% / nnz=2560 at 54×54) — sparse exploitation does not pay off at this scale; `FBDF` (dense) is the production solver.
+See `examples/gri30_benchmark.jl` to reproduce.
