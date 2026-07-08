@@ -197,7 +197,7 @@ function _parse_reaction(rxn_dict, name_to_id::Dict{String,SpeciesID}, ctx::_Uni
         if haskey(rxn_dict, "Troe")
             t = rxn_dict["Troe"]
             # Cantera {A,T3,T1,T2} -> TroeParams(α=A, T1, T2, T3) — field-aligned, NO reorder (spec T1;
-            # lowering.jl:141 formula Fcent=(1-α)exp(-T/T3)+α·exp(-T/T1)+exp(-T/T2) confirmed)
+            # lowering.jl _troe_F formula Fcent=(1-α)exp(-T/T3)+α·exp(-T/T1)+exp(-T2/T) confirmed)
             tp = TroeParams(Float64(t["A"]), Float64(t["T1"]), Float64(t["T2"]), Float64(t["T3"]))
             kin = TroeFalloff(low_rate, high_rate, eff, tp)
         else

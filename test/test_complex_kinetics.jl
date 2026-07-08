@@ -83,8 +83,8 @@ end
     # Arrhenius params: simple constants for easy hand-computation.
     Ah, bh, Eah = 1.0e10, 0.0, 0.0       # high-pressure limit (kinf)
     Al, bl, Eal = 1.0e15, 0.0, 0.0       # low-pressure limit  (k0)
-    # Troe params chosen so the bug matters: α=0 (drop first term), T1=1e-30 (α·exp(-T/T1)→0),
-    # T3=1e-30 ((1-α)·exp(-T/T3)→0 since α=0 so this term is 0 anyway), T2=5000.
+    # Troe params chosen so the bug matters: α=0 (so α·exp(-T/T1)=0), T1=1e-30 (irrelevant),
+    # T3=1e-30 (exp(-T/T3) underflows to 0), T2=5000.
     α, T1, T2, T3 = 0.0, 1.0e-30, 5000.0, 1.0e-30
     rxn = ReactionData(reactants=Dict(1 => 1.0, 2 => 1.0), products=Dict(3 => 1.0),
         kinetics=TroeFalloff(ElementaryArrhenius(Al, bl, Eal),
