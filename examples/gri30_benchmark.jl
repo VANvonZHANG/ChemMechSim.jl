@@ -27,9 +27,18 @@ println("Jacobian dense codegen: $(round(t_jg, digits=2)) s")
 println("Jacobian nnz=$(nnz(jac_sp)), density=$(round(nnz(jac_sp)/n_st^2*100, digits=1))% (sparse calc only — do NOT sparse-codegen)\n")
 
 # 3. CH4-air ignition solve (FBDF)
+#   The solve is the FIRST simulate() in a fresh process, so a cold run is
+#   dominated by one-time RHS+Jacobian function compilation (~tens of seconds).
+#   We measure BOTH cold and warm to separate compilation from integration.
 reactor = BatchReactor(mech; mode=:adiabatic_constV)
 u0 = Dict(sp.name => get(X0, sp.name, 0.0) * c_tot for sp in mech.species); u0["T"] = T0
+
+# Cold first solve (one-time RHS+Jacobian compilation):
+t_cold = @elapsed simulate(reactor, (0.0, 5.0e-3); u0=u0, solver=FBDF(), reltol=1e-8, abstol=1e-12)
+# Warm steady-state solve (functions already compiled):
+sol = nothing
 t_solve = @elapsed sol = simulate(reactor, (0.0, 5.0e-3); u0=u0, solver=FBDF(), reltol=1e-8, abstol=1e-12)
-println("FBDF solve (5 ms):     $(round(t_solve, digits=2)) s  (retcode=$(sol.retcode), steps=$(length(sol)))")
+println("FBDF solve (5 ms):     $(round(t_solve, digits=2)) s warm  (retcode=$(sol.retcode), steps=$(length(sol)))")
+println("  (cold first solve: $(round(t_cold, digits=2)) s — one-time RHS+Jacobian compilation)")
 
 println("\nBenchmark complete.")
