@@ -95,3 +95,46 @@ end
     @test size(jac) == (54, 54)
     @test !isempty(string(generate_jacobian(sys; sparse=false)))
 end
+
+# —— Phase 5b Task 3: GRI30 CH4-air ignition end-to-end ———————————————————————
+# Stoichiometric CH4-air (CH4 + 2(O2 + 3.76 N2)) at T0=1500 K, P=1 atm, const-V adiabatic.
+# Probe (2026-07-07): FBDF solves in 1.34 s, T_end=2902.6 K, t_ignition=1.72 ms (3-solver agree).
+
+const _R5B    = 8.314
+const _P_STD  = 101325.0
+const _T0_5B  = 1500.0
+const _X_CH4_5B, _X_O2_5B, _X_N2_5B = 1.0/10.52, 2.0/10.52, 7.52/10.52
+
+@testset "Phase 5b: GRI30 CH4-air const-V ignition (FBDF, U conserved)" begin
+    mech = load_mechanism(_GRI30_YAML)
+    reactor = BatchReactor(mech; mode=:adiabatic_constV)
+    sys = extract_system(reactor)
+    c_tot = _P_STD / (_R5B * _T0_5B)                          # ≈ 8.122 mol/m³
+    X0 = Dict("CH4" => _X_CH4_5B, "O2" => _X_O2_5B, "N2" => _X_N2_5B)
+    u0 = Dict(sp.name => get(X0, sp.name, 0.0) * c_tot for sp in mech.species)
+    u0["T"] = _T0_5B
+    sol = simulate(reactor, (0.0, 5.0e-3); u0=u0, solver=FBDF(), reltol=1e-8, abstol=1e-12)
+    @test sol.retcode == ReturnCode.Success
+    # ignition: T rises well above T0 (probe T_end 2902.6 K; give margin for solver variance)
+    T_end = Float64(sol(5.0e-3; idxs=_var(sys, "T")))
+    @test T_end > 2500.0
+    # ignition delay (argmax |dT/dt|) in a sane window (probe 1.72 ms)
+    ts = range(0.0, 5.0e-3; length=2001)
+    Ts = [Float64(sol(t; idxs=_var(sys, "T"))) for t in ts]
+    dTdt = diff(Ts) ./ diff(ts)
+    t_ign = ts[argmax(abs.(dTdt)) + 1]
+    @test 0.5e-3 < t_ign < 5.0e-3
+    # adiabatic const-V invariant: U = Σ cᵢ·ūᵢ(T) conserved (relative drift).
+    # h2o2 (Phase 5a) hit 1e-6; GRI30 is stiffer/larger → 1e-4 headroom.
+    function U_at(t)
+        Tv = Float64(sol(t; idxs=_var(sys, "T")))
+        u = 0.0
+        for sp in mech.species
+            u += Float64(sol(t; idxs=_var(sys, sp.name))) * u_molar(sp.thermo, Tv)
+        end
+        return u
+    end
+    U0 = U_at(0.0); U1 = U_at(5.0e-3)
+    @test abs(U1 - U0) / abs(U0) < 1.0e-4
+    @info "GRI30 CH4-air ignition" T_end=T_end t_ignition_ms=round(t_ign*1e3, digits=3) U_drift_rel=abs(U1-U0)/abs(U0)
+end
