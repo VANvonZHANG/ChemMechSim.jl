@@ -18,4 +18,5 @@
 using DynamicQuantities     # u"..." unit literals used across the lowering files
 
 include("lowering/units.jl")
+include("lowering/state.jl")
 include("lowering/core.jl")
