@@ -6,24 +6,6 @@
 # (units/state/kinetics/thermo/energy); what remains here at the end is the
 # assembly core listed above.
 
-"Attach a DynamicQuantities unit to a symbolic variable/parameter (the @species/@parameters
- macros reject interpolated names with [unit=...], so units are attached via setmetadata)."
-_attach_unit(sym, unit) = ModelingToolkit.setmetadata(sym, ModelingToolkit.VariableUnit, unit)
-
-"Build a rate-constant parameter `name` with `default` value and a derived `unit` (§5.6.5).
- The @parameters macro only accepts a LITERAL default with interpolation, so create with a
- placeholder then setdefault + setmetadata."
-function rate_param(name::Symbol, default, unit)
-    kp = only(@parameters ($(name)) = 1.0)
-    kp = ModelingToolkit.setdefault(kp, default)
-    return _attach_unit(kp, unit)
-end
-
-"Expected unit of a rate constant for overall reaction order `order` (Σ reactant stoich,
- incl. the third-body/[M] factor where applicable) and Arrhenius exponent `b`:
- [k] = conc^(1-order)·s⁻¹ ; the A-factor absorbs T^b -> [A] = [k] / K^b."
-_k_unit(order, b) = ChemUnits.conc^(1 - order) * u"s^-1" / (u"K"^b)
-
 "Symbolic rate constant k(T) for an ElementaryArrhenius law, as a unit-bearing parameter.
  `order` = Σ reactant stoichiometry (for unit derivation). Creates A (and θ, T if needed)."
 function _arrhenius_k_param(kin::ElementaryArrhenius, order::Real, nameprefix::AbstractString, T)
