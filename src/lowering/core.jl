@@ -36,12 +36,12 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
     _RGAS_PARAM[] = nothing
     _COEFF_CACHE[] = Dict{Int,Any}()   # per-species NASA7 coeff cache (Phase 4a)
     _lowerable(config) ||
-        error("lower_to_mtk: config not supported in Phase 4a. Supported: energy∈{:isothermal,:adiabatic}, " *
-              "state_basis=:concentration, eos∈{:off,:ideal_gas}; constraint must be :constant_volume for " *
-              ":adiabatic; non-concentration bases arrive in Phase 4b+. Got: " *
-              "energy=$(config.energy) constraint=$(config.constraint) eos=$(config.eos) " *
+        error("lower_to_mtk: config not supported. Supported: state_basis=:concentration, " *
+              "energy∈{:isothermal,:adiabatic}, eos∈{:off,:ideal_gas}; :constant_pressure " *
+              "requires eos=:ideal_gas; :adiabatic requires constraint∈{:constant_volume,:constant_pressure}. " *
+              "Got: energy=$(config.energy) constraint=$(config.constraint) eos=$(config.eos) " *
               "basis=$(config.state_basis). Use MechanismConfig() (:kinetic), convenience_config(:fixedT), " *
-              "or convenience_config(:adiabatic_constV).")
+              "convenience_config(:adiabatic_constV), or convenience_config(:adiabatic_constP).")
     config.constraint === :constant_pressure && return _lower_constP(mech, config)
     t = ModelingToolkit.t
     D = ModelingToolkit.D
