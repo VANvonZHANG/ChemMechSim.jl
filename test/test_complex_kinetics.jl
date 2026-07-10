@@ -222,13 +222,14 @@ end
 end
 
 @testset "symbolic cp/R + h/RT build (Phase 4a energy-eq building blocks)" begin
-    import ChemMechSim: _cp_over_R, _h_over_RT, rate_param
+    import ChemMechSim: _cp_over_R, _h_over_RT, rate_param, ThermoCtx
     # distinct low/high coeffs so the ifelse range switch is exercised
     m = NASA7((3.5,1.0e-3,0.0,0.0,0.0,-100.0,0.5),
              (3.5,2.0e-3,1.0e-6,0.0,0.0,-200.0,0.8), 200.0, 1000.0, 3500.0)
     T = rate_param(:T, 500.0, u"K")
-    cp = _cp_over_R(m, T, 1)
-    hh = _h_over_RT(m, T, 1)
+    tcx = ThermoCtx(T, nothing, nothing, Dict{Int,Any}())
+    cp = _cp_over_R(m, T, 1, tcx)
+    hh = _h_over_RT(m, T, 1, tcx)
     @test cp isa Num                       # builds a symbolic expression
     @test hh isa Num
     # both reference the per-species coeff params (range switch present)

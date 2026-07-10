@@ -4,7 +4,7 @@ using ModelingToolkit
 using ModelingToolkit: unknowns, getname
 using Catalyst
 using OrdinaryDiffEq
-import ChemMechSim: catalyst_native, catalyst_lowering, direct_mtk_lowering
+import ChemMechSim: catalyst_native, catalyst_lowering, direct_mtk_lowering, RateCtx
 
 @testset "lower_to_mtk: first-order A -> B" begin
     a = SpeciesData(id=1, name="A")
@@ -111,8 +111,9 @@ end
     cvar = Dict(1 => A, 2 => B)
     # Under units, k is a rate_param (default = stored A-factor); both paths
     # produce the same symbolic k·A. isequal: symbolic == returns a non-boolean Equation.
-    crate = catalyst_lowering(rxn, mech, cvar, nothing, 1)
-    drate = direct_mtk_lowering(rxn, mech, cvar, nothing, 1)
+    ctx = RateCtx(mech, cvar, nothing, 1, 1.0, nothing, nothing, Dict{Int,Any}())
+    crate = catalyst_lowering(rxn, mech, cvar, nothing, 1, ctx)
+    drate = direct_mtk_lowering(rxn, mech, cvar, nothing, 1, ctx)
     @test isequal(crate, drate)
     # The k parameter carries the stored default (2.0).
     kparam = ModelingToolkit.parameters(sys)[findfirst(p -> String(ModelingToolkit.getname(p)) == "k_1_A",

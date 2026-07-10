@@ -19,3 +19,11 @@ end
  incl. the third-body/[M] factor where applicable) and Arrhenius exponent `b`:
  [k] = conc^(1-order)·s⁻¹ ; the A-factor absorbs T^b -> [A] = [k] / K^b."
 _k_unit(order, b) = ChemUnits.conc^(1 - order) * u"s^-1" / (u"K"^b)
+
+# —— direct param-materialization helpers (reproduce current param naming verbatim) ——
+# Used by built-in symbolic_kf methods (Task 4) AND by materialize (Task 6). The naming
+# Symbol("k_", j, tag, "_A") matches the former _arrhenius_k_param("k_$j"*tag, ...) output:
+# tag="" → k_{j}_A, tag="_high" → k_{j}_high_A. θ/Troe-T names likewise.
+_aparam(ctx, tag, A, b)  = rate_param(Symbol("k_", ctx.j, tag, "_A"),     A,         _k_unit(ctx.order, b))
+_kparam(ctx, tag, Ea)    = rate_param(Symbol("k_", ctx.j, tag, "_theta"), Ea / R_GAS, u"K")
+_tvparam(ctx, tag, T)    = rate_param(Symbol("k_", ctx.j, "_troe", tag),  T,         u"K")
