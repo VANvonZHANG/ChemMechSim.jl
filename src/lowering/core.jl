@@ -19,7 +19,7 @@ end
 "True iff `config` is lowerable: concentration basis; energy ∈ {:isothermal,:adiabatic};
  constraint ∈ {:none,:constant_volume,:constant_pressure}; :adiabatic allows const-V or const-P,
  :isothermal allows any constraint; eos ∈ {:off,:ideal_gas}; :constant_pressure REQUIRES :ideal_gas
- (V is defined by the EOS). Phase 4b adds const-P (path A, pure ODE)."
+ (V is defined by the EOS). Const-P lowering stays a pure ODE (moles basis; V and c observed)."
 _lowerable(c::MechanismConfig) =
     c.state_basis === :concentration &&
     c.energy in (:isothermal, :adiabatic) &&

@@ -4,8 +4,6 @@
 #   - _energy_ode_constP : dT/dt = -V·Σⱼ rⱼ·Δh̄ⱼ / Σᵢ nᵢ·cpᵢ   (H conserved)
 # Both require NASA7 thermo on every species (spec §5.3.4 — clear error otherwise).
 
-# —— Constraint-layer assembly (Phase 4a: energy layer; EOS-as-DAE + const-P arrive in 4b) ——
-
 "Append energy/reactor constraint layers to the equation set (spec §5.4). Phase 4a: the energy
  layer (:adiabatic) adds the const-V energy ODE for T. `cvar`/`T`/`rates` are the shared species
  vars, the temperature symbol, and the per-reaction symbolic net rates from lower_to_mtk."
