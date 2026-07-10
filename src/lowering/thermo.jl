@@ -9,7 +9,7 @@
 
 "Net rate = forward − reverse for a reversible reaction (direct path). ExplicitReverse uses the
  general forward dispatch (_direct_rate) since its reverse is independent of the forward k_f.
- ThermoReverse needs the forward k_f (for k_r = k_f/K_c); `_direct_kf` provides the per-kinetics
+ ThermoReverse needs the forward k_f (for k_r = k_f/K_c); `symbolic_kf` provides the per-kinetics
  effective rate constant (elementary, ThirdBody, or Troe) so K_c-based reverse works for any
  forward kinetics type. Phase 5a T5fix removed the elementary-only guard that previously blocked
  ThirdBody/Troe under ThermoReverse."
@@ -20,7 +20,7 @@ function _net_rate(rx::ReactionData, mech, cvar, T, j, ctx)
         return fwd - _reverse_rate(policy, rx, mech, cvar, T, j, ctx)
     end
     if policy isa ThermoReverse
-        kf = _direct_kf(rx.kinetics, rx, mech, cvar, T, j, ctx)
+        kf = symbolic_kf(rx.kinetics, ctx)
         fwd = kf * _mass_action(rx.reactants, cvar)
         return fwd - _reverse_rate(policy, rx, mech, cvar, T, kf, ctx)
     end
@@ -42,7 +42,18 @@ function _reverse_rate(policy::ExplicitReverse, rx::ReactionData, mech, cvar, T,
         error("_reverse_rate(ExplicitReverse): non-Arrhenius reverse rate ($(typeof(policy.rate))) " *
               "deferred; use ElementaryArrhenius.")
     order = sum(values(rx.products))                       # reverse "reactants" = forward products
-    kr = _arrhenius_k_param(policy.rate, order, "k_$(j)_rev", T)   # _rev suffix avoids name clash
+    kin = policy.rate
+    b, Ea = kin.b, kin.Ea
+    prefix = "k_$(j)_rev"                                   # _rev suffix avoids name clash
+    A = rate_param(Symbol(prefix, "_A"), kin.A, _k_unit(order, b))
+    kr = if iszero(b) && iszero(Ea)
+        A                                                   # constant rate, no T dependence
+    elseif iszero(Ea)
+        A * T^b                                             # power-law k=A·T^b, no θ
+    else
+        θ = rate_param(Symbol(prefix, "_theta"), Ea / R_GAS, u"K")
+        _arrhenius_body(A, b, θ, T)                         # full: A·T^b·exp(-θ/T)
+    end
     return kr * _mass_action(rx.products, cvar)
 end
 
