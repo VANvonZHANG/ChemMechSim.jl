@@ -1,4 +1,5 @@
 using Test, ModelingToolkit
+using DynamicQuantities
 using ChemMechSim
 using ChemMechSim: afactor, ktemp, plain, paramspec, body, needs_T, rate_constant
 
@@ -47,4 +48,18 @@ ChemMechSim.needs_T(kin::MyArrhenius) = true
                    params=[Tparam => 1000.0], reltol=1e-9, abstol=1e-12)
     @test sol(1.0; idxs=Avar) < sol(0.0; idxs=Avar)
     @test sol(1.0; idxs=Bvar) > sol(0.0; idxs=Bvar)
+
+    # 4) symbolic_rate (design §5 protocol): default = symbolic_kf × mass-action(reactants).
+    #    Build a minimal RateCtx matching the lowering pipeline's construction.
+    t = ModelingToolkit.t
+    Avar_sym, Bvar_sym = ModelingToolkit.@variables A(t) B(t)
+    cvar_map = Dict(1 => Avar_sym, 2 => Bvar_sym)
+    Tp = ChemMechSim.rate_param(:T, 1000.0, u"K")
+    tcx = ChemMechSim.make_thermo_ctx(Tp)
+    ctx = ChemMechSim.RateCtx(mech, cvar_map, Tp, 1, sum(values(rxn.reactants)),
+                              tcx.R, tcx.P_std, tcx.coeff_cache)
+    kin2 = rxn.kinetics
+    expected = ChemMechSim.symbolic_kf(kin2, ctx) * ChemMechSim._mass_action(rxn.reactants, ctx.cvar)
+    @test isa(ChemMechSim.symbolic_rate(kin2, rxn, ctx), ModelingToolkit.Num)
+    @test isequal(ChemMechSim.symbolic_rate(kin2, rxn, ctx), expected)
 end

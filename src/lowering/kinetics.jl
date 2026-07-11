@@ -163,6 +163,12 @@ function symbolic_kf(kin::AbstractKinetics, ctx::RateCtx)
     return body(kin)(vals..., ctx.T)
 end
 
+"Default full forward rate = symbolic_kf × mass-action(reactants). Laws with extra
+ concentration-dependent factors (e.g. inhibition, [M]_eff beyond the rate constant)
+ override this with an explicit method. Default protocol entry (design §5)."
+symbolic_rate(kin::AbstractKinetics, rx::ReactionData, ctx::RateCtx) =
+    symbolic_kf(kin, ctx) * _mass_action(rx.reactants, ctx.cvar)
+
 "Effective third-body concentration [M]_eff = Σ_i α_i·[X_i] over all species (default α=1)."
 function _meff(mech::Mechanism, efficiencies::Dict{SpeciesID,Float64}, cvar)
     m = 0.0
