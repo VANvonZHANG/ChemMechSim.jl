@@ -142,10 +142,23 @@ function symbolic_kf(kin::LindemannFalloff, ctx::RateCtx)
     return kinf * (Pr / (1 + Pr))
 end
 
-"Generic fallback: a kinetics type without an explicit symbolic_kf method gets a clear error.
- Custom laws (Task 7) override via the paramspec+body protocol; built-in laws declare methods above."
-symbolic_kf(kin::AbstractKinetics, ctx::RateCtx) =
-    error("symbolic_kf: no method for $(typeof(kin)); if this is a custom law, declare paramspec+body (see Plan A T7).")
+# —— generic paramspec-driven symbolic_kf (the L2 default for custom / paramspec laws) ——
+# A kinetics law that declares paramspec + body (no explicit symbolic_kf) lowers via this:
+# materialize each (field, role, tag) into a unit-bearing param (or plain value), then call
+# body(vals..., ctx.T). Built-in laws override symbolic_kf per-type (Task 4) and bypass this.
+
+"Materialize one paramspec entry (role + value) into a symbolic param or plain value, per role."
+materialize(role::AFactor, ctx, tag, A) = _aparam(ctx, tag, A, role.b)   # b carried by AFactor for unit
+materialize(::KTemp,       ctx, tag, Ea) = _kparam(ctx, tag, Ea)
+materialize(::KValue,      ctx, tag, T)  = _tvparam(ctx, tag, T)
+materialize(::Plain,       ctx, _,   v)  = v                               # plain value, no param
+
+"Generic symbolic k_f for any law declaring paramspec + body. Driven entirely by the role table."
+function symbolic_kf(kin::AbstractKinetics, ctx::RateCtx)
+    spec = paramspec(kin)
+    vals = ntuple(i -> materialize(spec[i][2], ctx, spec[i][3], getfield(kin, spec[i][1])), length(spec))
+    return body(kin)(vals..., ctx.T)
+end
 
 "Effective third-body concentration [M]_eff = Σ_i α_i·[X_i] over all species (default α=1)."
 function _meff(mech::Mechanism, efficiencies::Dict{SpeciesID,Float64}, cvar)
