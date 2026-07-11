@@ -63,3 +63,54 @@ ChemMechSim.needs_T(kin::MyArrhenius) = true
     @test isa(ChemMechSim.symbolic_rate(kin2, rxn, ctx), ModelingToolkit.Num)
     @test isequal(ChemMechSim.symbolic_rate(kin2, rxn, ctx), expected)
 end
+
+# ---- Custom law that overrides symbolic_rate (inhibition factor) — proves the override
+# is reachable from _direct_rate dispatch, not silently ignored. Plan A review fix.
+struct _InhibitedTest <: AbstractKinetics
+    A::Float64; b::Float64; Ea::Float64; K_inh::Float64; inhibitor::Int
+end
+
+_inhibited_body(A, b, θ, T) = A * T^b * exp(-θ / T)
+
+ChemMechSim.paramspec(kin::_InhibitedTest) = (afactor(:A, "", kin.b), plain(:b), ktemp(:Ea, ""))
+ChemMechSim.body(kin::_InhibitedTest) = _inhibited_body
+ChemMechSim.needs_T(kin::_InhibitedTest) = true
+
+# Override symbolic_rate: default kf×mass-action multiplied by 1/(1 + K_inh·[I])
+function ChemMechSim.symbolic_rate(kin::_InhibitedTest, rx::ReactionData, ctx::ChemMechSim.RateCtx)
+    default = ChemMechSim.symbolic_kf(kin, ctx) * ChemMechSim._mass_action(rx.reactants, ctx.cvar)
+    return default / (1 + kin.K_inh * ctx.cvar[kin.inhibitor])
+end
+
+@testset "Plan A T7 fix: symbolic_rate override is honored" begin
+    # Build a 2-species mechanism: A -> B with species 2 (B) acting as the inhibitor.
+    spA = SpeciesData(id=1, name="A"); spB = SpeciesData(id=2, name="B")
+    kin = _InhibitedTest(1.0, 0.5, 5000.0, 3.0, 2)  # K_inh=3, inhibitor=species 2
+    rxn = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                       kinetics=kin, reverse_policy=Irreversible())
+    mech = Mechanism(species=[spA, spB], reactions=[rxn])
+
+    # Build a minimal RateCtx matching the lowering pipeline's construction.
+    t = ModelingToolkit.t
+    Avar_sym, Bvar_sym = ModelingToolkit.@variables A(t) B(t)
+    cvar_map = Dict(1 => Avar_sym, 2 => Bvar_sym)
+    Tp = ChemMechSim.rate_param(:T, 1000.0, u"K")
+    tcx = ChemMechSim.make_thermo_ctx(Tp)
+    ctx = ChemMechSim.RateCtx(mech, cvar_map, Tp, 1, sum(values(rxn.reactants)),
+                              tcx.R, tcx.P_std, tcx.coeff_cache)
+
+    # 1) symbolic_rate override DIFFERS from the plain default (inhibition factor present).
+    plain_default = ChemMechSim.symbolic_kf(kin, ctx) * ChemMechSim._mass_action(rxn.reactants, ctx.cvar)
+    overridden = ChemMechSim.symbolic_rate(kin, rxn, ctx)
+    @test !isequal(overridden, plain_default)
+
+    # 2) The _direct_rate fallback now routes through symbolic_rate (not inline kf×ma).
+    #    So the rate produced by the dispatch fallback equals the overridden symbolic_rate.
+    fallback_rate = ChemMechSim._direct_rate(kin, rxn, mech, cvar_map, Tp, 1, ctx)
+    @test isequal(fallback_rate, overridden)
+
+    # 3) The overridden rate contains the inhibitor concentration symbol (B), proving the
+    #    inhibition factor is actually present in the expression.
+    overridden_str = string(overridden)
+    @test occursin("B", overridden_str)
+end

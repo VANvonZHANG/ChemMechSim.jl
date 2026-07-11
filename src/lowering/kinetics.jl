@@ -77,12 +77,13 @@ function _direct_rate(kin::LindemannFalloff, rx, mech, cvar, T, j, ctx::RateCtx)
     return symbolic_kf(kin, ctx) * _mass_action(rx.reactants, cvar)
 end
 
-# Fallback for custom kinetics types: route through the generic symbolic_kf (Task 6 L2
-# materializer), which handles any law declaring paramspec + body. Built-in types
-# (ElementaryArrhenius, ThirdBodyArrhenius, TroeFalloff, LindemannFalloff) have explicit
-# _direct_rate methods above and never reach this fallback.
+# Fallback for custom kinetics types: route through symbolic_rate (design §5 protocol),
+# which defaults to symbolic_kf × mass-action but can be overridden by laws with extra
+# concentration-dependent factors (e.g. inhibition). Built-in types (ElementaryArrhenius,
+# ThirdBodyArrhenius, TroeFalloff, LindemannFalloff) have explicit _direct_rate methods
+# above and never reach this fallback.
 _direct_rate(kin::AbstractKinetics, rx, mech, cvar, T, j, ctx::RateCtx) =
-    symbolic_kf(kin, ctx) * _mass_action(rx.reactants, cvar)
+    symbolic_rate(rx.kinetics, rx, ctx)
 
 # —— Symbolic k_f(T) via data-layer bodies (Task 4: eliminate inline formulas) ——————————
 # Each built-in symbolic_kf method materializes unit-bearing params via _aparam/_kparam/
