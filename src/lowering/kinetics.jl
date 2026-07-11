@@ -77,9 +77,12 @@ function _direct_rate(kin::LindemannFalloff, rx, mech, cvar, T, j, ctx::RateCtx)
     return symbolic_kf(kin, ctx) * _mass_action(rx.reactants, cvar)
 end
 
-# Fallback for kinetics types not yet unit-aware (third-body/Troe/etc. arrive in Tasks 2-4).
+# Fallback for custom kinetics types: route through the generic symbolic_kf (Task 6 L2
+# materializer), which handles any law declaring paramspec + body. Built-in types
+# (ElementaryArrhenius, ThirdBodyArrhenius, TroeFalloff, LindemannFalloff) have explicit
+# _direct_rate methods above and never reach this fallback.
 _direct_rate(kin::AbstractKinetics, rx, mech, cvar, T, j, ctx::RateCtx) =
-    error("_direct_rate: unit-aware lowering for $(typeof(kin)) arrives in a later task.")
+    symbolic_kf(kin, ctx) * _mass_action(rx.reactants, cvar)
 
 # —— Symbolic k_f(T) via data-layer bodies (Task 4: eliminate inline formulas) ——————————
 # Each built-in symbolic_kf method materializes unit-bearing params via _aparam/_kparam/

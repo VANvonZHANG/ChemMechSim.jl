@@ -55,6 +55,8 @@ export lower_to_mtk, lower_reaction, rate_param, import_from_catalyst,
        ChemPhaseSystem, BatchReactor, convenience_config,
        validate, ValidationReport,
        simulate, build_problem, extract_system, generate_function, generate_jacobian,
-       load_mechanism
+       load_mechanism,
+       symbolic_kf, symbolic_rate, needs_T, paramspec, body, rate_constant,
+       ParamRole, AFactor, KTemp, KValue, Plain, afactor, ktemp, kvalue, plain
 
 end # module
