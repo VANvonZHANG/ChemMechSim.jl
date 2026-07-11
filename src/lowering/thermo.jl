@@ -1,7 +1,7 @@
 # Thermodynamic lowering (§3.4 #4, §4.2, Phase 4a): NASA7 symbolic cp/h/g for a unit-bearing
 # temperature, the equilibrium constant K_c(T) = exp(-Δg°/RT)·(P°/RT)^Δν, and the reverse-rate
 # policy machinery (_net_rate + _reverse_rate for Irreversible / ThermoReverse / ExplicitReverse).
-# _direct_kf (kinetics.jl) supplies the forward rate constant so ThermoReverse can form kr=kf/Kc.
+# symbolic_kf (kinetics.jl) supplies the forward rate constant so ThermoReverse can form kr=kf/Kc.
 # The per-species NASA7 coefficient set is cached in ctx.coeff_cache (state.jl RateCtx/ThermoCtx)
 # so cp/R, h/RT, g/RT share one set of parameters per lower_to_mtk call.
 
@@ -87,14 +87,16 @@ end
 _g_over_RT(m::NASA7, T::Real, sid, ctx) = g_over_RT(m, T)
 
 "Dimensionless g/RT from NASA7 thermo for a symbolic/unit-bearing T (the K-param in lowering).
- Refactored Phase 4a to share `_nasa7_coeffs_sym` with cp/R and h/RT. The bare `ifelse`
- LOWERS to a correct runtime `if (T <= Tmid) … else …` branch and the dimension check passes
- (verified 2026-06-29: distinct low/high coeffs give K_c=2 below Tmid, K_c=5 above, exact match)."
+ Materializes unit-bearing coefficients (cached in ctx.coeff_cache via _nasa7_coeffs_sym), then
+ calls the data-layer _nasa7_h and _nasa7_s bodies (single polynomial definition; T2 dedup).
+ The s/R log term needs a dimensionless argument for MTK's dim check, so log(T) from _nasa7_s
+ is replaced with log(T/T_ref) where T_ref = 1 K (numerically identical; verified 2026-06-29)."
 function _g_over_RT(m::NASA7, T::Num, sid, ctx)
-    (a1, a2, a3, a4, a5, a6, a7), _, T_ref = _nasa7_coeffs_sym(m, T, sid, ctx)
-    h_RT = a1 + a2 * T / 2 + a3 * T^2 / 3 + a4 * T^3 / 4 + a5 * T^4 / 5 + a6 / T
-    s_R  = a1 * log(T / T_ref) + a2 * T + a3 * T^2 / 2 + a4 * T^3 / 3 + a5 * T^4 / 4 + a7
-    return h_RT - s_R
+    coeffs, _, T_ref = _nasa7_coeffs_sym(m, T, sid, ctx)
+    a1 = coeffs[1]
+    # h/RT via data body; s/R via data body, fixing the log argument for the dim check:
+    #   _nasa7_s uses a1*log(T); replace with a1*log(T/T_ref) so log is dimensionless.
+    return _nasa7_h(coeffs, T) - (_nasa7_s(coeffs, T) - a1*log(T) + a1*log(T / T_ref))
 end
 _g_over_RT(m::ThermoModel, T, sid, ctx) = error("_g_over_RT: thermo model $(typeof(m)) unsupported; only NASA7.")
 
@@ -122,16 +124,18 @@ function _nasa7_coeffs_sym(m::NASA7, T, sid, ctx)
     return c
 end
 
-"Symbolic dimensionless cp/R for a unit-bearing T (energy equation, Phase 4a)."
+"Symbolic dimensionless cp/R for a unit-bearing T (energy equation, Phase 4a).
+ Calls the data-layer _nasa7_cp body (single polynomial definition; T2 dedup)."
 function _cp_over_R(m::NASA7, T::Num, sid, ctx)
-    (a1, a2, a3, a4, a5, a6, a7), _, _ = _nasa7_coeffs_sym(m, T, sid, ctx)
-    return a1 + a2 * T + a3 * T^2 + a4 * T^3 + a5 * T^4
+    coeffs, _, _ = _nasa7_coeffs_sym(m, T, sid, ctx)
+    return _nasa7_cp(coeffs, T)
 end
 
-"Symbolic dimensionless h/RT for a unit-bearing T (energy equation, Phase 4a)."
+"Symbolic dimensionless h/RT for a unit-bearing T (energy equation, Phase 4a).
+ Calls the data-layer _nasa7_h body (single polynomial definition; T2 dedup)."
 function _h_over_RT(m::NASA7, T::Num, sid, ctx)
-    (a1, a2, a3, a4, a5, a6, a7), _, _ = _nasa7_coeffs_sym(m, T, sid, ctx)
-    return a1 + a2 * T / 2 + a3 * T^2 / 3 + a4 * T^3 / 4 + a5 * T^4 / 5 + a6 / T
+    coeffs, _, _ = _nasa7_coeffs_sym(m, T, sid, ctx)
+    return _nasa7_h(coeffs, T)
 end
 
 "Species-keyed unit-bearing parameter for NASA7 coefficients (rate_param wrapper)."
