@@ -173,3 +173,27 @@ needs_T(::AbstractKinetics) = true
 
 "Default: a kinetics law is pressure-independent. PLOG (and future P-dependent laws) override."
 needs_P(::AbstractKinetics) = false
+
+# —— PLOG symbolic lowering (MTK-free composition) —————————————————————
+# A grid law needing a hand-written symbolic_kf (not the paramspec materializer).
+# MTK-free: calls module-scope _aparam/_kparam (lowering/units.jl, resolved at call time)
+# + pure arithmetic; the Num values flow through via Base dispatch. No `using MTK`.
+# Colocated with PlogRate (the user's "PLOG is a special reaction" decision; spec §2/§3).
+
+"Symbolic PLOG forward rate constant k(T,P). Materializes 2N params (A_i, θ_i per point;
+ P_i and b_i are plain Float64), builds each k_i(T) via _arrhenius_body, then log-log
+ interpolates via _plog_interpolate using ctx.P (pressure symbol). Requires ctx.P ≠ nothing."
+function symbolic_kf(kin::PlogRate, ctx)
+    ctx.P === nothing && error("symbolic_kf(PlogRate): pressure-dependent rate needs ctx.P " *
+                               "(a config with eos=:ideal_gas); got nothing.")
+    n = length(kin.points)
+    ks = ntuple(i -> let p = kin.points[i]
+        _arrhenius_body(_aparam(ctx, "_p$i", p.A, p.b), p.b, _kparam(ctx, "_p$i", p.Ea), ctx.T)
+    end, n)
+    log_Pi = ntuple(i -> log(kin.points[i].P / P_STD), n)   # plain Float64
+    log_P  = log(ctx.P / ctx.P_std)                          # symbolic Num (dimensionless ratio)
+    return _plog_interpolate(ks, log_P, log_Pi)
+end
+
+"PLOG is pressure-dependent."
+needs_P(kin::PlogRate) = true

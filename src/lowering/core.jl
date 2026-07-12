@@ -74,7 +74,7 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
     # Constraint-layer assembly (energy layer adds the const-V dT/dt under :adiabatic; spec §5.4).
     eqs = append_constraint_layers!(eqs, mech, config, cvar, Tparam, rates; tcx=tcx)
     if config.eos === :ideal_gas
-        return _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic, tcx, Pvar)
+        return _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic, tcx, Pvar, _needs_P(mech))
     end
     @named raw = System(eqs, t)          # auto-discovers states [c₁..cₙ, T] and RHS params
     return mtkcompile(raw)
@@ -82,11 +82,23 @@ end
 
 "Build the system with EOS observed P ~ (Σc)·R·T. Under :adiabatic T is a STATE (included in
  `states`); under :isothermal T is a parameter retained via the observed-param fix (Phase 3).
- R appears in the energy-equation RHS under :adiabatic so it is retained automatically."
-function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool, tcx, Pvar)
+ R appears in the energy-equation RHS under :adiabatic so it is retained automatically.
+ When P appears in the rate RHS (PLOG), the P equation is an algebraic eq in the main system
+ (Pvar in states); MTK tearing eliminates it → observed. Otherwise P is purely observed."
+function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool, tcx, Pvar, needs_P_flag::Bool)
     Rparam = tcx.R                                   # shared with K_c / energy eq (from tcx)
-    obs = [Pvar ~ sum(cvars) * Rparam * Tparam]      # Pvar created by caller (lower_to_mtk)
+    P_eq = Pvar ~ sum(cvars) * Rparam * Tparam       # Pvar created by caller (lower_to_mtk)
     states = is_adiabatic ? [cvars; Tparam] : cvars   # T is a state under :adiabatic
+    obs = Equation[]
+    if needs_P_flag
+        # P-dependent kinetics (PLOG): P appears in the rate RHS, so it must be a state
+        # with an algebraic eq. MTK tearing eliminates P → observed (same end result).
+        push!(eqs, P_eq)
+        push!(states, Pvar)
+    else
+        # No P-dependent kinetics: P is purely observed (never referenced in RHS eqs).
+        push!(obs, P_eq)
+    end
     @named _tmp = System(eqs, t)                   # auto-discover RHS params
     rhsparams = ModelingToolkit.parameters(_tmp)
     rhsnames = Set(ModelingToolkit.getname(p) for p in rhsparams)

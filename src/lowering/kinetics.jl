@@ -161,7 +161,7 @@ materialize(::KValue,      ctx, tag, T)  = _tvparam(ctx, tag, T)
 materialize(::Plain,       ctx, _,   v)  = v                               # plain value, no param
 
 "Generic symbolic k_f for any law declaring paramspec + body. Driven entirely by the role table."
-function symbolic_kf(kin::AbstractKinetics, ctx::RateCtx)
+function symbolic_kf(kin::AbstractKinetics, ctx)
     spec = paramspec(kin)
     vals = ntuple(i -> materialize(spec[i][2], ctx, spec[i][3], getfield(kin, spec[i][1])), length(spec))
     return body(kin)(vals..., ctx.T)
