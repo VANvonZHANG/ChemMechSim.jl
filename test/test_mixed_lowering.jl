@@ -23,8 +23,8 @@ import ChemMechSim: catalyst_lowering, direct_mtk_lowering, RateCtx
     # Prove the two lowering PATH FUNCTIONS agree on shared @species and unify into
     # one ODESystem: rxA's rate via the Catalyst path, rxB's via the direct path.
     # Under units (§5.6) k is a unit-bearing rate_param (default = stored A-factor).
-    rate_cat = catalyst_lowering(rxA, mech, cvar, nothing, 1, RateCtx(mech, cvar, nothing, 1, 1.0, nothing, nothing, Dict{Int,Any}()))    # k_1_A * A    (Catalyst path)
-    rate_dir = direct_mtk_lowering(rxB, mech, cvar, nothing, 2, RateCtx(mech, cvar, nothing, 2, 2.0, nothing, nothing, Dict{Int,Any}()))  # k_2_A * A*M  (direct path)
+    rate_cat = catalyst_lowering(rxA, mech, cvar, nothing, 1, RateCtx(mech, cvar, nothing, 1, 1.0, nothing, nothing, Dict{Int,Any}(), nothing))    # k_1_A * A    (Catalyst path)
+    rate_dir = direct_mtk_lowering(rxB, mech, cvar, nothing, 2, RateCtx(mech, cvar, nothing, 2, 2.0, nothing, nothing, Dict{Int,Any}(), nothing))  # k_2_A * A*M  (direct path)
     t = ModelingToolkit.t; D = ModelingToolkit.D
     eqs = [D(A) ~ -rate_cat - rate_dir,
            D(B) ~  rate_cat + rate_dir,
@@ -60,8 +60,8 @@ end
     cvar = Dict(1 => A, 2 => B)
     # Both paths build the same T-dependent symbolic rate k(T)·A on the shared @species.
     # Under units, k = A_param · T^b · exp(-θ/T) where θ = Ea/R (dimensionless exponent).
-    rc = catalyst_lowering(rxn, mech, cvar, T, 1, RateCtx(mech, cvar, T, 1, 1.0, nothing, nothing, Dict{Int,Any}()))
-    rd = direct_mtk_lowering(rxn, mech, cvar, T, 1, RateCtx(mech, cvar, T, 1, 1.0, nothing, nothing, Dict{Int,Any}()))
+    rc = catalyst_lowering(rxn, mech, cvar, T, 1, RateCtx(mech, cvar, T, 1, 1.0, nothing, nothing, Dict{Int,Any}(), nothing))
+    rd = direct_mtk_lowering(rxn, mech, cvar, T, 1, RateCtx(mech, cvar, T, 1, 1.0, nothing, nothing, Dict{Int,Any}(), nothing))
     @test isequal(rc, rd)
     # Structural check: the T-dependent rate is k_A · T^b · exp(-θ/T) · A (§3.4 #2).
     # Under units, k = A_param · T^b · exp(-θ/T) where θ = Ea/R (dimensionless exponent).

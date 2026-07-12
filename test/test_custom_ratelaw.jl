@@ -57,7 +57,7 @@ ChemMechSim.needs_T(kin::MyArrhenius) = true
     Tp = ChemMechSim.rate_param(:T, 1000.0, u"K")
     tcx = ChemMechSim.make_thermo_ctx(Tp)
     ctx = ChemMechSim.RateCtx(mech, cvar_map, Tp, 1, sum(values(rxn.reactants)),
-                              tcx.R, tcx.P_std, tcx.coeff_cache)
+                              tcx.R, tcx.P_std, tcx.coeff_cache, nothing)
     kin2 = rxn.kinetics
     expected = ChemMechSim.symbolic_kf(kin2, ctx) * ChemMechSim._mass_action(rxn.reactants, ctx.cvar)
     @test isa(ChemMechSim.symbolic_rate(kin2, rxn, ctx), ModelingToolkit.Num)
@@ -97,7 +97,7 @@ end
     Tp = ChemMechSim.rate_param(:T, 1000.0, u"K")
     tcx = ChemMechSim.make_thermo_ctx(Tp)
     ctx = ChemMechSim.RateCtx(mech, cvar_map, Tp, 1, sum(values(rxn.reactants)),
-                              tcx.R, tcx.P_std, tcx.coeff_cache)
+                              tcx.R, tcx.P_std, tcx.coeff_cache, nothing)
 
     # 1) symbolic_rate override DIFFERS from the plain default (inhibition factor present).
     plain_default = ChemMechSim.symbolic_kf(kin, ctx) * ChemMechSim._mass_action(rxn.reactants, ctx.cvar)

@@ -170,3 +170,6 @@ end
 # Generic needs_T fallback: a law without an explicit needs_T method is assumed T-dependent
 # (safe default; built-in laws and custom laws declare the precise method).
 needs_T(::AbstractKinetics) = true
+
+"Default: a kinetics law is pressure-independent. PLOG (and future P-dependent laws) override."
+needs_P(::AbstractKinetics) = false

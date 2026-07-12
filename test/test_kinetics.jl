@@ -61,7 +61,7 @@ end
     kin = _T6Custom(1e9, 0.5, 5000.0)
     ctx = RateCtx(ChemMechSim.Mechanism(ChemMechSim.SpeciesData[], ChemMechSim.ReactionData[],
                                         ChemMechSim.ThermoDatabase(), String[]),
-                  Dict{Int,Any}(), T_test, 1, 1.0, nothing, nothing, Dict{Int,Any}())
+                  Dict{Int,Any}(), T_test, 1, 1.0, nothing, nothing, Dict{Int,Any}(), nothing)
     kf_expr = symbolic_kf(kin, ctx)            # should dispatch to the generic materializer
     @test kf_expr isa Num
     # Structural check: the materialized params (k_1_A, k_1_theta) and T appear in the expression

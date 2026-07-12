@@ -19,6 +19,9 @@ _needs_T(mech::Mechanism) =
 _reverse_needs_T(::ThermoReverse) = true
 _reverse_needs_T(::ReverseRatePolicy) = false
 
+"True iff any reaction in `mech` needs pressure (P-needing kinetics law, e.g. PLOG)."
+_needs_P(mech::Mechanism) = any(needs_P(rx.kinetics) for rx in mech.reactions)
+
 "Mass-action product ∏ c[sid]^ν over a stoichiometry map."
 function _mass_action(stoich::Dict{SpeciesID,Float64}, cvar)
     ma = 1.0

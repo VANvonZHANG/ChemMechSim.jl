@@ -57,16 +57,24 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
         rate_param(:T, 300.0, u"K")                    # temperature parameter (isothermal)
     end
     tcx = make_thermo_ctx(Tparam)
+    # P symbol exists iff eos=:ideal_gas (observed P under const-V; Pparam under const-P).
+    # Created here (not inside _lower_with_eos) so P-needing rate laws (PLOG) can reach it via ctx.
+    Pvar = config.eos === :ideal_gas ? _attach_unit(only(@variables P(t)), ChemUnits.press) : nothing
+    # Early validation: pressure-dependent reactions require an EOS-provided P.
+    _needs_P(mech) && Pvar === nothing &&
+        error("lower_to_mtk: mechanism has pressure-dependent (e.g. PLOG) reactions but the config " *
+              "provides no pressure. Use a config with eos=:ideal_gas: convenience_config(:fixedT), " *
+              ":adiabatic_constV, or :adiabatic_constP. Got eos=$(config.eos).")
     rates = [lower_reaction(rx, mech, cvar, Tparam, config, j,
                 RateCtx(mech, cvar, Tparam, j,
-                        sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache))
+                        sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache, Pvar))
              for (j, rx) in enumerate(mech.reactions)]
     eqs = [D(cvars[i]) ~ _species_rhs(mech.species[i].id, mech, rates)
            for i in eachindex(mech.species)]
     # Constraint-layer assembly (energy layer adds the const-V dT/dt under :adiabatic; spec §5.4).
     eqs = append_constraint_layers!(eqs, mech, config, cvar, Tparam, rates; tcx=tcx)
     if config.eos === :ideal_gas
-        return _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic, tcx)
+        return _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic, tcx, Pvar)
     end
     @named raw = System(eqs, t)          # auto-discovers states [c₁..cₙ, T] and RHS params
     return mtkcompile(raw)
@@ -75,10 +83,9 @@ end
 "Build the system with EOS observed P ~ (Σc)·R·T. Under :adiabatic T is a STATE (included in
  `states`); under :isothermal T is a parameter retained via the observed-param fix (Phase 3).
  R appears in the energy-equation RHS under :adiabatic so it is retained automatically."
-function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool, tcx)
+function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool, tcx, Pvar)
     Rparam = tcx.R                                   # shared with K_c / energy eq (from tcx)
-    Pvar = _attach_unit(only(@variables P(t)), ChemUnits.press)
-    obs = [Pvar ~ sum(cvars) * Rparam * Tparam]
+    obs = [Pvar ~ sum(cvars) * Rparam * Tparam]      # Pvar created by caller (lower_to_mtk)
     states = is_adiabatic ? [cvars; Tparam] : cvars   # T is a state under :adiabatic
     @named _tmp = System(eqs, t)                   # auto-discover RHS params
     rhsparams = ModelingToolkit.parameters(_tmp)
@@ -108,7 +115,7 @@ function _lower_constP(mech::Mechanism, config::MechanismConfig)
     Vvar   = _attach_unit(only(@variables V(t)), ChemUnits.vol)
     rates  = [lower_reaction(rx, mech, cvar, Tsym, config, j,
                  RateCtx(mech, cvar, Tsym, j,
-                         sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache))
+                         sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache, Pparam))
               for (j, rx) in enumerate(mech.reactions)]
     eqs = Equation[D(nvars[i]) ~ Vvar * _species_rhs(mech.species[i].id, mech, rates)
               for i in eachindex(mech.species)]
