@@ -201,7 +201,7 @@ function _arrhenius_from_rc(rc, ctx::_UnitCtx, order::Real)
 end
 
 "Parse one reaction dict into ReactionData. Returns nothing (skipped + warning) for
- unsupported types (PLOG/Chebyshev/etc., Phase 6)."
+ unsupported types (Chebyshev/etc.)."
 function _parse_reaction(rxn_dict, name_to_id::Dict{String,SpeciesID}, ctx::_UnitCtx)
     eq = String(rxn_dict["equation"])
     parsed = _parse_equation(eq)
@@ -251,7 +251,7 @@ function _parse_reaction(rxn_dict, name_to_id::Dict{String,SpeciesID}, ctx::_Uni
             error("load_mechanism: PLOG reaction has duplicate pressure points in \"$eq\".")
         kin = PlogRate(pts)
     else
-        @warn "load_mechanism: skipping $rtype reaction (Phase 6): $eq"
+        @warn "load_mechanism: skipping unsupported $rtype reaction: $eq"
         return nothing
     end
 
@@ -266,9 +266,9 @@ end
 # —— Entry point ———————————————————————————————————————————————————
 
 "Load a Cantera YAML mechanism file into a Mechanism (spec §5.1, Phase 5a).
- Covers: elementary / three-body / falloff(Troe/Lindemann). PLOG/Chebyshev/etc.
- are skipped with a warning (Phase 6). Selects the first ideal-gas phase (or the
- named one via `phase`)."
+ Covers: elementary / three-body / falloff(Troe/Lindemann) / PLOG
+ (pressure-dependent-Arrhenius). Chebyshev/etc. are skipped with a warning.
+ Selects the first ideal-gas phase (or the named one via `phase`)."
 function load_mechanism(path::AbstractString; phase::Union{Nothing,String}=nothing)::Mechanism
     dict = YAML.load_file(path)
     ctx = _parse_units(get(dict, "units", nothing))

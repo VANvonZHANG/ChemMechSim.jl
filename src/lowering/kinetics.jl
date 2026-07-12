@@ -33,7 +33,7 @@ end
 
 "Whether a reaction lowers via the Catalyst mass-action backend (spec §3.3/§5.4).
  True for plain elementary Arrhenius (mass-action); false for rate types Catalyst
- does not represent natively (third-body/falloff/PLOG/Chebyshev arrive in 2.5b)."
+ does not represent natively (third-body/falloff/PLOG/Chebyshev/etc.)."
 catalyst_native(rx::ReactionData, config::MechanismConfig) =
     rx.kinetics isa ElementaryArrhenius
 
