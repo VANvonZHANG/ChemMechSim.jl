@@ -7,7 +7,8 @@ using ..ChemMechSim: SpeciesData, SpeciesID, ReactionData, ReactionMeta,
                      ElementaryArrhenius, ThirdBodyArrhenius,
                      TroeFalloff, LindemannFalloff, TroeParams,
                      Irreversible, ThermoReverse,
-                     NASA7, ThermoDatabase, Mechanism, molecular_weight
+                     NASA7, ThermoDatabase, Mechanism, molecular_weight,
+                     PlogPoint, PlogRate
 
 # —— Equation string parser ———————————————————————————————————
 
@@ -89,6 +90,20 @@ _a_factor(ctx::_UnitCtx, order::Real) = (1.0 / ctx.length_m)^(3 * (1 - order))
 
 "Convert a Cantera A-factor value to canonical m-mol-s units given reaction order."
 _convert_A(A::Real, ctx::_UnitCtx, order::Real) = A * _a_factor(ctx, order)
+
+"Parse a Cantera pressure quantity (e.g. \"0.001 atm\", \"986.9 atm\", or a bare number)
+ to Pa. atm ×101325, bar ×1e5, Pa ×1. Default Pa if no unit suffix."
+function _parse_pressure(p, ::_UnitCtx)
+    p isa Number && return Float64(p)                    # bare number → assume Pa
+    s = strip(string(p))
+    m = match(r"^\s*([0-9.]+(?:[eE][+-]?[0-9]+)?)\s*(atm|bar|Pa)?\s*$", s)
+    m === nothing && error("_parse_pressure: cannot parse \"$s\"")
+    val = parse(Float64, m.captures[1])
+    unit = m.captures[2]
+    return unit == "atm" ? val * 101325.0 :
+           unit == "bar" ? val * 1.0e5 :
+           val                                           # Pa (or unspecified → Pa)
+end
 
 # —— Phase selection ——————————————————————————————————————————————
 
@@ -203,6 +218,22 @@ function _parse_reaction(rxn_dict, name_to_id::Dict{String,SpeciesID}, ctx::_Uni
         else
             kin = LindemannFalloff(low_rate, high_rate, eff)
         end
+    elseif rtype == "pressure-dependent-Arrhenius"
+        order = sum(values(reactants))
+        pts = PlogPoint[]
+        for rc in rxn_dict["rate-constants"]
+            P_Pa = _parse_pressure(rc["P"], ctx)
+            A    = _convert_A(Float64(rc["A"]), ctx, order)
+            b    = Float64(rc["b"])
+            Ea   = Float64(rc["Ea"]) * ctx.ea_J_per_mol
+            push!(pts, PlogPoint(P_Pa, A, b, Ea))
+        end
+        sort!(pts, by = p -> p.P)                        # defensive: ensure ascending
+        length(pts) >= 2 ||
+            error("load_mechanism: PLOG reaction needs ≥2 pressure points; got $(length(pts)) in \"$eq\".")
+        allunique(p.P for p in pts) ||
+            error("load_mechanism: PLOG reaction has duplicate pressure points in \"$eq\".")
+        kin = PlogRate(pts)
     else
         @warn "load_mechanism: skipping $rtype reaction (Phase 6): $eq"
         return nothing

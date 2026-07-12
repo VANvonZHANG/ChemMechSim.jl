@@ -81,7 +81,7 @@ end
 # —— Phase 5a T4: load_mechanism + per-type characterization (h2o2.yaml) ——
 
 using ChemMechSim: ElementaryArrhenius, ThirdBodyArrhenius, TroeFalloff, TroeParams,
-                   ThermoReverse, Irreversible, load_mechanism
+                   ThermoReverse, Irreversible, load_mechanism, PlogRate
 
 const _H2O2_YAML = joinpath(@__DIR__, "data", "h2o2.yaml")
 
@@ -159,4 +159,23 @@ end
     # count duplicate reactions (24-29 are duplicates in h2o2.yaml)
     n_dup = count(r -> r.meta.duplicate, mech.reactions)
     @test n_dup == 6
+end
+
+@testset "Phase 6 T4: PLOG YAML parser" begin
+    mech = load_mechanism(joinpath(@__DIR__, "data", "plog_minimal.yaml"))
+    @test length(mech.reactions) == 1
+    kin = mech.reactions[1].kinetics
+    @test kin isa PlogRate
+    @test length(kin.points) == 3
+    # P converted atm → Pa, sorted ascending
+    @test issorted([p.P for p in kin.points])
+    @test kin.points[1].P ≈ 0.1 * 101325.0
+    @test kin.points[3].P ≈ 10.0 * 101325.0
+    # A converted cm→m (order 1 → factor (1/0.01)^(3·0) = 1, so A unchanged here); Ea cal→J
+    @test kin.points[1].A ≈ 1.2e15
+    @test kin.points[1].Ea ≈ 0.0
+    # gri30 (no PLOG) still loads unchanged
+    gri = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    @test length(gri.reactions) > 0
+    @test !any(r -> r.kinetics isa PlogRate, gri.reactions)
 end
