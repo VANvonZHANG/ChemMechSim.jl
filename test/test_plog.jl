@@ -30,3 +30,17 @@ using ChemMechSim: PlogPoint, PlogRate, plog_rate, symbolic_kf, RateCtx, needs_P
     # Simplest: the lowered system's RHS, evaluated at a fixed (T,P,c), tracks plog_rate.
     # (Covered structurally by the param-name checks above; deep numeric check is T5.)
 end
+
+@testset "Phase 6 T5: PLOG rate vs Cantera" begin
+    using DelimitedFiles
+    mech = load_mechanism(joinpath(@__DIR__, "data", "plog_minimal.yaml"))
+    kin = mech.reactions[1].kinetics
+    data = readdlm(joinpath(@__DIR__, "data", "plog_ref_rates.csv"), ',')[2:end, :]  # skip header; T_K,P_Pa,k_fwd
+    maxrel = 0.0
+    for i in 1:size(data, 1)
+        k_cms = plog_rate(kin::PlogRate, data[i, 1], data[i, 2])
+        k_can = data[i, 3]
+        maxrel = max(maxrel, abs(k_cms - k_can) / max(abs(k_can), 1e-30))
+    end
+    @test maxrel < 1e-6                                   # PLOG math must match Cantera
+end

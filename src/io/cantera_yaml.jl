@@ -20,7 +20,9 @@ function _parse_terms(s::AbstractString)
         isempty(term) && continue
         # optional leading coefficient (int/float) then species name (letter-led).
         # Parens allowed for labelled/excited states (e.g. GRI30's CH2(S) singlet methylene).
-        m = match(r"^(\d+\.?\d*|\.\d+)?\s*([A-Za-z][A-Za-z0-9()]*)$", term)
+        # Hyphens, asterisks, #, commas allowed for Aramco/FFCM2 isomer labels
+        # (e.g. C2H4O1-2, CH*, C4H5-2, 1,3-C3H6-style — note no species name starts with a digit).
+        m = match(r"^(\d+\.?\d*|\.\d+)?\s*([A-Za-z][A-Za-z0-9()\-*,#]*)$", term)
         m === nothing && error("_parse_terms: cannot parse term \"$term\"")
         coef = isnothing(m.captures[1]) ? 1.0 : parse(Float64, m.captures[1])
         name = m.captures[2]
@@ -120,7 +122,11 @@ end
 
 # —— Species / thermo parsing ——————————————————————————————————————
 
-"Parse a Cantera thermo block (NASA7 only) into a ThermoModel."
+"Parse a Cantera thermo block (NASA7 only) into a ThermoModel.
+ Handles both the canonical 2-block form (3 temperature-ranges, 2 data rows) and
+ the single-block form (2 temperature-ranges, 1 data row — e.g. noble gases in
+ AramcoMech3.0). For the single-block form the same coefficients are used for both
+ low and high ranges (the midpoint is taken as the upper bound)."
 function _parse_thermo(thermo_dict)
     model = thermo_dict["model"]
     model == "NASA7" ||
@@ -128,8 +134,15 @@ function _parse_thermo(thermo_dict)
     ranges = thermo_dict["temperature-ranges"]
     data   = thermo_dict["data"]
     low  = NTuple{7,Float64}(Float64(x) for x in data[1])
-    high = NTuple{7,Float64}(Float64(x) for x in data[2])
-    return NASA7(low, high, Float64(ranges[1]), Float64(ranges[2]), Float64(ranges[3]))
+    if length(data) >= 2
+        # canonical 2-block form: ranges = [Tlow, Tmid, Thigh], data = [low, high]
+        high = NTuple{7,Float64}(Float64(x) for x in data[2])
+        return NASA7(low, high, Float64(ranges[1]), Float64(ranges[2]), Float64(ranges[3]))
+    else
+        # single-block form: ranges = [Tlow, Thigh], data = [only]; same coeffs for both ranges
+        high = low
+        return NASA7(low, high, Float64(ranges[1]), Float64(ranges[2]), Float64(ranges[2]))
+    end
 end
 
 "Parse the species list. Returns (Vector{SpeciesData}, ThermoDatabase).
@@ -212,8 +225,11 @@ function _parse_reaction(rxn_dict, name_to_id::Dict{String,SpeciesID}, ctx::_Uni
         if haskey(rxn_dict, "Troe")
             t = rxn_dict["Troe"]
             # Cantera {A,T3,T1,T2} -> TroeParams(α=A, T1, T2, T3) — field-aligned, NO reorder (spec T1;
-            # lowering.jl _troe_F formula Fcent=(1-α)exp(-T/T3)+α·exp(-T/T1)+exp(-T2/T) confirmed)
-            tp = TroeParams(Float64(t["A"]), Float64(t["T1"]), Float64(t["T2"]), Float64(t["T3"]))
+            # lowering.jl _troe_F formula Fcent=(1-α)exp(-T/T3)+α·exp(-T/T1)+exp(-T2/T) confirmed).
+            # T2 is optional in Cantera (omitted in e.g. AramcoMech3.0 for some reactions); when
+            # absent, exp(-T2/T) → 0, so we use a huge T2 (1e30) to underflow that term to zero.
+            T2 = Float64(get(t, "T2", 1e30))
+            tp = TroeParams(Float64(t["A"]), Float64(t["T1"]), T2, Float64(t["T3"]))
             kin = TroeFalloff(low_rate, high_rate, eff, tp)
         else
             kin = LindemannFalloff(low_rate, high_rate, eff)
