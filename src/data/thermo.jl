@@ -25,23 +25,27 @@ function _nasa7_coeffs(m::NASA7, T::Real)
     T <= m.Tmid ? m.low_coeffs : m.high_coeffs
 end
 
-"Dimensionless cp/R = a1 + a2·T + a3·T² + a4·T³ + a5·T⁴."
-function cp_over_R(m::NASA7, T::Real)
-    a1, a2, a3, a4, a5 = _nasa7_coeffs(m, T)
-    return a1 + a2 * T + a3 * T^2 + a4 * T^3 + a5 * T^4
+# —— NASA7 polynomial bodies (generic; work for Real and symbolic Num). Single truth source. ——
+"Dimensionless cp/R = a1 + a2·T + a3·T² + a4·T³ + a5·T⁴. Generic over T and the coeff tuple."
+_nasa7_cp((a1, a2, a3, a4, a5, _, _), T) = a1 + a2*T + a3*T^2 + a4*T^3 + a5*T^4
+
+"Dimensionless h/RT = a1 + a2·T/2 + a3·T²/3 + a4·T³/4 + a5·T⁴/5 + a6/T. Generic over T."
+_nasa7_h((a1, a2, a3, a4, a5, a6, _), T) = a1 + a2*T/2 + a3*T^2/3 + a4*T^3/4 + a5*T^4/5 + a6/T
+
+"Dimensionless s/R = a1·ln(T) + a2·T + a3·T²/2 + a4·T³/3 + a5·T⁴/4 + a7. Generic over T."
+function _nasa7_s((a1, a2, a3, a4, a5, _, a7), T)
+    return a1*log(T) + a2*T + a3*T^2/2 + a4*T^3/3 + a5*T^4/4 + a7
 end
 
-"Dimensionless h/RT = a1 + a2·T/2 + a3·T²/3 + a4·T³/4 + a5·T⁴/5 + a6/T."
-function h_over_RT(m::NASA7, T::Real)
-    a1, a2, a3, a4, a5, a6 = _nasa7_coeffs(m, T)
-    return a1 + a2 * T / 2 + a3 * T^2 / 3 + a4 * T^3 / 4 + a5 * T^4 / 5 + a6 / T
-end
+# —— plain-Real entries (public API unchanged): select coeffs, call the generic body ——
+"Dimensionless cp/R (selects the active coeff range, then calls the generic body)."
+cp_over_R(m::NASA7, T::Real) = _nasa7_cp(_nasa7_coeffs(m, T), T)
 
-"Dimensionless s/R = a1·ln(T) + a2·T + a3·T²/2 + a4·T³/3 + a5·T⁴/4 + a7."
-function s_over_R(m::NASA7, T::Real)
-    a1, a2, a3, a4, a5, _, a7 = _nasa7_coeffs(m, T)
-    return a1 * log(T) + a2 * T + a3 * T^2 / 2 + a4 * T^3 / 3 + a5 * T^4 / 4 + a7
-end
+"Dimensionless h/RT."
+h_over_RT(m::NASA7, T::Real) = _nasa7_h(_nasa7_coeffs(m, T), T)
+
+"Dimensionless s/R."
+s_over_R(m::NASA7, T::Real)  = _nasa7_s(_nasa7_coeffs(m, T), T)
 
 "Dimensionless g/RT = h/RT - s/R (Task 6 uses this for K_c)."
 g_over_RT(m::NASA7, T::Real) = h_over_RT(m, T) - s_over_R(m, T)

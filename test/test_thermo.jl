@@ -57,9 +57,10 @@ end
     rxn = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
                        kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))
     mech = Mechanism(species=[spA, spB], reactions=[rxn])
-    import ChemMechSim: _equilibrium_constant
+    import ChemMechSim: _equilibrium_constant, ThermoCtx
     for T in (400.0, 800.0, 1200.0)
-        @test _equilibrium_constant(mech, rxn, T) ≈ 2.0  rtol = 1e-9   # K_c = exp(δ) = 2
+        tcx = ThermoCtx(T, nothing, nothing, Dict{Int,Any}())
+        @test _equilibrium_constant(mech, rxn, T, tcx) ≈ 2.0  rtol = 1e-9   # K_c = exp(δ) = 2
     end
 end
 

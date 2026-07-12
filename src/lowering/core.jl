@@ -32,9 +32,6 @@ _lowerable(c::MechanismConfig) =
  ThermoReverse. Each reaction's rate constant is a unit-bearing parameter (default = stored
  value), so MTK's dimension check fires at System construction (§5.6)."
 function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig())
-    _PSTD_PARAM[] = nothing        # reset lowering-scoped thermo-constant singletons (Task 4)
-    _RGAS_PARAM[] = nothing
-    _COEFF_CACHE[] = Dict{Int,Any}()   # per-species NASA7 coeff cache (Phase 4a)
     _lowerable(config) ||
         error("lower_to_mtk: config not supported. Supported: state_basis=:concentration, " *
               "energy∈{:isothermal,:adiabatic}, eos∈{:off,:ideal_gas}; :constant_pressure " *
@@ -51,22 +48,25 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
     is_adiabatic = config.energy === :adiabatic
     # T exists iff any reaction is T-dependent, EOS needs it, OR the energy layer makes it a state.
     # Under :adiabatic T is a STATE (@variables); otherwise a unit-bearing parameter.
-    needs_T = _needs_T(mech) || config.eos === :ideal_gas || is_adiabatic
-    Tparam = if !needs_T
+    create_T = _needs_T(mech) || config.eos === :ideal_gas || is_adiabatic
+    Tparam = if !create_T
         nothing
     elseif is_adiabatic
         _attach_unit(only(@variables T(t)), u"K")     # temperature STATE
     else
         rate_param(:T, 300.0, u"K")                    # temperature parameter (isothermal)
     end
-    rates = [lower_reaction(rx, mech, cvar, Tparam, config, j)
+    tcx = make_thermo_ctx(Tparam)
+    rates = [lower_reaction(rx, mech, cvar, Tparam, config, j,
+                RateCtx(mech, cvar, Tparam, j,
+                        sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache))
              for (j, rx) in enumerate(mech.reactions)]
     eqs = [D(cvars[i]) ~ _species_rhs(mech.species[i].id, mech, rates)
            for i in eachindex(mech.species)]
     # Constraint-layer assembly (energy layer adds the const-V dT/dt under :adiabatic; spec §5.4).
-    eqs = append_constraint_layers!(eqs, mech, config, cvar, Tparam, rates)
+    eqs = append_constraint_layers!(eqs, mech, config, cvar, Tparam, rates; tcx=tcx)
     if config.eos === :ideal_gas
-        return _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic)
+        return _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic, tcx)
     end
     @named raw = System(eqs, t)          # auto-discovers states [c₁..cₙ, T] and RHS params
     return mtkcompile(raw)
@@ -75,8 +75,8 @@ end
 "Build the system with EOS observed P ~ (Σc)·R·T. Under :adiabatic T is a STATE (included in
  `states`); under :isothermal T is a parameter retained via the observed-param fix (Phase 3).
  R appears in the energy-equation RHS under :adiabatic so it is retained automatically."
-function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool)
-    Rparam = _r_param()                            # shared with K_c / energy eq (memoized singleton)
+function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool, tcx)
+    Rparam = tcx.R                                   # shared with K_c / energy eq (from tcx)
     Pvar = _attach_unit(only(@variables P(t)), ChemUnits.press)
     obs = [Pvar ~ sum(cvars) * Rparam * Tparam]
     states = is_adiabatic ? [cvars; Tparam] : cvars   # T is a state under :adiabatic
@@ -103,16 +103,20 @@ function _lower_constP(mech::Mechanism, config::MechanismConfig)
     nvar  = Dict(mech.species[i].id => nvars[i] for i in eachindex(mech.species))
     Pparam = rate_param(:P, P_STD, ChemUnits.press)
     Tsym   = is_adiabatic ? _attach_unit(only(@variables T(t)), u"K") : rate_param(:T, 300.0, u"K")
-    Rparam = _r_param()
+    tcx = make_thermo_ctx(Tsym)
+    Rparam = tcx.R
     Vvar   = _attach_unit(only(@variables V(t)), ChemUnits.vol)
-    rates  = [lower_reaction(rx, mech, cvar, Tsym, config, j) for (j, rx) in enumerate(mech.reactions)]
+    rates  = [lower_reaction(rx, mech, cvar, Tsym, config, j,
+                 RateCtx(mech, cvar, Tsym, j,
+                         sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache))
+              for (j, rx) in enumerate(mech.reactions)]
     eqs = Equation[D(nvars[i]) ~ Vvar * _species_rhs(mech.species[i].id, mech, rates)
               for i in eachindex(mech.species)]
     push!(eqs, Vvar ~ sum(nvars) * Rparam * Tsym / Pparam)            # EOS → observed V
     for i in eachindex(mech.species)
         push!(eqs, cvars[i] ~ nvars[i] / Vvar)                        # observed concentrations (rate-law input)
     end
-    eqs = append_constraint_layers!(eqs, mech, config, cvar, Tsym, rates; nvar=nvar, Vvar=Vvar)
+    eqs = append_constraint_layers!(eqs, mech, config, cvar, Tsym, rates; tcx=tcx, nvar=nvar, Vvar=Vvar)
     @named raw = System(eqs, t)
     return mtkcompile(raw)
 end
