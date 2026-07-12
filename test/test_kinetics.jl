@@ -25,8 +25,8 @@ import ModelingToolkit: substitute, Num
     # Lindemann has no extra center-broadening params
     @test propertynames(lin) == (:low_rate, :high_rate, :efficiencies)
 
-    # PLOG / Chebyshev are minimal concrete subtypes (full fields deferred)
-    @test PlogRate() isa AbstractKinetics
+    # PLOG / Chebyshev are concrete subtypes
+    @test PlogRate(ChemMechSim.PlogPoint[]) isa AbstractKinetics
     @test ChebyshevRate() isa AbstractKinetics
 end
 
@@ -80,4 +80,23 @@ end
     @test numeric_kf ≈ 1e9 * 1000.0^0.5 * exp(-(5000.0/8.314)/1000.0)  rtol=1e-9
     # Cross-check: the symbolic materializer agrees with the numeric rate_constant path
     @test rate_constant(kin, 1000.0) ≈ numeric_kf  rtol=1e-12
+end
+
+@testset "Phase 6 T1: PLOG numeric interpolation (MTK-free)" begin
+    using ChemMechSim: PlogPoint, PlogRate, plog_rate, _plog_interp_segment
+    # segment: multiplicative form, dimensionless ratio
+    @test _plog_interp_segment(2.0, 8.0, 0.5) ≈ 2.0 * (8.0 / 2.0)^0.5   # = 4.0
+    # 2-point PLOG, Ea=0 → k_i(T) = A_i (constant in T)
+    kin = PlogRate([PlogPoint(1e4, 1e9, 0.0, 0.0), PlogPoint(1e6, 1e7, 0.0, 0.0)])
+    @test plog_rate(kin, 1000.0, 1e4) ≈ 1e9            # at P_lo → k_lo
+    @test plog_rate(kin, 1000.0, 1e6) ≈ 1e7            # at P_hi → k_hi
+    # geometric mid pressure (log-mid): f=0.5 → sqrt(k_lo·k_hi) = 1e8
+    @test plog_rate(kin, 1000.0, 1e5) ≈ 1e8
+    # clamping
+    @test plog_rate(kin, 1000.0, 1e3) ≈ 1e9            # below P_lo → k_lo
+    @test plog_rate(kin, 1000.0, 1e7) ≈ 1e7            # above P_hi → k_hi
+    # 3-point: mid segment uses points 2,3
+    kin3 = PlogRate([PlogPoint(1e4, 1e9, 0.0, 0.0), PlogPoint(1e5, 1e8, 0.0, 0.0), PlogPoint(1e6, 1e7, 0.0, 0.0)])
+    @test plog_rate(kin3, 1000.0, 1e5) ≈ 1e8           # exactly at mid point → k_mid
+    @test plog_rate(kin3, 1000.0, 3e5) ≈ 1e8 * (1e7 / 1e8)^((log(3e5/1e5)) / log(1e6/1e5))  # bracket [2,3]
 end

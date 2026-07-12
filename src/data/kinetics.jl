@@ -63,9 +63,55 @@ struct LindemannFalloff <: AbstractFalloff   # no extra center-broadening params
     efficiencies::Dict{SpeciesID,Float64}
 end
 
-# Pressure-dependent: PLOG (discrete pressure points), Chebyshev (T-P grid).
-# Minimal concrete subtypes — full fields/eval deferred to the Phase 6 plan.
-struct PlogRate <: AbstractKinetics end
+# —— PLOG (pressure-dependent Arrhenius) ——————————————————————————
+# log-log linear interpolation in k between discrete pressure points (CHEMKIN/Cantera).
+# Implemented in the multiplicative form k = k_lo·(k_hi/k_lo)^f to avoid taking log of a
+# dimensioned k (fails MTK's dim check). See docs/.../2026-07-11-phase6-plog-design.md §1.
+
+"One PLOG pressure point: (P [Pa], A, b, Ea [J/mol])."
+struct PlogPoint
+    P::Float64
+    A::Float64
+    b::Float64
+    Ea::Float64
+end
+
+"PLOG rate law: N pressure points (sorted ascending by P). k(T,P) log-log interpolates."
+struct PlogRate <: AbstractKinetics
+    points::Vector{PlogPoint}
+end
+
+"One interpolation segment (multiplicative form, dimensionless ratio → passes dim check)."
+_plog_interp_segment(k_lo, k_hi, f) = k_lo * (k_hi / k_lo)^f
+
+"Full PLOG interpolation with low/high clamping. ks = N k_i(T) values; log_P = ln(P/P_ref);
+ log_Pi = N ln(P_i/P_ref) (ascending). Folds ifelse from the high end (Num-safe: builds one
+ nested ifelse expression when called with symbolic inputs)."
+function _plog_interpolate(ks, log_P, log_Pi)
+    n = length(ks)
+    n == length(log_Pi) || error("_plog_interpolate: ks ($(length(ks))) / log_Pi ($(length(log_Pi))) length mismatch")
+    n == 1 && return ks[1]                              # degenerate single-point → constant rate
+    result = ks[n]                                      # high clamp
+    for i in (n - 1):-1:1
+        f = (log_P - log_Pi[i]) / (log_Pi[i + 1] - log_Pi[i])
+        seg = _plog_interp_segment(ks[i], ks[i + 1], f)
+        # log_P ≤ log_Pi[i]   → low-side clamp ks[i]
+        # log_Pi[i] < log_P ≤ log_Pi[i+1] → this segment
+        # else → whatever we'd built above
+        result = ifelse(log_P <= log_Pi[i], ks[i],
+                        ifelse(log_P <= log_Pi[i + 1], seg, result))
+    end
+    return result
+end
+
+"Numeric PLOG rate constant k(T,P) — MTK-free standalone eval (Cantera comparison, plots, tests).
+ Uses P_STD as the dimensionless-reference scaffold (its value cancels in the ratios)."
+function plog_rate(kin::PlogRate, T::Real, P::Real)
+    ks = [_arrhenius_body(p.A, p.b, p.Ea / R_GAS, T) for p in kin.points]
+    log_Pi = [log(p.P / P_STD) for p in kin.points]
+    return _plog_interpolate(ks, log(P / P_STD), log_Pi)
+end
+
 struct ChebyshevRate <: AbstractKinetics end
 
 # —— generic formula bodies (pure arithmetic; MTK-free; Real and symbolic Num both work) ——
