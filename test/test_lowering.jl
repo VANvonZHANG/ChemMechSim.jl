@@ -111,7 +111,7 @@ end
     cvar = Dict(1 => A, 2 => B)
     # Under units, k is a rate_param (default = stored A-factor); both paths
     # produce the same symbolic k·A. isequal: symbolic == returns a non-boolean Equation.
-    ctx = RateCtx(mech, cvar, nothing, 1, 1.0, nothing, nothing, Dict{Int,Any}())
+    ctx = RateCtx(mech, cvar, nothing, 1, 1.0, nothing, nothing, Dict{Int,Any}(), nothing)
     crate = catalyst_lowering(rxn, mech, cvar, nothing, 1, ctx)
     drate = direct_mtk_lowering(rxn, mech, cvar, nothing, 1, ctx)
     @test isequal(crate, drate)
@@ -207,4 +207,21 @@ end
     # V grows (A→2B increases moles at const P)
     Vobs = [o.lhs for o in observed(sys) if getname(o.lhs)==:V][1]
     @test Float64(sol(5.0; idxs=Vobs)) > Float64(sol(0.0; idxs=Vobs))
+end
+
+@testset "Phase 6 T2: RateCtx.P plumbing (generic)" begin
+    using ChemMechSim: RateCtx, needs_P
+    # needs_P default is false for built-in laws
+    @test needs_P(ElementaryArrhenius(1.0, 0, 0)) == false
+    @test needs_P(TroeFalloff(ElementaryArrhenius(1,0,0), ElementaryArrhenius(1,0,0),
+                              Dict{Int,Float64}(), TroeParams(0,0,0,0))) == false
+    # RateCtx now has a P field (9th field). Build a tiny mechanism, lower under EOS-on,
+    # and confirm the lowered system has a P (observed) — the plumbing works.
+    sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")]
+    rx = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
+                      kinetics=ElementaryArrhenius(1.0,0,0))
+    mech = Mechanism(species=sp, reactions=[rx])
+    sys = ChemMechSim.extract_system(ChemMechSim.ChemPhaseSystem(mech; config=convenience_config(:fixedT)))
+    # P is observed under :fixedT const-V ideal_gas: P ~ Σc·R·T
+    @test "P" in [String(getname(o.lhs)) for o in observed(sys)]
 end

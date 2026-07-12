@@ -7,7 +7,8 @@ using ..ChemMechSim: SpeciesData, SpeciesID, ReactionData, ReactionMeta,
                      ElementaryArrhenius, ThirdBodyArrhenius,
                      TroeFalloff, LindemannFalloff, TroeParams,
                      Irreversible, ThermoReverse,
-                     NASA7, ThermoDatabase, Mechanism, molecular_weight
+                     NASA7, ThermoDatabase, Mechanism, molecular_weight,
+                     PlogPoint, PlogRate
 
 # —— Equation string parser ———————————————————————————————————
 
@@ -19,7 +20,9 @@ function _parse_terms(s::AbstractString)
         isempty(term) && continue
         # optional leading coefficient (int/float) then species name (letter-led).
         # Parens allowed for labelled/excited states (e.g. GRI30's CH2(S) singlet methylene).
-        m = match(r"^(\d+\.?\d*|\.\d+)?\s*([A-Za-z][A-Za-z0-9()]*)$", term)
+        # Hyphens, asterisks, #, commas allowed for Aramco/FFCM2 isomer labels
+        # (e.g. C2H4O1-2, CH*, C4H5-2, 1,3-C3H6-style — note no species name starts with a digit).
+        m = match(r"^(\d+\.?\d*|\.\d+)?\s*([A-Za-z][A-Za-z0-9()\-*,#]*)$", term)
         m === nothing && error("_parse_terms: cannot parse term \"$term\"")
         coef = isnothing(m.captures[1]) ? 1.0 : parse(Float64, m.captures[1])
         name = m.captures[2]
@@ -90,6 +93,20 @@ _a_factor(ctx::_UnitCtx, order::Real) = (1.0 / ctx.length_m)^(3 * (1 - order))
 "Convert a Cantera A-factor value to canonical m-mol-s units given reaction order."
 _convert_A(A::Real, ctx::_UnitCtx, order::Real) = A * _a_factor(ctx, order)
 
+"Parse a Cantera pressure quantity (e.g. \"0.001 atm\", \"986.9 atm\", or a bare number)
+ to Pa. atm ×101325, bar ×1e5, Pa ×1. Default Pa if no unit suffix."
+function _parse_pressure(p, ::_UnitCtx)
+    p isa Number && return Float64(p)                    # bare number → assume Pa
+    s = strip(string(p))
+    m = match(r"^\s*([0-9.]+(?:[eE][+-]?[0-9]+)?)\s*(atm|bar|Pa)?\s*$", s)
+    m === nothing && error("_parse_pressure: cannot parse \"$s\"")
+    val = parse(Float64, m.captures[1])
+    unit = m.captures[2]
+    return unit == "atm" ? val * 101325.0 :
+           unit == "bar" ? val * 1.0e5 :
+           val                                           # Pa (or unspecified → Pa)
+end
+
 # —— Phase selection ——————————————————————————————————————————————
 
 "Select the first ideal-gas phase (or the named one). Errors on non-ideal-gas."
@@ -105,7 +122,11 @@ end
 
 # —— Species / thermo parsing ——————————————————————————————————————
 
-"Parse a Cantera thermo block (NASA7 only) into a ThermoModel."
+"Parse a Cantera thermo block (NASA7 only) into a ThermoModel.
+ Handles both the canonical 2-block form (3 temperature-ranges, 2 data rows) and
+ the single-block form (2 temperature-ranges, 1 data row — e.g. noble gases in
+ AramcoMech3.0). For the single-block form the same coefficients are used for both
+ low and high ranges (the midpoint is taken as the upper bound)."
 function _parse_thermo(thermo_dict)
     model = thermo_dict["model"]
     model == "NASA7" ||
@@ -113,8 +134,15 @@ function _parse_thermo(thermo_dict)
     ranges = thermo_dict["temperature-ranges"]
     data   = thermo_dict["data"]
     low  = NTuple{7,Float64}(Float64(x) for x in data[1])
-    high = NTuple{7,Float64}(Float64(x) for x in data[2])
-    return NASA7(low, high, Float64(ranges[1]), Float64(ranges[2]), Float64(ranges[3]))
+    if length(data) >= 2
+        # canonical 2-block form: ranges = [Tlow, Tmid, Thigh], data = [low, high]
+        high = NTuple{7,Float64}(Float64(x) for x in data[2])
+        return NASA7(low, high, Float64(ranges[1]), Float64(ranges[2]), Float64(ranges[3]))
+    else
+        # single-block form: ranges = [Tlow, Thigh], data = [only]; same coeffs for both ranges
+        high = low
+        return NASA7(low, high, Float64(ranges[1]), Float64(ranges[2]), Float64(ranges[2]))
+    end
 end
 
 "Parse the species list. Returns (Vector{SpeciesData}, ThermoDatabase).
@@ -173,7 +201,7 @@ function _arrhenius_from_rc(rc, ctx::_UnitCtx, order::Real)
 end
 
 "Parse one reaction dict into ReactionData. Returns nothing (skipped + warning) for
- unsupported types (PLOG/Chebyshev/etc., Phase 6)."
+ unsupported types (Chebyshev/etc.)."
 function _parse_reaction(rxn_dict, name_to_id::Dict{String,SpeciesID}, ctx::_UnitCtx)
     eq = String(rxn_dict["equation"])
     parsed = _parse_equation(eq)
@@ -197,14 +225,33 @@ function _parse_reaction(rxn_dict, name_to_id::Dict{String,SpeciesID}, ctx::_Uni
         if haskey(rxn_dict, "Troe")
             t = rxn_dict["Troe"]
             # Cantera {A,T3,T1,T2} -> TroeParams(α=A, T1, T2, T3) — field-aligned, NO reorder (spec T1;
-            # lowering.jl _troe_F formula Fcent=(1-α)exp(-T/T3)+α·exp(-T/T1)+exp(-T2/T) confirmed)
-            tp = TroeParams(Float64(t["A"]), Float64(t["T1"]), Float64(t["T2"]), Float64(t["T3"]))
+            # lowering.jl _troe_F formula Fcent=(1-α)exp(-T/T3)+α·exp(-T/T1)+exp(-T2/T) confirmed).
+            # T2 is optional in Cantera (omitted in e.g. AramcoMech3.0 for some reactions); when
+            # absent, exp(-T2/T) → 0, so we use a huge T2 (1e30) to underflow that term to zero.
+            T2 = Float64(get(t, "T2", 1e30))
+            tp = TroeParams(Float64(t["A"]), Float64(t["T1"]), T2, Float64(t["T3"]))
             kin = TroeFalloff(low_rate, high_rate, eff, tp)
         else
             kin = LindemannFalloff(low_rate, high_rate, eff)
         end
+    elseif rtype == "pressure-dependent-Arrhenius"
+        order = sum(values(reactants))
+        pts = PlogPoint[]
+        for rc in rxn_dict["rate-constants"]
+            P_Pa = _parse_pressure(rc["P"], ctx)
+            A    = _convert_A(Float64(rc["A"]), ctx, order)
+            b    = Float64(rc["b"])
+            Ea   = Float64(rc["Ea"]) * ctx.ea_J_per_mol
+            push!(pts, PlogPoint(P_Pa, A, b, Ea))
+        end
+        sort!(pts, by = p -> p.P)                        # defensive: ensure ascending
+        length(pts) >= 2 ||
+            error("load_mechanism: PLOG reaction needs ≥2 pressure points; got $(length(pts)) in \"$eq\".")
+        allunique(p.P for p in pts) ||
+            error("load_mechanism: PLOG reaction has duplicate pressure points in \"$eq\".")
+        kin = PlogRate(pts)
     else
-        @warn "load_mechanism: skipping $rtype reaction (Phase 6): $eq"
+        @warn "load_mechanism: skipping unsupported $rtype reaction: $eq"
         return nothing
     end
 
@@ -219,9 +266,9 @@ end
 # —— Entry point ———————————————————————————————————————————————————
 
 "Load a Cantera YAML mechanism file into a Mechanism (spec §5.1, Phase 5a).
- Covers: elementary / three-body / falloff(Troe/Lindemann). PLOG/Chebyshev/etc.
- are skipped with a warning (Phase 6). Selects the first ideal-gas phase (or the
- named one via `phase`)."
+ Covers: elementary / three-body / falloff(Troe/Lindemann) / PLOG
+ (pressure-dependent-Arrhenius). Chebyshev/etc. are skipped with a warning.
+ Selects the first ideal-gas phase (or the named one via `phase`)."
 function load_mechanism(path::AbstractString; phase::Union{Nothing,String}=nothing)::Mechanism
     dict = YAML.load_file(path)
     ctx = _parse_units(get(dict, "units", nothing))

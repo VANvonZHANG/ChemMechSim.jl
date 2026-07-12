@@ -1,0 +1,55 @@
+description: minimal PLOG reference mechanism (1 reaction, 2 species) for Phase 6 T5.
+  The 3 rate-constants EXACTLY match test/data/plog_minimal.yaml
+  (P=0.1/1.0/10.0 atm, A=1.2e15/5.0e14/2.0e14, b=-0.5/-0.4/-0.3, Ea=0.0).
+  Uses balanced H2O2-2OH (order 1) so Cantera accepts it; plog_minimal.yaml
+  uses unbalanced H2O-2OH (also order 1; same kf unit s⁻¹; same A-conversion).
+generator: chemmechsim-phase6-t5-cantera-ref
+cantera-version: 3.2.0
+phases:
+  - name: gas
+    thermo: ideal-gas
+    elements: [H, O]
+    species: [H2O2, OH]
+    kinetics: gas
+    transport: mixture-averaged
+species:
+  - name: H2O2
+    composition: {H: 2, O: 2}
+    thermo:
+      model: NASA7
+      temperature-ranges: [200.0, 1000.0, 3500.0]
+      data:
+        - [4.27611269, -5.42822417e-04, 1.67335701e-05, -2.15770813e-08,
+           8.62454363e-12, -1.77025821e+04, 3.43505074]
+        - [4.16500285, 4.90831694e-03, -1.90139225e-06, 3.71185986e-10,
+           -2.87908305e-14, -1.78617877e+04, 2.91615662]
+    transport:
+      model: gas
+      geometry: nonlinear
+      diameter: 3.458
+      well-depth: 107.4
+      rotational-relaxation: 3.8
+  - name: OH
+    composition: {O: 1, H: 1}
+    thermo:
+      model: NASA7
+      temperature-ranges: [200.0, 1000.0, 3500.0]
+      data:
+        - [3.99201543, -2.40131752e-03, 4.61793841e-06, -3.88113333e-09,
+           1.3641147e-12, 3.61508056e+03, -1.03925458e-01]
+        - [3.09288767, 5.48429716e-04, 1.26505228e-07, -8.79461556e-11,
+           1.17412376e-14, 3.858657e+03, 4.4766961]
+    transport:
+      model: gas
+      geometry: linear
+      diameter: 2.75
+      well-depth: 80.0
+units: {length: cm, quantity: mol, activation-energy: cal/mol}
+reactions:
+  # H2O2 → 2 OH: balanced (H2 → H2, O2 → O2), order 1 → kf unit s⁻¹.
+  - equation: H2O2 <=> OH + OH
+    type: pressure-dependent-Arrhenius
+    rate-constants:
+      - {P: 0.1 atm, A: 1.2e+15, b: -0.5, Ea: 0.0}
+      - {P: 1.0 atm, A: 5.0e+14, b: -0.4, Ea: 0.0}
+      - {P: 10.0 atm, A: 2.0e+14, b: -0.3, Ea: 0.0}

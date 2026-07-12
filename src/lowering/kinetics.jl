@@ -19,6 +19,9 @@ _needs_T(mech::Mechanism) =
 _reverse_needs_T(::ThermoReverse) = true
 _reverse_needs_T(::ReverseRatePolicy) = false
 
+"True iff any reaction in `mech` needs pressure (P-needing kinetics law, e.g. PLOG)."
+_needs_P(mech::Mechanism) = any(needs_P(rx.kinetics) for rx in mech.reactions)
+
 "Mass-action product ∏ c[sid]^ν over a stoichiometry map."
 function _mass_action(stoich::Dict{SpeciesID,Float64}, cvar)
     ma = 1.0
@@ -30,7 +33,7 @@ end
 
 "Whether a reaction lowers via the Catalyst mass-action backend (spec §3.3/§5.4).
  True for plain elementary Arrhenius (mass-action); false for rate types Catalyst
- does not represent natively (third-body/falloff/PLOG/Chebyshev arrive in 2.5b)."
+ does not represent natively (third-body/falloff/PLOG/Chebyshev/etc.)."
 catalyst_native(rx::ReactionData, config::MechanismConfig) =
     rx.kinetics isa ElementaryArrhenius
 
@@ -158,7 +161,7 @@ materialize(::KValue,      ctx, tag, T)  = _tvparam(ctx, tag, T)
 materialize(::Plain,       ctx, _,   v)  = v                               # plain value, no param
 
 "Generic symbolic k_f for any law declaring paramspec + body. Driven entirely by the role table."
-function symbolic_kf(kin::AbstractKinetics, ctx::RateCtx)
+function symbolic_kf(kin::AbstractKinetics, ctx)
     spec = paramspec(kin)
     vals = ntuple(i -> materialize(spec[i][2], ctx, spec[i][3], getfield(kin, spec[i][1])), length(spec))
     return body(kin)(vals..., ctx.T)

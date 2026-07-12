@@ -14,6 +14,7 @@ struct RateCtx
     R::Any                                  # shared R_gas param
     P_std::Any                              # shared P° param
     coeff_cache::Dict{Int,Any}              # per-species NASA coeff cache (ThermoCtx shares this Dict)
+    P::Any                                  # pressure symbol (Num) under eos=:ideal_gas configs; nothing otherwise
 end
 
 "Shared thermo/energy lowering context (R/P°/coeff-cache/T). Built once per lower_to_mtk."
