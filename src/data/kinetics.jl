@@ -121,14 +121,30 @@ struct ChebyshevRate <: AbstractKinetics end
 "Arrhenius k(T) = A·T^b·exp(-θ/T), θ = Ea/R. Generic over T (Real or symbolic Num)."
 _arrhenius_body(A, b, θ, T) = A * T^b * exp(-θ / T)
 
-"Troe center-broadening factor F (α, T1, T2, T3, reduced pressure Pr, T). Generic over T."
-function _troe_F_body(α, T1, T2, T3, Pr, T)
-    Fcent = (1 - α) * exp(-T / T3) + α * exp(-T / T1) + exp(-T2 / T)
+"Troe Fcent term degeneracy plan (pure Float64, MTK-free). Returns (t1,t2,t3) ∈ {:zero,:one,:active}
+ for term1=(1-α)exp(-T/T3), term2=α·exp(-T/T1), term3=exp(-T2/T). Sentinel thresholds are
+ float-dynamic-range limits (1e20/1e-20), mechanism-independent. Negative x is :active (normal)."
+function _troe_fcent_plan(α::Float64, T1::Float64, T2::Float64, T3::Float64)
+    (_exp_negT_over_x_form(T3), _exp_negT_over_x_form(T1), _exp_neg_x_over_T_form(T2))
+end
+# exp(-T/x): |x|≤1e-20→:zero, |x|≥1e20→:one, else :active
+_exp_negT_over_x_form(x) = abs(x) ≤ 1e-20 ? :zero : (abs(x) ≥ 1e20 ? :one : :active)
+# exp(-x/T): |x|≥1e20→:zero, |x|≤1e-20→:one, else :active
+_exp_neg_x_over_T_form(x) = abs(x) ≥ 1e20 ? :zero : (abs(x) ≤ 1e-20 ? :one : :active)
+
+"Troe F given Fcent and reduced pressure Pr (the post-Fcent formula). Generic (Real/Num)."
+function _troe_F_from_fcent(Fcent, Pr)
     lFc = log10(Fcent); lPr = log10(Pr)
     c = -0.4 - 0.67 * lFc; N = 0.75 - 1.27 * lFc
     f1 = lPr + c; f2 = N - 0.14 * f1
     return 10^(lFc / (1 + (f1 / f2)^2))
 end
+
+"Troe center-broadening factor F. Naive Fcent (no degenerate handling) — kept for numeric/simple
+ callers. Lowering's symbolic_kf(::TroeFalloff) instead builds Fcent via _troe_fcent_plan (to
+ short-circuit sentinel params) then calls _troe_F_from_fcent."
+_troe_F_body(α, T1, T2, T3, Pr, T) =
+    _troe_F_from_fcent((1 - α) * exp(-T / T3) + α * exp(-T / T1) + exp(-T2 / T), Pr)
 
 # —— param-role types (MTK-free markers; materialize/numeric_value dispatch on them) ——
 # Roles describe how a struct field becomes a rate parameter: its unit role + naming.

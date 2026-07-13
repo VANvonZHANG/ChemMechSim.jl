@@ -100,3 +100,16 @@ end
     @test plog_rate(kin3, 1000.0, 1e5) ≈ 1e8           # exactly at mid point → k_mid
     @test plog_rate(kin3, 1000.0, 3e5) ≈ 1e8 * (1e7 / 1e8)^((log(3e5/1e5)) / log(1e6/1e5))  # bracket [2,3]
 end
+
+@testset "Large-mech A: _troe_fcent_plan degenerate detection" begin
+    using ChemMechSim: _troe_fcent_plan
+    # normal params → all active
+    @test _troe_fcent_plan(0.43, 2941.0, 6964.0, 74.0) == (:active, :active, :active)
+    # Aramco #1 H2O2: T3=1e-30→:zero, T1=1e30→:one, T2=1e30→:zero
+    @test _troe_fcent_plan(0.43, 1e30, 1e30, 1e-30) == (:zero, :one, :zero)
+    # Aramco #18: T1=1e-30→:zero(exp(-T/T1)→0), T2=1e30→:zero, T3=-10200→:active(negative, build normally)
+    # Return tuple is (term1=T3, term2=T1, term3=T2) → (:active, :zero, :zero)
+    @test _troe_fcent_plan(0.5, 1e-30, 1e30, -10200.0) == (:active, :zero, :zero)
+    # Aramco #38: T2=1e20→:zero, others normal → (term1=T3:active, term2=T1:active, term3=T2:zero)
+    @test _troe_fcent_plan(0.5, 60.79, 1e20, 815.3) == (:active, :active, :zero)
+end

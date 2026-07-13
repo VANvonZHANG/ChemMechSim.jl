@@ -118,9 +118,11 @@ function symbolic_kf(kin::ThirdBodyArrhenius, ctx::RateCtx)
     return base * _meff(ctx.mech, kin.efficiencies, ctx.cvar)
 end
 
-"Troe k_f = kinf·(Pr/(1+Pr))·F, Pr = k0·[M]_eff/kinf. kinf/k0 via _arrhenius_body; F via _troe_F_body.
- kinf A-factor uses ctx.order (high-pressure limit = Σ reactant order); k0 uses ctx.order+1
- (low-pressure limit adds one [M]_eff concentration)."
+"Troe k_f = kinf·(Pr/(1+Pr))·F, Pr = k0·[M]_eff/kinf. kinf/k0 via _arrhenius_body; F via
+ _troe_F_from_fcent with Fcent built per _troe_fcent_plan (short-circuits sentinel Troe params
+ so pathological symbolic exp(-T/1e-30) is never constructed). kinf A-factor uses ctx.order
+ (high-pressure limit = Σ reactant order); k0 uses ctx.order+1 (low-pressure limit adds one
+ [M]_eff concentration)."
 function symbolic_kf(kin::TroeFalloff, ctx::RateCtx)
     ctx.T === nothing && error("symbolic_kf(TroeFalloff): falloff is T-dependent but ctx.T is nothing.")
     kinf = _arrhenius_body(_aparam(ctx, "_high", kin.high_rate.A, kin.high_rate.b),
@@ -130,8 +132,16 @@ function symbolic_kf(kin::TroeFalloff, ctx::RateCtx)
                            kin.low_rate.b, _kparam(ctx, "_low", kin.low_rate.Ea), ctx.T)
     meff = _meff(ctx.mech, kin.efficiencies, ctx.cvar)
     Pr   = k0 * meff / kinf
-    F    = _troe_F_body(kin.troe.α, _tvparam(ctx, "T1", kin.troe.T1), _tvparam(ctx, "T2", kin.troe.T2),
-                        _tvparam(ctx, "T3", kin.troe.T3), Pr, ctx.T)
+    # Fcent with degenerate-term short-circuit (data-layer plan; avoids pathological symbolic exp)
+    α, tp = kin.troe.α, kin.troe
+    plan = _troe_fcent_plan(α, tp.T1, tp.T2, tp.T3)
+    t1 = plan[1] == :active ? (1 - α) * exp(-ctx.T / _tvparam(ctx, "T3", tp.T3)) :
+         plan[1] == :one    ? (1 - α) : 0.0
+    t2 = plan[2] == :active ? α * exp(-ctx.T / _tvparam(ctx, "T1", tp.T1)) :
+         plan[2] == :one    ? α : 0.0
+    t3 = plan[3] == :active ? exp(-_tvparam(ctx, "T2", tp.T2) / ctx.T) :
+         plan[3] == :one    ? 1.0 : 0.0
+    F = _troe_F_from_fcent(t1 + t2 + t3, Pr)
     return kinf * (Pr / (1 + Pr)) * F
 end
 
