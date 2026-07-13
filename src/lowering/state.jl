@@ -15,6 +15,9 @@ struct RateCtx
     P_std::Any                              # shared P° param
     coeff_cache::Dict{Int,Any}              # per-species NASA coeff cache (ThermoCtx shares this Dict)
     P::Any                                  # pressure symbol (Num) under eos=:ideal_gas configs; nothing otherwise
+    meff_eqs::Vector{Any}                   # M_eff algebraic equations (one per third-body/falloff reaction),
+                                            # collected by lower_to_mtk and appended to eqs; MTK tearing
+                                            # eliminates M_eff_j → observed (state+algebraic pattern, §7.1)
 end
 
 "Shared thermo/energy lowering context (R/P°/coeff-cache/T). Built once per lower_to_mtk."

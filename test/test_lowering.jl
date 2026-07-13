@@ -111,7 +111,7 @@ end
     cvar = Dict(1 => A, 2 => B)
     # Under units, k is a rate_param (default = stored A-factor); both paths
     # produce the same symbolic k·A. isequal: symbolic == returns a non-boolean Equation.
-    ctx = RateCtx(mech, cvar, nothing, 1, 1.0, nothing, nothing, Dict{Int,Any}(), nothing)
+    ctx = RateCtx(mech, cvar, nothing, 1, 1.0, nothing, nothing, Dict{Int,Any}(), nothing, Any[])
     crate = catalyst_lowering(rxn, mech, cvar, nothing, 1, ctx)
     drate = direct_mtk_lowering(rxn, mech, cvar, nothing, 1, ctx)
     @test isequal(crate, drate)

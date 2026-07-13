@@ -65,17 +65,20 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
         error("lower_to_mtk: mechanism has pressure-dependent (e.g. PLOG) reactions but the config " *
               "provides no pressure. Use a config with eos=:ideal_gas: convenience_config(:fixedT), " *
               ":adiabatic_constV, or :adiabatic_constP. Got eos=$(config.eos).")
+    meff_eqs = Any[]                     # M_eff algebraic eqs (shared across per-reaction RateCtx)
     rates = [lower_reaction(rx, mech, cvar, Tparam, config, j,
                 RateCtx(mech, cvar, Tparam, j,
-                        sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache, Pvar))
+                        sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache, Pvar, meff_eqs))
              for (j, rx) in enumerate(mech.reactions)]
     eqs = [D(cvars[i]) ~ _species_rhs(mech.species[i].id, mech, rates)
            for i in eachindex(mech.species)]
     # Constraint-layer assembly (energy layer adds the const-V dT/dt under :adiabatic; spec §5.4).
     eqs = append_constraint_layers!(eqs, mech, config, cvar, Tparam, rates; tcx=tcx)
+    # M_eff algebraic eqs: MTK tearing eliminates M_eff_j → observed (state+algebraic, §7.1).
     if config.eos === :ideal_gas
-        return _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic, tcx, Pvar, _needs_P(mech))
+        return _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic, tcx, Pvar, _needs_P(mech), meff_eqs)
     end
+    append!(eqs, meff_eqs)               # non-EOS: auto-discover path handles M_eff_j as states
     @named raw = System(eqs, t)          # auto-discovers states [c₁..cₙ, T] and RHS params
     return mtkcompile(raw)
 end
@@ -84,8 +87,10 @@ end
  `states`); under :isothermal T is a parameter retained via the observed-param fix (Phase 3).
  R appears in the energy-equation RHS under :adiabatic so it is retained automatically.
  When P appears in the rate RHS (PLOG), the P equation is an algebraic eq in the main system
- (Pvar in states); MTK tearing eliminates it → observed. Otherwise P is purely observed."
-function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool, tcx, Pvar, needs_P_flag::Bool)
+ (Pvar in states); MTK tearing eliminates it → observed. Otherwise P is purely observed.
+ M_eff_j (third-body) algebraic eqs follow the same state+algebraic pattern: M_eff_j is added
+ to states with its algebraic eq in eqs; MTK tearing eliminates M_eff_j → observed."
+function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool, tcx, Pvar, needs_P_flag::Bool, meff_eqs=Any[])
     Rparam = tcx.R                                   # shared with K_c / energy eq (from tcx)
     P_eq = Pvar ~ sum(cvars) * Rparam * Tparam       # Pvar created by caller (lower_to_mtk)
     states = is_adiabatic ? [cvars; Tparam] : cvars   # T is a state under :adiabatic
@@ -98,6 +103,11 @@ function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool, tcx, Pvar, n
     else
         # No P-dependent kinetics: P is purely observed (never referenced in RHS eqs).
         push!(obs, P_eq)
+    end
+    # M_eff_j algebraic eqs (state+algebraic): add to eqs + states; tearing eliminates → observed.
+    for eq in meff_eqs
+        push!(eqs, eq)
+        push!(states, eq.lhs)
     end
     @named _tmp = System(eqs, t)                   # auto-discover RHS params
     rhsparams = ModelingToolkit.parameters(_tmp)
@@ -125,9 +135,10 @@ function _lower_constP(mech::Mechanism, config::MechanismConfig)
     tcx = make_thermo_ctx(Tsym)
     Rparam = tcx.R
     Vvar   = _attach_unit(only(@variables V(t)), ChemUnits.vol)
+    meff_eqs = Any[]                     # M_eff algebraic eqs (shared across per-reaction RateCtx)
     rates  = [lower_reaction(rx, mech, cvar, Tsym, config, j,
                  RateCtx(mech, cvar, Tsym, j,
-                         sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache, Pparam))
+                         sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache, Pparam, meff_eqs))
               for (j, rx) in enumerate(mech.reactions)]
     eqs = Equation[D(nvars[i]) ~ Vvar * _species_rhs(mech.species[i].id, mech, rates)
               for i in eachindex(mech.species)]
@@ -136,6 +147,7 @@ function _lower_constP(mech::Mechanism, config::MechanismConfig)
         push!(eqs, cvars[i] ~ nvars[i] / Vvar)                        # observed concentrations (rate-law input)
     end
     eqs = append_constraint_layers!(eqs, mech, config, cvar, Tsym, rates; tcx=tcx, nvar=nvar, Vvar=Vvar)
+    append!(eqs, meff_eqs)               # M_eff algebraic eqs → MTK tearing eliminates to observed
     @named raw = System(eqs, t)
     return mtkcompile(raw)
 end

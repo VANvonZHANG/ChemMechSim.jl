@@ -1,6 +1,6 @@
 using Test
 using ChemMechSim
-using ModelingToolkit: getname, get_variables, getdefault, value, @parameters
+using ModelingToolkit: getname, get_variables, getdefault, value, @parameters, parameters, unknowns, observed
 import ModelingToolkit: substitute, Num
 
 @testset "data/kinetics" begin
@@ -61,7 +61,7 @@ end
     kin = _T6Custom(1e9, 0.5, 5000.0)
     ctx = RateCtx(ChemMechSim.Mechanism(ChemMechSim.SpeciesData[], ChemMechSim.ReactionData[],
                                         ChemMechSim.ThermoDatabase(), String[]),
-                  Dict{Int,Any}(), T_test, 1, 1.0, nothing, nothing, Dict{Int,Any}(), nothing)
+                  Dict{Int,Any}(), T_test, 1, 1.0, nothing, nothing, Dict{Int,Any}(), nothing, Any[])
     kf_expr = symbolic_kf(kin, ctx)            # should dispatch to the generic materializer
     @test kf_expr isa Num
     # Structural check: the materialized params (k_1_A, k_1_theta) and T appear in the expression
@@ -112,4 +112,39 @@ end
     @test _troe_fcent_plan(0.5, 1e-30, 1e30, -10200.0) == (:active, :zero, :zero)
     # Aramco #38: T2=1e20→:zero, others normal → (term1=T3:active, term2=T1:active, term3=T2:zero)
     @test _troe_fcent_plan(0.5, 60.79, 1e20, 815.3) == (:active, :active, :zero)
+end
+
+@testset "Large-mech T2: M_eff as algebraic variable (state+tearing → observed)" begin
+    using OrdinaryDiffEq: ODEFunction
+    # H + O2 + M -> HO2 + M ; [M]_eff = sum of all species (alpha=1 default)
+    H = SpeciesData(id=1, name="H");  O2  = SpeciesData(id=2, name="O2")
+    HO2 = SpeciesData(id=3, name="HO2"); M = SpeciesData(id=4, name="M")
+    rxn = ReactionData(reactants=Dict(1 => 1.0, 2 => 1.0), products=Dict(3 => 1.0),
+                       kinetics=ThirdBodyArrhenius(ElementaryArrhenius(2.0, 0.0, 0.0),
+                                                   Dict(4 => 1.0)))
+    mech = Mechanism(species=[H, O2, HO2, M], reactions=[rxn])
+    sys = lower_to_mtk(mech)
+    # M_eff_1 should be in observed, NOT in unknowns
+    obs_names = Set(String(getname(o.lhs)) for o in observed(sys))
+    unk_names = Set(String(getname(u)) for u in unknowns(sys))
+    @test "M_eff_1" in obs_names
+    @test !("M_eff_1" in unk_names)
+    # Numeric: at H=1,O2=2,M=3,HO2=0: [M]_eff = 1+2+0+3 = 6 -> rate = 2*1*2*6 = 24
+    idx = _state_index(sys); u = zeros(4)
+    u[idx["H"]] = 1.0; u[idx["O2"]] = 2.0; u[idx["M"]] = 3.0
+    du = zeros(4)
+    pvals = [getdefault(p) for p in parameters(sys)]
+    ODEFunction(sys)(du, u, pvals, 0.0)
+    @test du[idx["H"]]   ≈ -24.0
+    @test du[idx["HO2"]] ≈  24.0
+    @test du[idx["M"]]   ≈ 0.0
+    # Troe falloff: M_eff should also be observed
+    troe_rxn = ReactionData(reactants=Dict(1 => 1.0, 2 => 1.0), products=Dict(3 => 1.0),
+        kinetics=TroeFalloff(ElementaryArrhenius(1.0e20, -1.4, 0.0),
+                             ElementaryArrhenius(1.0e15, -1.0, 0.0),
+                             Dict(4 => 1.0), TroeParams(0.5, 1.0e-30, 1.0e30, 1.0e30)))
+    troe_mech = Mechanism(species=[H, O2, HO2, M], reactions=[troe_rxn])
+    troe_sys = lower_to_mtk(troe_mech)
+    troe_obs = Set(String(getname(o.lhs)) for o in observed(troe_sys))
+    @test "M_eff_1" in troe_obs
 end

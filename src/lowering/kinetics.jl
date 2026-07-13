@@ -115,7 +115,7 @@ function symbolic_kf(kin::ThirdBodyArrhenius, ctx::RateCtx)
     base = iszero(kin.base.b) && iszero(kin.base.Ea) ? A :
            iszero(kin.base.Ea) ? A * ctx.T^kin.base.b :
            _arrhenius_body(A, kin.base.b, _kparam(ctx, "", kin.base.Ea), ctx.T)
-    return base * _meff(ctx.mech, kin.efficiencies, ctx.cvar)
+    return base * _meff(ctx, kin.efficiencies)
 end
 
 "Troe k_f = kinf·(Pr/(1+Pr))·F, Pr = k0·[M]_eff/kinf. kinf/k0 via _arrhenius_body; F via
@@ -130,7 +130,7 @@ function symbolic_kf(kin::TroeFalloff, ctx::RateCtx)
     k0   = _arrhenius_body(rate_param(Symbol("k_", ctx.j, "_low_A"), kin.low_rate.A,
                                       _k_unit(ctx.order + 1, kin.low_rate.b)),
                            kin.low_rate.b, _kparam(ctx, "_low", kin.low_rate.Ea), ctx.T)
-    meff = _meff(ctx.mech, kin.efficiencies, ctx.cvar)
+    meff = _meff(ctx, kin.efficiencies)
     Pr   = k0 * meff / kinf
     # Fcent with degenerate-term short-circuit (data-layer plan; avoids pathological symbolic exp)
     α, tp = kin.troe.α, kin.troe
@@ -154,7 +154,7 @@ function symbolic_kf(kin::LindemannFalloff, ctx::RateCtx)
     k0   = _arrhenius_body(rate_param(Symbol("k_", ctx.j, "_low_A"), kin.low_rate.A,
                                       _k_unit(ctx.order + 1, kin.low_rate.b)),
                            kin.low_rate.b, _kparam(ctx, "_low", kin.low_rate.Ea), ctx.T)
-    meff = _meff(ctx.mech, kin.efficiencies, ctx.cvar)
+    meff = _meff(ctx, kin.efficiencies)
     Pr   = k0 * meff / kinf
     return kinf * (Pr / (1 + Pr))
 end
@@ -183,14 +183,22 @@ end
 symbolic_rate(kin::AbstractKinetics, rx::ReactionData, ctx::RateCtx) =
     symbolic_kf(kin, ctx) * _mass_action(rx.reactants, ctx.cvar)
 
-"Effective third-body concentration [M]_eff = Σ_i α_i·[X_i] over all species (default α=1)."
-function _meff(mech::Mechanism, efficiencies::Dict{SpeciesID,Float64}, cvar)
-    m = 0.0
-    for sp in mech.species
+"Effective third-body concentration [M]_eff = Σ_i α_i·[X_i] over all species (default α=1).
+ Emits M_eff_j as an algebraic variable (state+algebraic pattern, §7.1): the equation
+ M_eff_j ~ Σα·c is registered in ctx.meff_eqs, and M_eff_j (a single symbol) is returned
+ for use in the rate. MTK tearing eliminates M_eff_j → observed at compile time. This avoids
+ inlining the N_species-term sum into every rate, so MTK's dim-check processes one symbol
+ per rate (fast) instead of an N-term expression (hangs for Aramco's 581 species)."
+function _meff(ctx::RateCtx, efficiencies::Dict{SpeciesID,Float64})
+    t = ModelingToolkit.t
+    Mvar = _attach_unit(only(@variables ($(Symbol("M_eff_", ctx.j)))(t)), ChemUnits.conc)
+    s = 0.0
+    for sp in ctx.mech.species
         alpha = get(efficiencies, sp.id, 1.0)
-        m += alpha * cvar[sp.id]
+        s += alpha * ctx.cvar[sp.id]
     end
-    return m
+    push!(ctx.meff_eqs, Mvar ~ s)           # register the algebraic equation
+    return Mvar
 end
 
 "Catalyst mass-action lowering path (spec §5.4). Builds a Catalyst.Reaction on the
