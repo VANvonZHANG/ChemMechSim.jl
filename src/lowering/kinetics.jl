@@ -118,18 +118,22 @@ function symbolic_kf(kin::ThirdBodyArrhenius, ctx::RateCtx)
     return base * _meff(ctx, kin.efficiencies)
 end
 
-"Troe k_f = kinf·(Pr/(1+Pr))·F, Pr = k0·[M]_eff/kinf. kinf/k0 via _arrhenius_body; F via
- _troe_F_from_fcent with Fcent built per _troe_fcent_plan (short-circuits sentinel Troe params
- so pathological symbolic exp(-T/1e-30) is never constructed). kinf A-factor uses ctx.order
- (high-pressure limit = Σ reactant order); k0 uses ctx.order+1 (low-pressure limit adds one
- [M]_eff concentration)."
+"Troe k_f = kinf·(Pr/(1+Pr))·F, Pr = k0·[M]_eff/kinf. kinf/k0 via _arrhenius_dimless_body
+ (T_ref-normalized to avoid DynamicQuantities FixedRational rounding on T^(b0-binf) in the
+ ratio k0/kinf; see PLOG docstring for details); F via _troe_F_from_fcent with Fcent built
+ per _troe_fcent_plan (short-circuits sentinel Troe params so pathological symbolic
+ exp(-T/1e-30) is never constructed). kinf A-factor uses ctx.order (high-pressure limit =
+ Σ reactant order); k0 uses ctx.order+1 (low-pressure limit adds one [M]_eff concentration)."
 function symbolic_kf(kin::TroeFalloff, ctx::RateCtx)
     ctx.T === nothing && error("symbolic_kf(TroeFalloff): falloff is T-dependent but ctx.T is nothing.")
-    kinf = _arrhenius_body(_aparam(ctx, "_high", kin.high_rate.A, kin.high_rate.b),
-                           kin.high_rate.b, _kparam(ctx, "_high", kin.high_rate.Ea), ctx.T)
-    k0   = _arrhenius_body(rate_param(Symbol("k_", ctx.j, "_low_A"), kin.low_rate.A,
-                                      _k_unit(ctx.order + 1, kin.low_rate.b)),
-                           kin.low_rate.b, _kparam(ctx, "_low", kin.low_rate.Ea), ctx.T)
+    T_ref = _tvparam(ctx, "_Tref", 1.0)
+    kinf = _arrhenius_dimless_body(_aparam(ctx, "_high", kin.high_rate.A, 0.0),
+                                    kin.high_rate.b, _kparam(ctx, "_high", kin.high_rate.Ea),
+                                    ctx.T, T_ref)
+    k0   = _arrhenius_dimless_body(rate_param(Symbol("k_", ctx.j, "_low_A"), kin.low_rate.A,
+                                               _k_unit(ctx.order + 1, 0.0)),
+                                    kin.low_rate.b, _kparam(ctx, "_low", kin.low_rate.Ea),
+                                    ctx.T, T_ref)
     meff = _meff(ctx, kin.efficiencies)
     Pr   = k0 * meff / kinf
     # Fcent with degenerate-term short-circuit (data-layer plan; avoids pathological symbolic exp)
@@ -146,14 +150,18 @@ function symbolic_kf(kin::TroeFalloff, ctx::RateCtx)
 end
 
 "Lindemann k_f = kinf·Pr/(1+Pr) (F≡1). Same as Troe minus the center-broadening factor.
- kinf A-factor uses ctx.order; k0 uses ctx.order+1."
+ kinf A-factor uses ctx.order; k0 uses ctx.order+1. Uses _arrhenius_dimless_body (same
+ FixedRational-avoidance rationale as Troe)."
 function symbolic_kf(kin::LindemannFalloff, ctx::RateCtx)
     ctx.T === nothing && error("symbolic_kf(LindemannFalloff): falloff is T-dependent but ctx.T is nothing.")
-    kinf = _arrhenius_body(_aparam(ctx, "_high", kin.high_rate.A, kin.high_rate.b),
-                           kin.high_rate.b, _kparam(ctx, "_high", kin.high_rate.Ea), ctx.T)
-    k0   = _arrhenius_body(rate_param(Symbol("k_", ctx.j, "_low_A"), kin.low_rate.A,
-                                      _k_unit(ctx.order + 1, kin.low_rate.b)),
-                           kin.low_rate.b, _kparam(ctx, "_low", kin.low_rate.Ea), ctx.T)
+    T_ref = _tvparam(ctx, "_Tref", 1.0)
+    kinf = _arrhenius_dimless_body(_aparam(ctx, "_high", kin.high_rate.A, 0.0),
+                                    kin.high_rate.b, _kparam(ctx, "_high", kin.high_rate.Ea),
+                                    ctx.T, T_ref)
+    k0   = _arrhenius_dimless_body(rate_param(Symbol("k_", ctx.j, "_low_A"), kin.low_rate.A,
+                                               _k_unit(ctx.order + 1, 0.0)),
+                                    kin.low_rate.b, _kparam(ctx, "_low", kin.low_rate.Ea),
+                                    ctx.T, T_ref)
     meff = _meff(ctx, kin.efficiencies)
     Pr   = k0 * meff / kinf
     return kinf * (Pr / (1 + Pr))

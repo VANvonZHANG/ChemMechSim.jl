@@ -222,15 +222,31 @@ needs_P(::AbstractKinetics) = false
 # Colocated with PlogRate (the user's "PLOG is a special reaction" decision; spec §2/§3).
 
 "Symbolic PLOG forward rate constant k(T,P). Materializes 2N params (A_i, θ_i per point;
- P_i and b_i are plain Float64), builds each k_i(T) via _arrhenius_body, groups same-pressure
+ P_i and b_i are plain Float64), builds each k_i(T) via _arrhenius_dimless_body, groups same-pressure
  points (sum k_i(T) at each unique P — Cantera semantics), then log-log interpolates via
- _plog_interpolate using ctx.P (pressure symbol). Requires ctx.P ≠ nothing."
+ _plog_interpolate using ctx.P (pressure symbol). Requires ctx.P ≠ nothing.
+ Uses _arrhenius_dimless_body (T_ref-normalized) instead of _arrhenius_body.
+
+ PLOG uses a T_ref-normalized Arrhenius body: k_i = A_i·(T/T_ref)^b_i·exp(-θ_i/T) instead of
+ the generic A·T^b. Different PLOG points have different b_i, and in the interpolation ratio
+ (k_hi/k_lo)^f the T^b dimensions must cancel. DynamicQuantities stores exponents as
+ FixedRational{Int32,25200}, so T^b_i and T^b_j use independently-rounded rationals that DON'T
+ exactly cancel in the ratio (e.g. 3.817→24047/6300, 4.149→20911/5040, but the difference
+ 0.332→4183/12600 ≠ 789/25200 = 20911/5040−24047/6300). Using (T/T_ref)^b makes each T^b factor
+ dimensionless, so all k_i share the same unit regardless of b_i. The A-factor carries the
+ rate-constant unit directly (conc^(1-order)·s⁻¹), NOT the b-dependent _k_unit.
+ The same issue affects Troe/Lindemann: Pr = k0·M/kinf involves a ratio of Arrhenius
+ expressions with different b values."
+_arrhenius_dimless_body(A, b, θ, T, T_ref) = A * (T / T_ref)^b * exp(-θ / T)
+
 function symbolic_kf(kin::PlogRate, ctx)
     ctx.P === nothing && error("symbolic_kf(PlogRate): pressure-dependent rate needs ctx.P " *
                                "(a config with eos=:ideal_gas); got nothing.")
     n = length(kin.points)
+    T_ref = _tvparam(ctx, "_Tref", 1.0)
     ks = ntuple(i -> let p = kin.points[i]
-        _arrhenius_body(_aparam(ctx, "_p$i", p.A, p.b), p.b, _kparam(ctx, "_p$i", p.Ea), ctx.T)
+        _arrhenius_dimless_body(_aparam(ctx, "_p$i", p.A, 0.0), p.b,
+                                _kparam(ctx, "_p$i", p.Ea), ctx.T, T_ref)
     end, n)
     log_Pi = ntuple(i -> log(kin.points[i].P / P_STD), n)   # plain Float64, may have dups
     s_ks, s_lp = _plog_sum_at_pressures(collect(ks), collect(log_Pi))
