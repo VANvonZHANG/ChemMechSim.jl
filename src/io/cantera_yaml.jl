@@ -247,8 +247,8 @@ function _parse_reaction(rxn_dict, name_to_id::Dict{String,SpeciesID}, ctx::_Uni
         sort!(pts, by = p -> p.P)                        # defensive: ensure ascending
         length(pts) >= 2 ||
             error("load_mechanism: PLOG reaction needs ≥2 pressure points; got $(length(pts)) in \"$eq\".")
-        allunique(p.P for p in pts) ||
-            error("load_mechanism: PLOG reaction has duplicate pressure points in \"$eq\".")
+        length(unique(round.(p.P, sigdigits=12) for p in pts)) >= 2 ||
+            error("load_mechanism: PLOG reaction needs ≥2 distinct pressures; all same in \"$eq\".")
         kin = PlogRate(pts)
     else
         @warn "load_mechanism: skipping unsupported $rtype reaction: $eq"

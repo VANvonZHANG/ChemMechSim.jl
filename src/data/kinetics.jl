@@ -104,12 +104,37 @@ function _plog_interpolate(ks, log_P, log_Pi)
     return result
 end
 
+"Group points by unique log-pressure (after sort), summing ks within each group. Returns
+ (unique_ks, unique_log_Pi) for downstream _plog_interpolate. Pure arithmetic, generic.
+ Matches Cantera's same-pressure PLOG semantics (rates sum at each pressure, then interpolate).
+ Assumes ks/log_Pi are already sorted ascending by log_Pi (the parser sorts by P before building
+ PlogRate). Exact Float64 equality on log_Pi is safe: Pa-converted atm values from the same YAML
+ entry produce bit-identical log_Pi (same Float64 multiply + log call)."
+function _plog_sum_at_pressures(ks, log_Pi)
+    n = length(ks)
+    n == length(log_Pi) || error("_plog_sum_at_pressures: length mismatch")
+    out_ks = Any[]; out_lp = Any[]
+    i = 1
+    while i ≤ n
+        j = i
+        s = ks[i]
+        while j + 1 ≤ n && log_Pi[j + 1] == log_Pi[i]   # same pressure (exact-equal: log_Pi are log(P/P_STD), Float64)
+            j += 1; s += ks[j]
+        end
+        push!(out_ks, s); push!(out_lp, log_Pi[i])
+        i = j + 1
+    end
+    return (out_ks, out_lp)
+end
+
 "Numeric PLOG rate constant k(T,P) — MTK-free standalone eval (Cantera comparison, plots, tests).
- Uses P_STD as the dimensionless-reference scaffold (its value cancels in the ratios)."
+ Uses P_STD as the dimensionless-reference scaffold (its value cancels in the ratios).
+ Groups same-pressure points (sum k_i(T) at each unique P) before interpolating — Cantera semantics."
 function plog_rate(kin::PlogRate, T::Real, P::Real)
     ks = [_arrhenius_body(p.A, p.b, p.Ea / R_GAS, T) for p in kin.points]
-    log_Pi = [log(p.P / P_STD) for p in kin.points]
-    return _plog_interpolate(ks, log(P / P_STD), log_Pi)
+    log_Pi = [log(p.P / P_STD) for p in kin.points]      # may have duplicates (helper groups)
+    s_ks, s_lp = _plog_sum_at_pressures(ks, log_Pi)
+    return _plog_interpolate(s_ks, log(P / P_STD), s_lp)
 end
 
 struct ChebyshevRate <: AbstractKinetics end
@@ -197,8 +222,9 @@ needs_P(::AbstractKinetics) = false
 # Colocated with PlogRate (the user's "PLOG is a special reaction" decision; spec §2/§3).
 
 "Symbolic PLOG forward rate constant k(T,P). Materializes 2N params (A_i, θ_i per point;
- P_i and b_i are plain Float64), builds each k_i(T) via _arrhenius_body, then log-log
- interpolates via _plog_interpolate using ctx.P (pressure symbol). Requires ctx.P ≠ nothing."
+ P_i and b_i are plain Float64), builds each k_i(T) via _arrhenius_body, groups same-pressure
+ points (sum k_i(T) at each unique P — Cantera semantics), then log-log interpolates via
+ _plog_interpolate using ctx.P (pressure symbol). Requires ctx.P ≠ nothing."
 function symbolic_kf(kin::PlogRate, ctx)
     ctx.P === nothing && error("symbolic_kf(PlogRate): pressure-dependent rate needs ctx.P " *
                                "(a config with eos=:ideal_gas); got nothing.")
@@ -206,9 +232,9 @@ function symbolic_kf(kin::PlogRate, ctx)
     ks = ntuple(i -> let p = kin.points[i]
         _arrhenius_body(_aparam(ctx, "_p$i", p.A, p.b), p.b, _kparam(ctx, "_p$i", p.Ea), ctx.T)
     end, n)
-    log_Pi = ntuple(i -> log(kin.points[i].P / P_STD), n)   # plain Float64
-    log_P  = log(ctx.P / ctx.P_std)                          # symbolic Num (dimensionless ratio)
-    return _plog_interpolate(ks, log_P, log_Pi)
+    log_Pi = ntuple(i -> log(kin.points[i].P / P_STD), n)   # plain Float64, may have dups
+    s_ks, s_lp = _plog_sum_at_pressures(collect(ks), collect(log_Pi))
+    return _plog_interpolate(s_ks, log(ctx.P / ctx.P_std), s_lp)
 end
 
 "PLOG is pressure-dependent."
