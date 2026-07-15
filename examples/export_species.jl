@@ -39,5 +39,5 @@ function export_mech(yaml, out_csv, label)
 end
 
 export_mech("test/data/gri30.yaml", "examples/cantera_ref/gri30_cms_species.csv", "GRI30")
-export_mech("examples/data/FFCM2_model.yaml", "examples/cantera_ref/ffcm2_cms_species.csv", "FFCM2")
+export_mech("examples/data/FFCM2.yaml", "examples/cantera_ref/ffcm2_cms_species.csv", "FFCM2")
 println("Done.")

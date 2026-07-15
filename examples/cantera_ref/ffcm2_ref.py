@@ -6,7 +6,7 @@ import cantera as ct
 import numpy as np
 
 T0, P0 = 1500.0, ct.one_atm
-gas = ct.Solution("examples/data/FFCM2_model.yaml")
+gas = ct.Solution("examples/data/FFCM2.yaml")
 gas.TP = T0, P0
 gas.set_equivalence_ratio(1.0, "CH4", "O2:1,N2:3.76")   # stoichiometric CH4-air
 

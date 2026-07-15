@@ -6,7 +6,7 @@ using OrdinaryDiffEq: FBDF
 using ModelingToolkit: unknowns, getname
 using DelimitedFiles
 
-const YAML_PATH = joinpath(@__DIR__, "data", "FFCM2_model.yaml")
+const YAML_PATH = joinpath(@__DIR__, "data", "FFCM2.yaml")
 const REF_CSV = joinpath(@__DIR__, "cantera_ref", "ffcm2_ref_constV.csv")
 
 _var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unknowns(sys))]

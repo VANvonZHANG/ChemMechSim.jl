@@ -34,5 +34,5 @@ def run(yaml_path, out_csv, label):
 # GRI30 (Cantera built-in)
 run("test/data/gri30.yaml", f"{DIR}/gri30_ref_species.csv", "GRI30")
 # FFCM2 (project fixture)
-run("examples/data/FFCM2_model.yaml", f"{DIR}/ffcm2_ref_species.csv", "FFCM2")
+run("examples/data/FFCM2.yaml", f"{DIR}/ffcm2_ref_species.csv", "FFCM2")
 print("Cantera species refs generated.")
