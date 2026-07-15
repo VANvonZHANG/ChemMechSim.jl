@@ -1,2 +1,5 @@
 *.csv
 *.png
+*.svg
+*.pdf
+validation_errors.txt
