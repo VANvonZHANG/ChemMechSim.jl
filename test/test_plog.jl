@@ -44,3 +44,13 @@ end
     end
     @test maxrel < 1e-6                                   # PLOG math must match Cantera
 end
+
+@testset "Large-mech C: same-pressure PLOG sums at pressure" begin
+    using ChemMechSim: PlogPoint, PlogRate, plog_rate
+    # 2 points at P=1e5 (A=1e9,b=0,Ea=0 and A=3e9,b=0,Ea=0 → sum 4e9), 1 at P=1e6 (A=1e7)
+    kin = PlogRate([PlogPoint(1e5,1e9,0,0), PlogPoint(1e5,3e9,0,0), PlogPoint(1e6,1e7,0,0)])
+    @test plog_rate(kin, 1000.0, 1e5) ≈ 4e9          # at P=1e5 → sum of the two (4e9), not interp
+    @test plog_rate(kin, 1000.0, 1e6) ≈ 1e7          # at P=1e6
+    # between: f=0.5 at log-mid → 4e9·(1e7/4e9)^0.5
+    @test plog_rate(kin, 1000.0, sqrt(1e5*1e6)) ≈ 4e9 * (1e7/4e9)^0.5
+end
