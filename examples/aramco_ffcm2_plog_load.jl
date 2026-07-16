@@ -1,5 +1,5 @@
 # Phase 6 T5: coverage — full Aramco 3.0 + FFCM2 parse + lower (all PLOG reactions).
-# Local only (the fixtures in examples/data/ are untracked). NOT a CI test.
+# Local coverage script (not a CI test). Mechanism fixtures live in examples/data/.
 # Run: julia --project=. examples/aramco_ffcm2_plog_load.jl
 #
 # Known limitations surfaced by this coverage run (documented, not blocking T5):
@@ -14,7 +14,7 @@
 using ChemMechSim
 using ChemMechSim: PlogRate
 
-for path in ["examples/data/AramcoMech3.0.yaml", "examples/data/FFCM2_model.yaml"]
+for path in ["examples/data/AramcoMech3.0.yaml", "examples/data/FFCM2.yaml"]
     println("=" ^ 60)
     println("Loading: $path")
     local mech
