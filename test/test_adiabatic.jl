@@ -17,18 +17,21 @@ function _exothermic_ab_mech(; A=1.0, b=0.0, Ea=0.0, HEAT=10000.0)
     Mechanism(species=[spA, spB], reactions=[rxn])
 end
 
-@testset ":adiabatic_constV: dT/dt analytic + T rises + U conserved + P observed" begin
+@testset ":adiabatic_constV: dT/dt analytic + T rises + U conserved + P a differential state" begin
     HEAT = 10000.0
     mech = _exothermic_ab_mech(; A=1.0, HEAT=HEAT)         # k = 1 s⁻¹ (constant)
     phase = ChemPhaseSystem(mech; config=convenience_config(:adiabatic_constV))
     sys = extract_system(phase); idx = _state_index(sys)
+    # P is now a differential STATE under const-V (Task 4), not observed
+    @test "P" in keys(idx)
+    @test !("P" in [String(getname(o.lhs)) for o in observed(sys)])
     # analytic dT/dt at t=0: r = k·A = 1·1 = 1; Σc·cv = (A+B)·(cp/R−1)·R = 1·1.5·R
     dT_analytic = 1.0 * HEAT / (1.0 * 1.5 * R4A)
     f = ODEFunction(sys); du = zeros(length(idx))
     u0 = zeros(length(idx)); u0[idx["A"]] = 1.0; u0[idx["B"]] = 0.0; u0[idx["T"]] = 300.0
     f(du, u0, [getdefault(p) for p in parameters(sys)], 0.0)
     @test du[idx["T"]] ≈ dT_analytic  rtol=1e-9
-    # solve: T rises, A depletes, B grows
+    # solve: T rises, A depletes, B grows (build_problem auto-fills P0 from EOS)
     sol = simulate(phase, (0.0, 5.0);
                    u0=Dict("A"=>1.0, "B"=>0.0, "T"=>300.0),
                    solver=Rodas5P(), reltol=1e-8, abstol=1e-10)
@@ -40,10 +43,12 @@ end
     nA = mech.species[1].thermo; nB = mech.species[2].thermo
     U(T2, a, b2) = a * u_molar(nA, T2) + b2 * u_molar(nB, T2)
     @test U(Tv, Av, Bv) ≈ U(300.0, 1.0, 0.0)  rtol=1e-6
-    # observed P rises with T at const V (Σc ≈ const)
-    Pvar = [o.lhs for o in observed(sys) if getname(o.lhs)==:P][1]
+    # P is a STATE now: access via _var(sys, "P"). P rises with T at const V (Σc ≈ const).
+    Pvar = _var(sys, "P")
     P0 = Float64(sol(0.0; idxs=Pvar)); Pe = Float64(sol(5.0; idxs=Pvar))
     @test Pe > P0
+    # P0 matches the EOS initial pressure (Σc)·R·T0 = 1·8.314·300 (build_problem auto-fill)
+    @test P0 ≈ 1.0 * R4A * 300.0  rtol=1e-6
 end
 
 @testset ":adiabatic_constV: T-dependent Arrhenius rate with T as state solves" begin
@@ -57,14 +62,15 @@ end
     @test Float64(sol(5.0; idxs=_var(sys,"T"))) > 300.0     # T rises despite T-dependent k
 end
 
-@testset ":adiabatic_constV: Jacobian carries T-coupling" begin
+@testset ":adiabatic_constV: Jacobian carries T- and P-coupling" begin
     mech = _exothermic_ab_mech(; A=1.0e3, Ea=R4A * 3000.0)  # T-dependent rate → coupled
     sys = extract_system(ChemPhaseSystem(mech; config=convenience_config(:adiabatic_constV)))
     jac = ModelingToolkit.calculate_jacobian(sys)
-    @test size(jac) == (3, 3)
+    @test size(jac) == (4, 4)                              # A, B, T, P (P is a differential state, Task 4)
     idx = _state_index(sys)
     @test !isequal(0.0, jac[idx["T"], idx["T"]])           # ∂(dT/dt)/∂T  ≠ 0 (cp/cv + Arrhenius)
     @test !isequal(0.0, jac[idx["A"], idx["T"]])           # ∂(dc_A/dt)/∂T ≠ 0 (rate T-coupling)
+    @test !isequal(0.0, jac[idx["P"], idx["P"]])           # ∂(dP/dt)/∂P  ≠ 0 (const-V P-ODE couples P)
 end
 
 @testset "validate: :adiabatic requires NASA7 thermo on all species (§5.3.4)" begin
@@ -183,7 +189,42 @@ end
     @test Float64(sol(5.0; idxs=Vobs)) > Float64(sol(0.0; idxs=Vobs))
 end
 
-using ChemMechSim: _sum_species_rhs
+using ChemMechSim: _sum_species_rhs, PlogPoint, PlogRate
+using OrdinaryDiffEq
+using OrdinaryDiffEq: FBDF
+using SparseArrays: nnz, nonzeros
+
+"Small inline PLOG mechanism for the const-V P-differential integration test:
+ A → B with one PLOG reaction. Both species carry NASA7 thermo (required for :adiabatic)."
+function _plog_ab_mech()
+    a1 = 2.5; a6A = -a1 * 298.15; a6B = a6A - 5000.0 / R4A   # B is 5 kJ/mol lower (mildly exothermic)
+    nA = NASA7((a1,0,0,0,0,a6A,0.0),(a1,0,0,0,0,a6A,0.0), 200.0, 1000.0, 3500.0)
+    nB = NASA7((a1,0,0,0,0,a6B,0.0),(a1,0,0,0,0,a6B,0.0), 200.0, 1000.0, 3500.0)
+    spA = SpeciesData(id=1, name="A", thermo=nA); spB = SpeciesData(id=2, name="B", thermo=nB)
+    kin = PlogRate([PlogPoint(1e4, 1e3, 0.0, 0.0), PlogPoint(1e6, 1e2, 0.0, 0.0)])
+    rxn = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0), kinetics=kin)
+    Mechanism(species=[spA, spB], reactions=[rxn])
+end
+
+@testset "const-V: P differential state + opaque-PLOG + jac tractable + solve" begin
+    # Task 4 integration: const-V adiabatic + opaque-PLOG ⇒ P is a DIFFERENTIAL state,
+    # the sparse Jacobian is finite (does not explode), and FBDF solves to Success.
+    mech = _plog_ab_mech()
+    phase = ChemMechSim.ChemPhaseSystem(mech; config=convenience_config(:adiabatic_constV))
+    sys = ChemMechSim.extract_system(phase)
+    names = Set(String(ModelingToolkit.getname(u)) for u in unknowns(sys))
+    @test "P" in names                                        # P is now a STATE (not observed)
+    @test !("P" in Set(String(ModelingToolkit.getname(o.lhs)) for o in observed(sys)))  # not observed
+    # sparse Jacobian must be finite (was exploding symbolically before the opaque-PLOG node)
+    jac = ModelingToolkit.calculate_jacobian(sys; sparse=true)
+    @test nnz(jac) > 0                                        # finite nnz ⇒ tractable
+    @test all(isfinite, nonzeros(jac))                       # no Inf/NaN
+    # solve a tiny tspan with FBDF; P0 auto-filled by build_problem (no P in u0)
+    sol = simulate(phase, (0.0, 0.1);
+                   u0=Dict("A"=>1.0, "B"=>0.0, "T"=>1000.0),
+                   solver=FBDF(), reltol=1e-6, abstol=1e-9)
+    @test sol.retcode == OrdinaryDiffEq.ReturnCode.Success
+end
 
 @testset "P-ODE helpers (_sum_species_rhs)" begin
     # A + B -> C (Δn_total = 1-2 = -1 per event); rate r ⇒ Σ dc/dt = -r

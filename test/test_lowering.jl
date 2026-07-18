@@ -166,7 +166,7 @@ end
     @test csum ≈ 1.0  atol=1e-6                                            # mass conserved
 end
 
-@testset ":adiabatic_constV lowers with T as a state (Phase 4a)" begin
+@testset ":adiabatic_constV lowers with T and P as states (Phase 4a + Task 4)" begin
     # exothermic A -> B, both species carry NASA7 thermo
     a1 = 2.5; a6A = -a1 * 298.15; a6B = a6A - 10000.0 / 8.314
     nA = NASA7((a1,0,0,0,0,a6A,0.0),(a1,0,0,0,0,a6A,0.0), 200.0, 1000.0, 3500.0)
@@ -179,11 +179,12 @@ end
     sys = extract_system(phase)
     names = [String(getname(s)) for s in unknowns(sys)]
     @test "T" in names                       # T is a state, not a parameter
-    @test length(unknowns(sys)) == 3         # A, B, T
+    @test "P" in names                       # P is a differential state under const-V (Task 4)
+    @test length(unknowns(sys)) == 4         # A, B, T, P
     @test !any(String(getname(p)) == "T" for p in parameters(sys))  # T not in params
-    # EOS observed pressure present
+    # P is NOT observed under const-V adiabatic (it's a state now)
     obs_names = [String(getname(o.lhs)) for o in ModelingToolkit.observed(sys)]
-    @test "P" in obs_names
+    @test !("P" in obs_names)
 end
 
 @testset "const-P isothermal: moles state, V/c observed, analytic n_A(t)=exp(-kt)" begin

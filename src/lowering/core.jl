@@ -31,7 +31,7 @@ _lowerable(c::MechanismConfig) =
  Species get [unit=conc]; T [unit=K] is created iff any reaction is T-dependent or
  ThermoReverse. Each reaction's rate constant is a unit-bearing parameter (default = stored
  value), so MTK's dimension check fires at System construction (§5.6)."
-function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig())
+function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig(), checks::Bool=true)
     _lowerable(config) ||
         error("lower_to_mtk: config not supported. Supported: state_basis=:concentration, " *
               "energy∈{:isothermal,:adiabatic}, eos∈{:off,:ideal_gas}; :constant_pressure " *
@@ -39,7 +39,7 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
               "Got: energy=$(config.energy) constraint=$(config.constraint) eos=$(config.eos) " *
               "basis=$(config.state_basis). Use MechanismConfig() (:kinetic), convenience_config(:fixedT), " *
               "convenience_config(:adiabatic_constV), or convenience_config(:adiabatic_constP).")
-    config.constraint === :constant_pressure && return _lower_constP(mech, config)
+    config.constraint === :constant_pressure && return _lower_constP(mech, config, checks)
     t = ModelingToolkit.t
     D = ModelingToolkit.D
     cvars = [_attach_unit(only(@species ($(Symbol(sp.name)))(t)), ChemUnits.conc)
@@ -74,35 +74,53 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
            for i in eachindex(mech.species)]
     # Constraint-layer assembly (energy layer adds the const-V dT/dt under :adiabatic; spec §5.4).
     eqs = append_constraint_layers!(eqs, mech, config, cvar, Tparam, rates; tcx=tcx)
+    # P differential state (spec §5.3 iii; Task 4): under :adiabatic + :constant_volume the
+    # EOS total derivative D(P) ~ R·(T·Σ物种RHS + (Σc)·能量RHS) is pushed so P becomes a state
+    # rather than an observed variable. const-P is unaffected (early-returned above); :fixedT
+    # (isothermal const-V) keeps P observed/algebraic since there is no energy ODE to couple.
+    p_differential = is_adiabatic && config.constraint === :constant_volume && Pvar !== nothing
+    p_differential &&
+        push!(eqs, _p_ode_constV(mech, cvar, Tparam, rates, tcx, Pvar, is_adiabatic))
     # M_eff algebraic eqs: MTK tearing eliminates M_eff_j → observed (state+algebraic, §7.1).
     if config.eos === :ideal_gas
-        return _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic, tcx, Pvar, _needs_P(mech), meff_eqs)
+        return _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic, tcx, Pvar, _needs_P(mech),
+                               meff_eqs, checks; p_differential=p_differential)
     end
     append!(eqs, meff_eqs)               # non-EOS: auto-discover path handles M_eff_j as states
     @named raw = System(eqs, t)          # auto-discovers states [c₁..cₙ, T] and RHS params
-    return mtkcompile(raw)
+    return mtkcompile(raw; checks=checks)
 end
 
-"Build the system with EOS observed P ~ (Σc)·R·T. Under :adiabatic T is a STATE (included in
- `states`); under :isothermal T is a parameter retained via the observed-param fix (Phase 3).
- R appears in the energy-equation RHS under :adiabatic so it is retained automatically.
- When P appears in the rate RHS (PLOG), the P equation is an algebraic eq in the main system
- (Pvar in states); MTK tearing eliminates it → observed. Otherwise P is purely observed.
- M_eff_j (third-body) algebraic eqs follow the same state+algebraic pattern: M_eff_j is added
- to states with its algebraic eq in eqs; MTK tearing eliminates M_eff_j → observed."
-function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool, tcx, Pvar, needs_P_flag::Bool, meff_eqs=Any[])
+"Build the system with EOS P. Two regimes (spec §5.3 iii; Task 4):
+   • const-V + :adiabatic (p_differential=true): P is a DIFFERENTIAL state — its ODE
+     D(P) ~ R·(T·Σ物种RHS + (Σc)·能量RHS) was already pushed into `eqs` by `lower_to_mtk`.
+     We add Pvar to `states` WITHOUT an algebraic/observed P eq (the ODE defines P).
+   • otherwise (isothermal const-V, constraint=:none+eos): P stays OBSERVED (P ~ (Σc)·R·T)
+     or algebraic (when `needs_P_flag` — PLOG under isothermal const-V) exactly as before.
+ Under :adiabatic T is a STATE; under :isothermal T is a parameter (retained via the
+ observed-param fix). R is retained automatically (appears in the energy / P ODE RHS).
+ M_eff_j (third-body) algebraic eqs follow the same state+algebraic pattern: M_eff_j is
+ added to states with its algebraic eq in eqs; MTK tearing eliminates M_eff_j → observed."
+function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool, tcx, Pvar,
+                         needs_P_flag::Bool, meff_eqs=Any[], checks::Bool=true; p_differential::Bool=false)
     Rparam = tcx.R                                   # shared with K_c / energy eq (from tcx)
-    P_eq = Pvar ~ sum(cvars) * Rparam * Tparam       # Pvar created by caller (lower_to_mtk)
     states = is_adiabatic ? [cvars; Tparam] : cvars   # T is a state under :adiabatic
     obs = Equation[]
-    if needs_P_flag
-        # P-dependent kinetics (PLOG): P appears in the rate RHS, so it must be a state
-        # with an algebraic eq. MTK tearing eliminates P → observed (same end result).
-        push!(eqs, P_eq)
+    if p_differential
+        # P is a differential state: its ODE was pushed by lower_to_mtk. Just register Pvar
+        # as a state — NO algebraic/observed P equation (the ODE defines P).
         push!(states, Pvar)
     else
-        # No P-dependent kinetics: P is purely observed (never referenced in RHS eqs).
-        push!(obs, P_eq)
+        P_eq = Pvar ~ sum(cvars) * Rparam * Tparam   # Pvar created by caller (lower_to_mtk)
+        if needs_P_flag
+            # P-dependent kinetics (PLOG under isothermal const-V): P appears in the rate RHS,
+            # so it must be a state with an algebraic eq. MTK tearing eliminates P → observed.
+            push!(eqs, P_eq)
+            push!(states, Pvar)
+        else
+            # No P-dependent kinetics: P is purely observed (never referenced in RHS eqs).
+            push!(obs, P_eq)
+        end
     end
     # M_eff_j algebraic eqs (state+algebraic): add to eqs + states; tearing eliminates → observed.
     for eq in meff_eqs
@@ -116,14 +134,14 @@ function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool, tcx, Pvar, n
     ModelingToolkit.getname(Rparam) in rhsnames || push!(extras, Rparam)
     is_adiabatic || (ModelingToolkit.getname(Tparam) in rhsnames || push!(extras, Tparam))  # T param only when isothermal
     @named raw = System(eqs, t, states, [rhsparams; extras]; observed=obs)
-    return mtkcompile(raw)
+    return mtkcompile(raw; checks=checks)
 end
 
 "Lower under :constant_pressure — path A, PURE ODE (probed 2026-07-03 P1/P2).
  Moles `nᵢ` are the states; `V ~ (Σn)RT/P` and concentrations `cᵢ ~ nᵢ/V` are observed (structural_simplify
  flattens them). The rate laws consume `cvar` (concentrations) UNCHANGED — only the outer assembly differs
  from the concentration-state path. :adiabatic adds the enthalpy energy equation via append_constraint_layers!."
-function _lower_constP(mech::Mechanism, config::MechanismConfig)
+function _lower_constP(mech::Mechanism, config::MechanismConfig, checks::Bool=true)
     t = ModelingToolkit.t; D = ModelingToolkit.D
     is_adiabatic = config.energy === :adiabatic
     cvars = [_attach_unit(only(@species ($(Symbol(sp.name)))(t)), ChemUnits.conc) for sp in mech.species]
@@ -149,5 +167,5 @@ function _lower_constP(mech::Mechanism, config::MechanismConfig)
     eqs = append_constraint_layers!(eqs, mech, config, cvar, Tsym, rates; tcx=tcx, nvar=nvar, Vvar=Vvar)
     append!(eqs, meff_eqs)               # M_eff algebraic eqs → MTK tearing eliminates to observed
     @named raw = System(eqs, t)
-    return mtkcompile(raw)
+    return mtkcompile(raw; checks=checks)
 end
