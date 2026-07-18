@@ -1,34 +1,44 @@
 using Test, ModelingToolkit
 using ChemMechSim
 using ChemMechSim: PlogPoint, PlogRate, plog_rate, symbolic_kf, RateCtx, needs_P
+import ModelingToolkit: substitute, value, get_variables, getname, getdefault
 
-@testset "Phase 6 T3: PLOG symbolic_kf + needs_P" begin
-    # needs_P(::PlogRate) = true
+@testset "Phase 6 T3: PLOG symbolic_kf (opaque call node) + needs_P" begin
     kin = PlogRate([PlogPoint(1e4, 1e9, 0.0, 0.0), PlogPoint(1e6, 1e7, 0.0, 0.0)])
     @test needs_P(kin) == true
-
-    # PLOG lowers under :fixedT (eos=:ideal_gas → P observed)
     sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")]
     rx = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0), kinetics=kin)
     mech = Mechanism(species=sp, reactions=[rx])
     phase = ChemMechSim.ChemPhaseSystem(mech; config=convenience_config(:fixedT))
     sys = ChemMechSim.extract_system(phase)
-    # 2 concentration states
-    @test length(unknowns(sys)) == 2
-    # PLOG params named per convention: k_1_p1_A, k_1_p1_theta, k_1_p2_A, k_1_p2_theta
-    pnames = sort([String(ModelingToolkit.getname(p)) for p in parameters(sys)])
-    @test "k_1_p1_A" in pnames
-    @test "k_1_p1_theta" in pnames
-    @test "k_1_p2_A" in pnames
-    @test "k_1_p2_theta" in pnames
-
-    # PLOG under :kinetic (eos=:off, no P) → clear error from T2 early validation
+    unk_names = Set(String(ModelingToolkit.getname(u)) for u in unknowns(sys))
+    @test "A" in unk_names && "B" in unk_names   # species present (P count differs by config)
+    # RHS references plog_kf call node (opaque), NOT inlined ifelse
+    rhs_str = string(equations(sys)[1].rhs)
+    @test occursin("plog_kf", rhs_str)
+    @test !occursin("ifelse", rhs_str)          # no inlined interpolation tree
+    # Numeric check (task-2 brief ambiguity #3): substitute fixed (T, P, c_A) on the RHS
+    # equation and confirm the opaque plog_kf call node evaluates to plog_rate(kin, T, P)
+    # times the mass-action factor (c_A^1 = c_A). Verifies the registered call returns the
+    # correct VALUE, not just that a node exists.
+    rhs = equations(sys)[1].rhs
+    T_sample, P_sample, cA_sample = 1000.0, 1e5, 0.5
+    sub = Dict{Any,Float64}()
+    for v in get_variables(rhs)
+        n = getname(v)
+        if n === :T
+            sub[v] = T_sample
+        elseif n === :P
+            sub[v] = P_sample
+        elseif n === :A
+            sub[v] = cA_sample
+        else
+            sub[v] = getdefault(v)
+        end
+    end
+    rhs_num = Float64(value(substitute(rhs, sub; fold=Val(true))))
+    @test rhs_num ≈ plog_rate(kin, T_sample, P_sample) * cA_sample  rtol=1e-10
     @test_throws ErrorException ChemMechSim.ChemPhaseSystem(mech; config=MechanismConfig())
-
-    # numeric consistency: materialize kf at a sample (T,P) and compare to plog_rate
-    # (build a RateCtx the way the test_lowering T6 test does, or lower + read the rate)
-    # Simplest: the lowered system's RHS, evaluated at a fixed (T,P,c), tracks plog_rate.
-    # (Covered structurally by the param-name checks above; deep numeric check is T5.)
 end
 
 @testset "Phase 6 T5: PLOG rate vs Cantera" begin
