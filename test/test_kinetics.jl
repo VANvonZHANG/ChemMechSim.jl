@@ -148,3 +148,31 @@ end
     troe_obs = Set(String(getname(o.lhs)) for o in observed(troe_sys))
     @test "M_eff_1" in troe_obs
 end
+
+using ChemMechSim: PlogPoint, PlogRate, plog_rate, plog_dkdT, plog_dkdP
+
+@testset "PLOG analytic derivatives vs finite difference" begin
+    # unique-pressure (Aramco-like): 3 points
+    kin = PlogRate([PlogPoint(1e3, 1e9, 0.0, 0.0),
+                    PlogPoint(1e5, 1e8, 1.0, 5000.0),
+                    PlogPoint(1e7, 1e7, 0.5, 10000.0)])
+    for (T, P) in [(1000.0, 5e4), (1500.0, 2e5), (2500.0, 8e5), (1500.0, 9e2), (1500.0, 5e7)]
+        h = 1e-3
+        fdT = (plog_rate(kin, T+h, P) - plog_rate(kin, T-h, P)) / 2h
+        fdP = (plog_rate(kin, T, P+h) - plog_rate(kin, T, P-h)) / 2h
+        @test abs(fdT - plog_dkdT(kin, T, P)) / (abs(fdT) + 1e-30) < 1e-5
+        @test abs(fdP - plog_dkdP(kin, T, P)) / (abs(fdP) + 1e-30) < 1e-4
+    end
+    # same-pressure (FFCM2-like): two rates summed at P=1e5
+    kin2 = PlogRate([PlogPoint(1e5, 1e8, 1.0, 5000.0),
+                     PlogPoint(1e5, 2e7, 0.5, 8000.0),
+                     PlogPoint(1e7, 1e6, 0.0, 0.0)])
+    for (T, P) in [(1500.0, 1e5), (2000.0, 5e5)]
+        h = 1e-3
+        fdT = (plog_rate(kin2, T+h, P) - plog_rate(kin2, T-h, P)) / 2h
+        @test abs(fdT - plog_dkdT(kin2, T, P)) / (abs(fdT) + 1e-30) < 1e-5
+    end
+    # clamp regions: derivative = endpoint dkdT / 0 dkdP
+    @test abs(plog_dkdP(kin, 1500.0, 1e2)) < 1e-30        # below lowest P → 0
+    @test abs(plog_dkdP(kin, 1500.0, 1e9)) < 1e-30        # above highest P → 0
+end
