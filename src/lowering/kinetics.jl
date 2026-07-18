@@ -7,6 +7,48 @@
 # lower_reaction dispatches between them. symbolic_kf returns the effective forward rate
 # constant EXCLUDING the mass-action term (so thermo.jl's ThermoReverse can form kr=kf/Kc).
 
+using ModelingToolkit: @register_symbolic, @register_derivative
+using DynamicQuantities: Quantity, ustrip
+
+# —— Opaque PLOG call node (spec §5.2) ——————————————————————————————
+# PLOG rate is emitted as a call to a registered Julia function (not an inlined ifelse tree),
+# with registered analytic derivatives (∂k/∂T, ∂k/∂P) — the sin→cos pattern. This keeps
+# symbolic differentiation (calculate_jacobian) working AND cheap. The PlogRate params live
+# in a session table keyed by a globally-unique id (safe across multiple lowerings).
+#
+# The opaque function deliberately bypasses MTK's *inner* symbolic unit check on the PLOG
+# interpolation body (architecture decision — see chemmechsim-plog-jacobian-rootcause memory).
+# The unit BOUNDARY is preserved: a Quantity-dispatch on plog_kf/dT/dP re-wraps the Float64
+# result with the reaction's rate-constant unit (conc^(1-order)·s⁻¹), so MTK's check_units
+# derives the correct call-node unit and the equation-level dim check still fires.
+const PLOG_TABLE     = Dict{Int, PlogRate}()           # id → PlogRate (params)
+const PLOG_UNIT_TABLE = Dict{Int, Any}()               # id → output Quantity unit (conc^(1-order)·s⁻¹)
+const PLOG_NEXT_ID   = Ref(0)
+
+"Numeric PLOG k(T,P) for the registered call node; looks up reaction by id."
+plog_kf(T, P, id::Int)    = plog_rate(PLOG_TABLE[id], T, P)
+"Numeric ∂k/∂T for the registered call node."
+plog_kf_dT(T, P, id::Int) = plog_dkdT(PLOG_TABLE[id], T, P)
+"Numeric ∂k/∂P for the registered call node."
+plog_kf_dP(T, P, id::Int) = plog_dkdP(PLOG_TABLE[id], T, P)
+
+# Quantity-dispatch: extract SI values, call the Float64 method, re-wrap with the stored
+# output unit. Invoked by MTK's check_units (get_unit walks the call node and fires this with
+# unit-bearing Quantity args for ALL parameters, including the literal id which arrives as a
+# unitless Quantity). T is in K, P is in Pa (both SI base), so ustrip gives exactly what
+# plog_rate expects. id may arrive as Int (numeric call) or unitless Quantity (unit check).
+_id_int(id::Int)       = id
+_id_int(id::Quantity)  = Int(ustrip(id))
+plog_kf(T::Quantity, P::Quantity, id)    = plog_kf(ustrip(T), ustrip(P), _id_int(id))    * PLOG_UNIT_TABLE[_id_int(id)]
+plog_kf_dT(T::Quantity, P::Quantity, id) = plog_kf_dT(ustrip(T), ustrip(P), _id_int(id)) * PLOG_UNIT_TABLE[_id_int(id)] / u"K"
+plog_kf_dP(T::Quantity, P::Quantity, id) = plog_kf_dP(ustrip(T), ustrip(P), _id_int(id)) * PLOG_UNIT_TABLE[_id_int(id)] / u"Pa"
+
+@register_symbolic plog_kf(T, P, id::Int)
+@register_symbolic plog_kf_dT(T, P, id::Int)
+@register_symbolic plog_kf_dP(T, P, id::Int)
+@register_derivative plog_kf(T, P, id) 1 plog_kf_dT(T, P, id)     # ∂/∂T
+@register_derivative plog_kf(T, P, id) 2 plog_kf_dP(T, P, id)     # ∂/∂P  (id is a literal Int — no rule)
+
 "Explicit per-type T-dependence (migrated verbatim from _is_T_dependent; Brusselator-safe).
  True iff rate law `kin` needs a temperature symbol (T-dependent Arrhenius)."
 needs_T(kin::ElementaryArrhenius) = !(iszero(kin.b) && iszero(kin.Ea))
@@ -165,6 +207,23 @@ function symbolic_kf(kin::LindemannFalloff, ctx::RateCtx)
     meff = _meff(ctx, kin.efficiencies)
     Pr   = k0 * meff / kinf
     return kinf * (Pr / (1 + Pr))
+end
+
+"Symbolic PLOG forward rate constant k(T,P) — OPAQUE call node (not inlined ifelse).
+ Registers this reaction's PlogRate in PLOG_TABLE under a fresh id and emits plog_kf(T,P,id).
+ ∂k/∂T and ∂k/∂P are supplied by @register_derivative (analytic) so calculate_jacobian
+ differentiates through the call node cheaply. Requires ctx.P ≠ nothing.
+ The output unit (conc^(1-order)·s⁻¹) is stored in PLOG_UNIT_TABLE so the Quantity-dispatch
+ on plog_kf re-wraps the result with the correct rate-constant unit (MTK's check_units then
+ derives the call-node unit correctly — the boundary unit is preserved even though the
+ opaque function bypasses the inner symbolic unit check on the interpolation body)."
+function symbolic_kf(kin::PlogRate, ctx::RateCtx)
+    ctx.P === nothing && error("symbolic_kf(PlogRate): pressure-dependent rate needs ctx.P " *
+                               "(a config with eos=:ideal_gas); got nothing.")
+    id = (PLOG_NEXT_ID[] += 1)
+    PLOG_TABLE[id] = kin
+    PLOG_UNIT_TABLE[id] = _k_unit(ctx.order, 0.0)      # b=0: PLOG normalizes T via T_ref internally (matches old inliner)
+    return plog_kf(ctx.T, ctx.P, id)
 end
 
 # —— generic paramspec-driven symbolic_kf (the L2 default for custom / paramspec laws) ——
