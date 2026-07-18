@@ -137,6 +137,63 @@ function plog_rate(kin::PlogRate, T::Real, P::Real)
     return _plog_interpolate(s_ks, log(P / P_STD), s_lp)
 end
 
+"Arrhenius kᵢ(T)=A·T^b·exp(-θ/T) and its T-derivative kᵢ'=kᵢ·(b/T+θ/T²). Returns (kᵢ, kᵢ')."
+_arrhenius_k_dkT(A, b, θ, T) = (k = A*T^b*exp(-θ/T); (k, k*(b/T + θ/T^2)))
+
+"∂k/∂T for PLOG (analytic, MTK-free, generic over Real). Same pressure-grouping + log-log
+ interpolation structure as plog_rate, with each point using kᵢ' instead of kᵢ. In-segment
+ (f is P-only): ∂k/∂T = k·[(1-f)(k_lo'/k_lo) + f(k_hi'/k_hi)]. Low/high clamps → endpoint kᵢ'."
+function plog_dkdT(kin::PlogRate, T::Real, P::Real)
+    kd = [_arrhenius_k_dkT(p.A, p.b, p.Ea / R_GAS, T) for p in kin.points]
+    ks  = [first(x) for x in kd]
+    dks = [last(x)  for x in kd]
+    logPi = [log(p.P / P_STD) for p in kin.points]
+    s_ks,  s_lp = _plog_sum_at_pressures(ks,  logPi)
+    s_dks, _   = _plog_sum_at_pressures(dks, logPi)
+    return _plog_interp_derivT(s_ks, s_dks, log(P / P_STD), s_lp)
+end
+
+"∂k/∂P for PLOG (analytic, MTK-free). In-segment: ∂k/∂P = k·ln(k_hi/k_lo)·(1/P)/(logPᵢ₊₁−logPᵢ).
+ Clamps → 0 (k constant w.r.t. P outside range)."
+function plog_dkdP(kin::PlogRate, T::Real, P::Real)
+    ks = [_arrhenius_body(p.A, p.b, p.Ea / R_GAS, T) for p in kin.points]
+    logPi = [log(p.P / P_STD) for p in kin.points]
+    s_ks, s_lp = _plog_sum_at_pressures(ks, logPi)
+    return _plog_interp_derivP(s_ks, log(P / P_STD), s_lp, P)
+end
+
+"Segment-fold for ∂k/∂T (ks=N summed k, dks=N summed k'). Folds high→low like _plog_interpolate."
+function _plog_interp_derivT(ks, dks, log_P, log_Pi)
+    n = length(ks)
+    n == 1 && return dks[1]
+    out = dks[n]                                  # high clamp
+    for i in (n - 1):-1:1
+        f = (log_P - log_Pi[i]) / (log_Pi[i + 1] - log_Pi[i])
+        klo, khi = ks[i], ks[i + 1]
+        seg_k = klo^(1 - f) * khi^f
+        seg_d = seg_k * ((1 - f) * dks[i] / klo + f * dks[i + 1] / khi)
+        out = ifelse(log_P <= log_Pi[i], dks[i],
+                     ifelse(log_P <= log_Pi[i + 1], seg_d, out))
+    end
+    return out
+end
+
+"Segment-fold for ∂k/∂P (ks=N summed k). Clamps → 0."
+function _plog_interp_derivP(ks, log_P, log_Pi, P)
+    n = length(ks)
+    n == 1 && return 0.0
+    out = 0.0                                     # high clamp
+    for i in (n - 1):-1:1
+        klo, khi = ks[i], ks[i + 1]
+        f = (log_P - log_Pi[i]) / (log_Pi[i + 1] - log_Pi[i])
+        seg_k = klo^(1 - f) * khi^f
+        seg_d = seg_k * log(khi / klo) * (1 / P) / (log_Pi[i + 1] - log_Pi[i])
+        out = ifelse(log_P <= log_Pi[i], 0.0,
+                     ifelse(log_P <= log_Pi[i + 1], seg_d, out))
+    end
+    return out
+end
+
 struct ChebyshevRate <: AbstractKinetics end
 
 # —— generic formula bodies (pure arithmetic; MTK-free; Real and symbolic Num both work) ——

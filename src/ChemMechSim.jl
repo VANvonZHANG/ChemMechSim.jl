@@ -22,7 +22,8 @@ include("data/kinetics.jl")       # AbstractKinetics hierarchy
 export AbstractKinetics, AbstractFalloff,
        ElementaryArrhenius, ThirdBodyArrhenius,
        TroeFalloff, SRIFalloff, LindemannFalloff, PlogRate, ChebyshevRate,
-       TroeParams, SRIParams
+       TroeParams, SRIParams,
+       plog_rate, plog_dkdT, plog_dkdP
 
 include("data/reaction.jl")       # ReactionData, ReverseRatePolicy
 export ReverseRatePolicy, Irreversible, ExplicitReverse, ThermoReverse,
