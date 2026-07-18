@@ -182,3 +182,19 @@ end
     Vobs = [o.lhs for o in observed(sys) if getname(o.lhs)==:V][1]
     @test Float64(sol(5.0; idxs=Vobs)) > Float64(sol(0.0; idxs=Vobs))
 end
+
+using ChemMechSim: _sum_species_rhs
+
+@testset "P-ODE helpers (_sum_species_rhs)" begin
+    # A + B -> C (Δn_total = 1-2 = -1 per event); rate r ⇒ Σ dc/dt = -r
+    sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B"), SpeciesData(id=3, name="C")]
+    rx = ReactionData(reactants=Dict(1=>1.0, 2=>1.0), products=Dict(3=>1.0),
+                      kinetics=ElementaryArrhenius(1e9, 0.0, 0.0))
+    mech = Mechanism(species=sp, reactions=[rx])
+    @test _sum_species_rhs(mech, [2.5]) ≈ -2.5                # Δn_total(A+B->C) = 1-2 = -1; ×rate 2.5
+    # 2A -> 2A (Δn_total = 0) ⇒ Σ dc/dt = 0
+    rx2 = ReactionData(reactants=Dict(1=>2.0), products=Dict(1=>2.0),
+                       kinetics=ElementaryArrhenius(1e9, 0.0, 0.0))
+    mech2 = Mechanism(species=sp, reactions=[rx2])
+    @test _sum_species_rhs(mech2, [2.5]) == 0.0
+end
