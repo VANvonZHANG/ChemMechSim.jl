@@ -44,15 +44,13 @@ function _energy_ode_constP(mech::Mechanism, nvar, Vvar, T, rates, tcx)
     return D(T) ~ Vvar * src / cp_sum
 end
 
-"Constant-volume adiabatic energy equation (spec §5.3, §11 Phase 4; verified 2026-07-02):
- dT/dt = -Σⱼ rⱼ·Δūⱼ / Σᵢ cᵢ·cvᵢ, with ūᵢ=(h/RT-1)·R·T and cvᵢ=(cp/R-1)·R (ideal gas).
- All species must carry NASA7 thermo (spec §5.3.4 — clear error otherwise)."
-function _energy_ode_constV(mech::Mechanism, cvar, T, rates, tcx)
-    D = ModelingToolkit.D
+"Const-V adiabatic energy RHS dT/dt (the expression, not the equation). Refactored out so the
+ P-ODE (Task 4) can reuse it without duplicating the Σⱼ rⱼ·Δūⱼ / Σᵢ cᵢ·cvᵢ expression."
+function _energy_rhs_constV(mech::Mechanism, cvar, T, rates, tcx)
     R = tcx.R
     for sp in mech.species
         sp.thermo isa NASA7 ||
-            error("_energy_ode_constV: species $(sp.name) (id $(sp.id)) has no NASA7 thermo; " *
+            error("_energy_rhs_constV: species $(sp.name) (id $(sp.id)) has no NASA7 thermo; " *
                   ":adiabatic requires NASA7 thermo on all species (spec §5.3.4). " *
                   "Use energy=:isothermal or provide NASA7 thermo.")
     end
@@ -72,5 +70,30 @@ function _energy_ode_constV(mech::Mechanism, cvar, T, rates, tcx)
         end
         src += rates[j] * (-delta_u)
     end
-    return D(T) ~ src / cv_sum
+    return src / cv_sum
+end
+
+"Constant-volume adiabatic energy equation D(T) ~ dT/dt (spec §5.3, §11 Phase 4; verified
+ 2026-07-02). Delegates the RHS to `_energy_rhs_constV` so the P-ODE (Task 4) can reuse it.
+ dT/dt = -Σⱼ rⱼ·Δūⱼ / Σᵢ cᵢ·cvᵢ, with ūᵢ=(h/RT-1)·R·T and cvᵢ=(cp/R-1)·R (ideal gas)."
+function _energy_ode_constV(mech::Mechanism, cvar, T, rates, tcx)
+    D = ModelingToolkit.D
+    return D(T) ~ _energy_rhs_constV(mech, cvar, T, rates, tcx)
+end
+
+"Σᵢ dcᵢ/dt = Σⱼ (Σ_prod ν − Σ_react ν)·rateⱼ — total concentration RHS (for the const-V P-ODE,
+ spec §5.3 iii). Pure: depends only on stoichiometry and the per-reaction rates."
+_sum_species_rhs(mech::Mechanism, rates) =
+    sum((sum(values(rx.products)) - sum(values(rx.reactants))) * rates[j]
+        for (j, rx) in enumerate(mech.reactions))
+
+"P-ODE for const-V (spec §5.3 iii): D(P) ~ R·(T·Σ物种RHS + (Σc)·能量RHS) = d/dt[(Σc)RT].
+ `is_adiabatic=false` (isothermal) ⇒ energy RHS term = 0 (T is a parameter, dT/dt=0).
+ Task 4 consumes this to add P as a differential state under :adiabatic_constV."
+function _p_ode_constV(mech::Mechanism, cvar, Tparam, rates, tcx, Pvar, is_adiabatic::Bool)
+    D = ModelingToolkit.D
+    sum_rhs = _sum_species_rhs(mech, rates)
+    csum = sum(values(cvar))
+    energy_rhs = is_adiabatic ? _energy_rhs_constV(mech, cvar, Tparam, rates, tcx) : 0.0
+    return D(Pvar) ~ tcx.R * (Tparam * sum_rhs + csum * energy_rhs)
 end
