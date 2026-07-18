@@ -88,11 +88,11 @@ end
 @testset "Phase 5b: GRI30 lowers + compiles + dense Jacobian builds" begin
     mech = load_mechanism(_GRI30_YAML)
     sys = lower_to_mtk(mech; config=convenience_config(:adiabatic_constV))
-    @test length(unknowns(sys)) == 54                 # 53 concentrations + T
-    @test length(equations(sys)) == 54
+    @test length(unknowns(sys)) == 55                 # 53 concentrations + T + P (P differential state, Task 4)
+    @test length(equations(sys)) == 55
     # Dense Jacobian = the production path (sparse codegen is pathological — Task 4).
     jac = ModelingToolkit.calculate_jacobian(sys; sparse=false)
-    @test size(jac) == (54, 54)
+    @test size(jac) == (55, 55)
     @test !isempty(string(generate_jacobian(sys; sparse=false)))
 end
 

@@ -14,9 +14,22 @@ function _u0_pairs(phase::ChemPhaseSystem, u0::AbstractDict)
 end
 
 "Build an ODEProblem from a ChemPhaseSystem. `u0` is a Dict(speciesname => value);
- `params` is an optional Vector of Pair(parameter => value) (e.g. `[T => 500.0]`)."
+ `params` is an optional Vector of Pair(parameter => value) (e.g. `[T => 500.0]`).
+ When P is a differential state (const-V P-ODE, Task 4) and `u0` omits `\"P\"`, P0 is auto-filled
+ as (Σ species c0)·R·T0 — the EOS initial pressure consistent with the supplied composition/T."
 function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan; params=Pair[])
-    return ODEProblem(phase.sys, [_u0_pairs(phase, u0); params], tspan)
+    sys = phase.sys
+    unks = ModelingToolkit.unknowns(sys)
+    byname = Dict(String(ModelingToolkit.getname(s)) => s for s in unks)
+    pairs = [_u0_pairs(phase, u0); params]
+    # P0 auto-fill (const-V P differential, Task 4): P0 = (Σ species c0)·R·T0 when P is a state
+    # and the caller did not supply it. Excludes T and P from the concentration sum.
+    if haskey(byname, "P") && !haskey(u0, "P")
+        csum = sum(v for (k, v) in u0 if haskey(byname, k) && k != "T" && k != "P")
+        T0 = get(u0, "T", 300.0)
+        push!(pairs, byname["P"] => R_GAS * csum * T0)
+    end
+    return ODEProblem(sys, pairs, tspan)
 end
 
 "Simulate a ChemPhaseSystem over `tspan`. `u0` is a Dict(speciesname => value);
