@@ -198,7 +198,8 @@ end
 
 @testset ":fixedT + ThermoReverse Δν≠0 + EOS (cross-cutting)" begin
     # A + B <-> C (Δν = -1). all-zero NASA7 → Δg°=0 → K_c = (P°/RT)^(-1) = RT/P°.
-    # :fixedT mode (isothermal + const-V + ideal-gas EOS). Exercises K_c Δν≠0 (Task 4) + EOS observed (Task 7) together.
+    # :fixedT mode (isothermal + const-V + ideal-gas EOS). Exercises K_c Δν≠0 (Task 4) +
+    # EOS P (Task 3: P is now a differential STATE under :fixedT const-V — D(P)=R·T·Σ物种RHS).
     n = NASA7((0.0,0,0,0,0,0.0,0.0),(0.0,0,0,0,0,0.0,0.0),200.0,1000.0,3500.0)
     A = SpeciesData(id=1,name="A",thermo=n); B = SpeciesData(id=2,name="B",thermo=n); C = SpeciesData(id=3,name="C",thermo=n)
     rxn = ReactionData(reactants=Dict(1=>1.0,2=>1.0), products=Dict(3=>1.0),
@@ -206,19 +207,23 @@ end
     mech = Mechanism(species=[A,B,C], reactions=[rxn])
     phase = ChemPhaseSystem(mech; config=convenience_config(:fixedT))
     sys = extract_system(phase)
-    @test :P in [getname(o.lhs) for o in observed(sys)]            # EOS observed present
+    # Task 3: P is a DIFFERENTIAL STATE (D(P)=R·T·Σ物种RHS at fixed T), not observed.
+    @test :P in [getname(u) for u in unknowns(sys)]               # P a state (Task 3)
+    @test !(:P in [getname(o.lhs) for o in observed(sys)])        # not observed
     Av = unknowns(sys)[findfirst(s -> String(getname(s))=="A", unknowns(sys))]
     Bv = unknowns(sys)[findfirst(s -> String(getname(s))=="B", unknowns(sys))]
     Cv = unknowns(sys)[findfirst(s -> String(getname(s))=="C", unknowns(sys))]
+    Pv = unknowns(sys)[findfirst(s -> String(getname(s))=="P", unknowns(sys))]
     Tp = parameters(sys)[findfirst(p -> String(getname(p))=="T", parameters(sys))]
-    Pvar = [o.lhs for o in observed(sys) if getname(o.lhs)==:P][1]
     Tv = 1000.0
-    sol = simulate(phase, (0.0,200.0); u0=Dict("A"=>1.0,"B"=>1.0,"C"=>0.0),
+    # Caller overrides T via params=[Tp=>Tv]; supplies u0["P"] consistent with T=Tv so that
+    # build_problem's P0 auto-fill (which uses the T-param DEFAULT) does not need to run.
+    sol = simulate(phase, (0.0,200.0); u0=Dict("A"=>1.0,"B"=>1.0,"C"=>0.0,"P"=>2.0*8.314*Tv),
                    params=[Tp=>Tv], solver=Rodas5P(), reltol=1e-9, abstol=1e-12)
     Ca, Cb, Cc = sol(200.0; idxs=Av), sol(200.0; idxs=Bv), sol(200.0; idxs=Cv)
     @test Cc/(Ca*Cb) ≈ 8.314*Tv/1.0e5  rtol=1e-2                   # K_c = RT/P° (Δν=-1, Δg°=0)
     csum = Ca + Cb + Cc
-    @test sol(200.0; idxs=Pvar) ≈ csum*8.314*Tv  rtol=1e-4        # P = (Σc)·R·T observed
+    @test sol(200.0; idxs=Pv) ≈ csum*8.314*Tv  rtol=1e-4          # P = (Σc)·R·T (EOS identity at fixed T)
 end
 
 @testset "symbolic cp/R + h/RT build (Phase 4a energy-eq building blocks)" begin
@@ -262,7 +267,9 @@ _zero_nasa7() = NASA7((0.0,0,0,0,0,0.0,0.0),(0.0,0,0,0,0,0.0,0.0),200.0,1000.0,3
     # lowering succeeds (this used to error in _net_rate guard)
     phase = ChemPhaseSystem(mech; config=convenience_config(:fixedT))
     sys = extract_system(phase)
-    @test length(unknowns(sys)) == 4
+    # 4 species (A,B,C,M) + P (Task 3: P differential state under :fixedT const-V). M_eff_1
+    # is eliminated to observed by MTK tearing (state+algebraic pattern).
+    @test length(unknowns(sys)) == 5
     # integrate to equilibrium and check K_c is satisfied:
     # at equilibrium  kf_eff·[A][B] = kr·[C]  →  [C]/([A][B]) = kf_eff/kr = K_c = RT/P°
     Av = unknowns(sys)[findfirst(s -> String(getname(s))=="A", unknowns(sys))]
@@ -296,8 +303,11 @@ end
     # lowering succeeds (Troe under ThermoReverse used to error in _net_rate guard)
     phase = ChemPhaseSystem(mech; config=convenience_config(:fixedT))
     sys = extract_system(phase)
-    @test length(unknowns(sys)) == 3
-    # smoke integrate (no equilibrium assertion — Troe kf is complex; just verify it runs)
+    # 3 species (A, A2, M) + P (Task 3: P differential state under :fixedT const-V).
+    @test length(unknowns(sys)) == 4
+    # smoke integrate (no equilibrium assertion — Troe kf is complex; just verify it runs).
+    # P0 auto-filled by build_problem from the T-param default (300 K) — not the overridden
+    # value (1000 K via params=); smoke only checks finiteness so the imprecise P0 is fine.
     Tp = parameters(sys)[findfirst(p -> String(getname(p))=="T", parameters(sys))]
     sol = simulate(phase, (0.0,1.0e-3); u0=Dict("A"=>1.0,"A2"=>0.0,"M"=>1.0e3),
                    params=[Tp=>1000.0], reltol=1e-9, abstol=1e-12, dt=1.0e-7)

@@ -74,11 +74,14 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
            for i in eachindex(mech.species)]
     # Constraint-layer assembly (energy layer adds the const-V dT/dt under :adiabatic; spec §5.4).
     eqs = append_constraint_layers!(eqs, mech, config, cvar, Tparam, rates; tcx=tcx)
-    # P differential state (spec §5.3 iii; Task 4): under :adiabatic + :constant_volume the
-    # EOS total derivative D(P) ~ R·(T·Σ物种RHS + (Σc)·能量RHS) is pushed so P becomes a state
-    # rather than an observed variable. const-P is unaffected (early-returned above); :fixedT
-    # (isothermal const-V) keeps P observed/algebraic since there is no energy ODE to couple.
-    p_differential = is_adiabatic && config.constraint === :constant_volume && Pvar !== nothing
+    # P differential state (spec §5.3 iii; Task 4 + Task 3): under :constant_volume with
+    # an EOS-provided P, the EOS total derivative D(P) ~ R·(T·Σ物种RHS + (Σc)·能量RHS) is
+    # pushed so P becomes a state rather than an observed variable. This applies to BOTH
+    # energy regimes: :adiabatic_constV (full coupling — the energy RHS is the dT/dt ODE)
+    # and :fixedT / isothermal const-V (energy RHS = 0 since T is a parameter with dT/dt=0,
+    # so the ODE collapses to D(P) ~ R·T·Σ物种RHS = d/dt[(Σc)·R·T] at fixed T). const-P is
+    # unaffected (early-returned above); constraint=:none+eos keeps P observed/algebraic.
+    p_differential = config.constraint === :constant_volume && Pvar !== nothing
     p_differential &&
         push!(eqs, _p_ode_constV(mech, cvar, Tparam, rates, tcx, Pvar, is_adiabatic))
     # M_eff algebraic eqs: MTK tearing eliminates M_eff_j → observed (state+algebraic, §7.1).
@@ -91,12 +94,15 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
     return mtkcompile(raw; checks=checks)
 end
 
-"Build the system with EOS P. Two regimes (spec §5.3 iii; Task 4):
-   • const-V + :adiabatic (p_differential=true): P is a DIFFERENTIAL state — its ODE
-     D(P) ~ R·(T·Σ物种RHS + (Σc)·能量RHS) was already pushed into `eqs` by `lower_to_mtk`.
-     We add Pvar to `states` WITHOUT an algebraic/observed P eq (the ODE defines P).
-   • otherwise (isothermal const-V, constraint=:none+eos): P stays OBSERVED (P ~ (Σc)·R·T)
-     or algebraic (when `needs_P_flag` — PLOG under isothermal const-V) exactly as before.
+"Build the system with EOS P. Two regimes (spec §5.3 iii; Task 4 + Task 3):
+   • const-V (p_differential=true; applies to BOTH :adiabatic_constV AND :fixedT): P is a
+     DIFFERENTIAL state — its ODE was already pushed into `eqs` by `lower_to_mtk`. Under
+     :adiabatic the ODE is D(P) ~ R·(T·Σ物种RHS + (Σc)·能量RHS); under :fixedT (isothermal)
+     it collapses to D(P) ~ R·T·Σ物种RHS (energy RHS = 0). We add Pvar to `states` WITHOUT
+     an algebraic/observed P eq (the ODE defines P).
+   • otherwise (constraint=:none+eos, isothermal const-V was promoted to p_differential
+     above): P stays OBSERVED (P ~ (Σc)·R·T) or algebraic (when `needs_P_flag` — PLOG under
+     constraint=:none+eos) exactly as before.
  Under :adiabatic T is a STATE; under :isothermal T is a parameter (retained via the
  observed-param fix). R is retained automatically (appears in the energy / P ODE RHS).
  M_eff_j (third-body) algebraic eqs follow the same state+algebraic pattern: M_eff_j is

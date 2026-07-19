@@ -146,7 +146,7 @@ end
     @test "T" in pnames                                  # T retained (T-dependent)
 end
 
-@testset ":fixedT mode — isothermal species ODE + EOS pressure observed" begin
+@testset ":fixedT mode — isothermal species ODE + EOS pressure a differential state (Task 3)" begin
     a = SpeciesData(id=1, name="A"); b = SpeciesData(id=2, name="B")
     rxn = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
                        kinetics=ElementaryArrhenius(1.0,0.0,0.0),
@@ -154,16 +154,24 @@ end
     mech = Mechanism(species=[a,b], reactions=[rxn])
     phase = ChemPhaseSystem(mech; config=convenience_config(:fixedT))
     sys = extract_system(phase)
-    @test :P in [getname(o.lhs) for o in observed(sys)]                     # P observed
+    # Task 3 contract flip: under :fixedT const-V, P is now a DIFFERENTIAL STATE (was observed).
+    # D(P) ~ R·T·Σ物种RHS (energy_rhs=0 since T is a parameter under isothermal). This matches
+    # the :adiabatic_constV contract (P differential) — const-V ⇒ P differential for both energies.
+    @test :P in [getname(u) for u in unknowns(sys)]                          # P a state
+    @test !(:P in [getname(o.lhs) for o in observed(sys)])                  # not observed
     Av = unknowns(sys)[findfirst(s -> String(getname(s))=="A", unknowns(sys))]
     Bv = unknowns(sys)[findfirst(s -> String(getname(s))=="B", unknowns(sys))]
+    Pv = unknowns(sys)[findfirst(s -> String(getname(s))=="P", unknowns(sys))]
     Tp  = parameters(sys)[findfirst(p -> String(getname(p))=="T", parameters(sys))]  # T retained
-    Pvar = [o.lhs for o in observed(sys) if getname(o.lhs)==:P][1]
     Tv = 1000.0
-    sol = simulate(phase, (0.0,5.0); u0=Dict("A"=>1.0,"B"=>0.0), params=[Tp=>Tv], reltol=1e-9, abstol=1e-12)
+    # Caller overrides T via params=[Tp=>Tv] AND supplies u0["P"] consistent with T=Tv (the
+    # build_problem P0 auto-fill uses the T-param DEFAULT, not the overridden value — so a
+    # caller who overrides T must supply P0 explicitly; see build_problem docstring).
+    sol = simulate(phase, (0.0,5.0); u0=Dict("A"=>1.0,"B"=>0.0,"P"=>1.0*8.314*Tv),
+                   params=[Tp=>Tv], reltol=1e-9, abstol=1e-12)
     csum = sol(2.0; idxs=Av) + sol(2.0; idxs=Bv)
-    @test sol(2.0; idxs=Pvar) ≈ csum * 8.314 * Tv  rtol=1e-4               # P = (Σc)·R·T
-    @test csum ≈ 1.0  atol=1e-6                                            # mass conserved
+    @test sol(2.0; idxs=Pv) ≈ csum * 8.314 * Tv  rtol=1e-4                   # P = (Σc)·R·T (const)
+    @test csum ≈ 1.0  atol=1e-6                                              # mass conserved (mole-neutral)
 end
 
 @testset ":adiabatic_constV lowers with T and P as states (Phase 4a + Task 4)" begin
@@ -217,12 +225,14 @@ end
     @test needs_P(TroeFalloff(ElementaryArrhenius(1,0,0), ElementaryArrhenius(1,0,0),
                               Dict{Int,Float64}(), TroeParams(0,0,0,0))) == false
     # RateCtx now has a P field (9th field). Build a tiny mechanism, lower under EOS-on,
-    # and confirm the lowered system has a P (observed) — the plumbing works.
+    # and confirm the lowered system has a P (Task 3: a differential STATE under :fixedT
+    # const-V ideal_gas, since the const-V P-ODE applies to BOTH energy regimes).
     sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")]
     rx = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
                       kinetics=ElementaryArrhenius(1.0,0,0))
     mech = Mechanism(species=sp, reactions=[rx])
     sys = ChemMechSim.extract_system(ChemMechSim.ChemPhaseSystem(mech; config=convenience_config(:fixedT)))
-    # P is observed under :fixedT const-V ideal_gas: P ~ Σc·R·T
-    @test "P" in [String(getname(o.lhs)) for o in observed(sys)]
+    # Task 3: P is a differential STATE under :fixedT const-V (D(P)~R·T·Σ物种RHS, energy_rhs=0)
+    @test "P" in [String(getname(u)) for u in unknowns(sys)]
+    @test !("P" in [String(getname(o.lhs)) for o in observed(sys)])
 end
