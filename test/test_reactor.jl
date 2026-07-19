@@ -94,13 +94,17 @@ end
     @test all(isfinite, sol.u[end])
 end
 
-@testset "BatchReactor: :fixedT is lowerable; :adiabatic_* still errors" begin
-    # Phase 3 lowers :fixedT (isothermal + ideal_gas EOS observed). The adiabatic
-    # modes still require the energy/EOS-as-DAE layers (Phase 4).
+@testset "BatchReactor: :fixedT is lowerable with P as a state; :adiabatic_* need NASA7" begin
+    # KTask 3 of the K_c-opaquer plan: :fixedT const-V now makes P a DIFFERENTIAL state
+    # (was Phase-3 observed). The adiabatic modes are implemented (Phase 4), but require
+    # NASA7 thermo on every species — _decay_mech has none, so they still throw (now a
+    # different message, but the same ErrorException shape the assertion checks).
     r = BatchReactor(_decay_mech(); mode=:fixedT)
     @test r.phase.config.eos === :ideal_gas
-    @test any(o -> ModelingToolkit.getname(o.lhs) === :P,
-              ModelingToolkit.observed(extract_system(r)))      # P observed
+    @test any(u -> ModelingToolkit.getname(u) === :P,
+              ModelingToolkit.unknowns(extract_system(r)))        # P is now a state
+    @test !any(o -> ModelingToolkit.getname(o.lhs) === :P,
+               ModelingToolkit.observed(extract_system(r)))       # ... not observed
     @test_throws ErrorException BatchReactor(_decay_mech(); mode=:adiabatic_constV)
     @test_throws ErrorException BatchReactor(_decay_mech(); mode=:adiabatic_constP)
 end
