@@ -117,3 +117,74 @@ end
         end
     end
 end
+
+@testset "ThermoReverse reverse-rate is an opaque keq call node" begin
+    using ChemMechSim: keq, keq_dT  # registered symbolic functions (Task 2 adds them)
+    import ModelingToolkit: equations
+
+    mech = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    rxidx = findfirst(r -> r.reverse_policy isa ChemMechSim.ThermoReverse, mech.reactions)
+    @test rxidx !== nothing
+    # Use :fixedT (T as a parameter) so the ONLY place Tmid_sp could appear is K_c.
+    # Under :adiabatic_constV the energy equation also uses NASA7 cp/h polynomials which
+    # legitimately carry Tmid_sp coefficients (for cp/h, NOT K_c).
+    phase = ChemMechSim.ChemPhaseSystem(mech; config=convenience_config(:fixedT))
+    sys = ChemMechSim.extract_system(phase)
+    # Find a species equation whose RHS involves the reverse rate (a product species of rx).
+    # Its RHS should reference keq(...) (opaque), NOT an inlined NASA7 g/RT polynomial tree.
+    eqs = equations(sys)
+    rhs_with_keq = findfirst(eq -> occursin("keq", string(eq.rhs)), eqs)
+    @test rhs_with_keq !== nothing                  # some RHS references keq
+    # And no RHS contains the inlined _g_over_RT polynomial marker (e.g. "Tmid_sp" coeff names)
+    @test !any(eq -> occursin("Tmid_sp", string(eq.rhs)), eqs)   # K_c no longer inlined
+end
+
+@testset "ThermoReverse + keq call node passes check_units under :adiabatic_constV" begin
+    # Regression guard: the brief flagged conc^Δν unit-construction as the risk area. MTK's
+    # get_unit probes the registered keq() with id=Quantity(1.0) and assigns that unit to every
+    # call node, so the opaque function's unit must be INVARIANT across reactions. The split
+    # (keq = dimensionless NASA7 part + inlined (P°/RT)^Δν) achieves this. This test confirms
+    # GRI30 (with its mix of dnu=0 and dnu≠0 ThermoReverse reactions) lowers without a unit error.
+    import ModelingToolkit: equations
+    mech = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    phase = ChemMechSim.ChemPhaseSystem(mech; config=convenience_config(:adiabatic_constV))
+    sys = ChemMechSim.extract_system(phase)
+    @test length(equations(sys)) > 0                # lowering succeeded (check_units passed)
+    # And the keq call node still appears (not accidentally optimized away)
+    @test any(eq -> occursin("keq", string(eq.rhs)), equations(sys))
+end
+
+@testset "keq(T,id) numeric value matches equilibrium_constant (behavior-preserving)" begin
+    # Verify the opaque call node evaluates to the correct K_c VALUE (not just that a node exists).
+    # The split design: keq(T,id) returns exp(-Δg°/RT); _reverse_rate multiplies by (P°/RT)^Δν inline.
+    # So keq(T,id) · (P°/(R·T))^Δν must equal equilibrium_constant(KcData, T) (the data-layer truth).
+    using ChemMechSim: KcData, equilibrium_constant, keq
+    import ChemMechSim: KEQ_TABLE, KEQ_NEXT_ID
+
+    mech = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    # Pick the first ThermoReverse reaction with dnu != 0 (covers both factors of the split)
+    rxidx = findfirst(r -> r.reverse_policy isa ChemMechSim.ThermoReverse &&
+                           (sum(values(r.products)) - sum(values(r.reactants))) != 0,
+                      mech.reactions)
+    rx = mech.reactions[rxidx]
+    # Lower a minimal system so _reverse_rate populates KEQ_TABLE
+    phase = ChemMechSim.ChemPhaseSystem(mech; config=convenience_config(:fixedT))
+    sys = ChemMechSim.extract_system(phase)
+    # For each registered id, verify keq(T, id) is behavior-preserving with the data layer.
+    ids = sort(collect(keys(KEQ_TABLE)))
+    @test !isempty(ids)
+    R_GAS_v = ChemMechSim.R_GAS
+    P_STD_v = ChemMechSim.P_STD
+    for id in ids
+        kcd = KEQ_TABLE[id]
+        for T in (900.0, 1500.0, 2500.0)
+            # The opaque call node value (Float64 method):
+            keq_node = keq(T, id)
+            # The full K_c from the data layer (truth):
+            Kc_full = equilibrium_constant(kcd, T)
+            # The inlined factor (P°/(R·T))^Δν — what _reverse_rate multiplies in:
+            factor = iszero(kcd.dnu) ? 1.0 : (P_STD_v / (R_GAS_v * T))^kcd.dnu
+            @test keq_node * factor ≈ Kc_full  rtol = 1e-12
+        end
+    end
+end
