@@ -53,15 +53,20 @@ end
     sys = ChemMechSim.extract_system(phase)
     unk_names = Set(String(ModelingToolkit.getname(u)) for u in unknowns(sys))
     @test "A" in unk_names && "B" in unk_names   # species present (P count differs by config)
-    # RHS references plog_kf call node (opaque), NOT inlined ifelse
-    rhs_str = string(equations(sys)[1].rhs)
+    # RHS references plog_kf call node (opaque), NOT inlined ifelse.
+    # Look up the species-B equation by name (Task 3: P is now also a state under :fixedT
+    # const-V, so equation ordering is [P, B, A] — positional indexing would hit D(P)~...).
+    eqs = equations(sys)
+    b_eq = first(eq for eq in eqs if operation(eq.lhs) isa Differential &&
+                                     getname(arguments(eq.lhs)[1]) === :B)
+    rhs_str = string(b_eq.rhs)
     @test occursin("plog_kf", rhs_str)
     @test !occursin("ifelse", rhs_str)          # no inlined interpolation tree
     # Numeric check (task-2 brief ambiguity #3): substitute fixed (T, P, c_A) on the RHS
     # equation and confirm the opaque plog_kf call node evaluates to plog_rate(kin, T, P)
     # times the mass-action factor (c_A^1 = c_A). Verifies the registered call returns the
     # correct VALUE, not just that a node exists.
-    rhs = equations(sys)[1].rhs
+    rhs = b_eq.rhs
     T_sample, P_sample, cA_sample = 1000.0, 1e5, 0.5
     sub = Dict{Any,Float64}()
     for v in get_variables(rhs)

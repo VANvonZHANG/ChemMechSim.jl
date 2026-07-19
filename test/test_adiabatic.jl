@@ -226,6 +226,55 @@ end
     @test sol.retcode == OrdinaryDiffEq.ReturnCode.Success
 end
 
+@testset ":fixedT const-V: P is a differential state" begin
+    mech = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    phase = ChemMechSim.ChemPhaseSystem(mech; config=convenience_config(:fixedT))
+    sys = ChemMechSim.extract_system(phase)
+    unk_names = Set(String(ModelingToolkit.getname(u)) for u in unknowns(sys))
+    @test "P" in unk_names                       # P is now a STATE under :fixedT const-V (was observed)
+    @test !("P" in [String(ModelingToolkit.getname(o.lhs)) for o in observed(sys)])  # not observed
+    # The T parameter exists (isothermal: T is a parameter, not a state) and P does not
+    # depend on a missing T-state — _p_ode_constV with is_adiabatic=false emits D(P)~R·T·Σ物种RHS
+    # (energy_rhs=0 since there is no energy ODE under isothermal).
+    @test !("T" in unk_names)                     # T stays a parameter under :fixedT
+    Tparam = _param(sys, "T")
+    @test ModelingToolkit.getdefault(Tparam) ≈ 300.0    # default 300 K from rate_param(:T, 300.0, u"K")
+end
+
+@testset ":fixedT const-V: P-ODE rhs reduces to R·T·Σ物种RHS (energy_rhs=0)" begin
+    # Use a simple 2-species mechanism so we can compute Σ物种RHS analytically.
+    # A -> B (Δn_total = 0): even at nonzero rate, Σ dc/dt = 0, so dP/dt = R·T·0 = 0
+    # at t=0 — P is a state but does not move (mole-neutral reaction). Verify the
+    # state arrangement + that D(P) is well-defined (not dangling).
+    sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")]
+    rx = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
+                      kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))
+    mech = Mechanism(species=sp, reactions=[rx])
+    phase = ChemMechSim.ChemPhaseSystem(mech; config=convenience_config(:fixedT))
+    sys = ChemMechSim.extract_system(phase); idx = _state_index(sys)
+    @test sort(collect(keys(idx))) == sort(["A", "B", "P"])     # P joined A,B as a state
+    f = ODEFunction(sys); du = zeros(length(idx))
+    u0 = zeros(length(idx)); u0[idx["A"]] = 1.0; u0[idx["B"]] = 0.0; u0[idx["P"]] = 1.0 * R4A * 300.0
+    f(du, u0, _pvals(sys), 0.0)
+    @test du[idx["P"]] ≈ 0.0                                     # mole-neutral reaction ⇒ ΣRHS=0 ⇒ dP/dt=0
+    @test du[idx["A"]] ≈ -1.0                                    # dc_A/dt = -k·A = -1 at t=0
+    @test du[idx["B"]] ≈ +1.0                                    # dc_B/dt = +k·A = +1
+end
+
+@testset ":fixedT const-V: build_problem P0 from T-param default" begin
+    # Caller supplies species u0 but NEITHER T (it's a param) NOR P (auto-filled).
+    # build_problem must use the T param's default (300 K) for the P0 auto-fill.
+    sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")]
+    rx = ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
+                      kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))
+    mech = Mechanism(species=sp, reactions=[rx])
+    phase = ChemMechSim.ChemPhaseSystem(mech; config=convenience_config(:fixedT))
+    sys = ChemMechSim.extract_system(phase); idx = _state_index(sys)
+    prob = build_problem(phase, Dict("A"=>1.0, "B"=>0.0), (0.0, 1.0))
+    P0 = prob.u0[idx["P"]]
+    @test P0 ≈ 1.0 * R4A * 300.0 rtol=1e-9                       # csum=1, T-param default=300
+end
+
 @testset "P-ODE helpers (_sum_species_rhs)" begin
     # A + B -> C (Δn_total = 1-2 = -1 per event); rate r ⇒ Σ dc/dt = -r
     sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B"), SpeciesData(id=3, name="C")]
