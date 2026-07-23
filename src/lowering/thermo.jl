@@ -31,8 +31,10 @@ const KEQ_NEXT_ID  = Ref(0)
 "Numeric exp(-Δg°/RT) for the registered call node; looks up reaction by id.
  This is the DIMENSIONLESS NASA7 part of K_c; the (P°/RT)^Δν factor is inlined by _reverse_rate."
 keq(T, rxid::Int)    = exp(-_delta_g_over_RT_data(KEQ_TABLE[rxid], T))
+keq(T::Real, rxid::Int) = exp(-_delta_g_over_RT_data(KEQ_TABLE[rxid], T))
 "Numeric ∂/∂T of exp(-Δg°/RT) for the registered call node."
 keq_dT(T, rxid::Int) = _keq_dimless_dT(KEQ_TABLE[rxid], T)
+keq_dT(T::Real, rxid::Int) = _keq_dimless_dT(KEQ_TABLE[rxid], T)
 
 # Data-layer Δg°/RT (sum of ν·g_over_RT) and its T-derivative. Used by the opaque keq node so
 # the lowering layer does NOT re-invoke the symbolic NASA7 polynomial (the whole point).
@@ -59,9 +61,18 @@ end
 # for keq, always 1/K for keq_dT) — required because MTK probes with id=Quantity(1.0) and
 # applies the result to every call node.
 _keq_id_int(id::Int)      = id
+_keq_id_int(id::Real)     = Int(id)
 _keq_id_int(id::Quantity) = Int(ustrip(id))
-keq(T::Quantity, rxid)    = keq(ustrip(T), _keq_id_int(rxid))            # dimensionless Quantity
-keq_dT(T::Quantity, rxid) = keq_dT(ustrip(T), _keq_id_int(rxid)) / u"K"  # 1/K unit
+keq(T::Real, rxid::Real)    = keq(T, _keq_id_int(rxid))
+keq_dT(T::Real, rxid::Real) = keq_dT(T, _keq_id_int(rxid))
+keq(T::Quantity, rxid::Int)      = keq(ustrip(T), rxid)                  # dimensionless Quantity
+keq(T::Quantity, rxid::Real)     = keq(ustrip(T), _keq_id_int(rxid))     # dimensionless Quantity
+keq(T::Quantity, rxid::Quantity) = keq(ustrip(T), _keq_id_int(rxid))     # dimensionless Quantity
+keq(T::Quantity, rxid)           = keq(ustrip(T), _keq_id_int(rxid))     # dimensionless Quantity
+keq_dT(T::Quantity, rxid::Int)      = keq_dT(ustrip(T), rxid) / u"K"              # 1/K unit
+keq_dT(T::Quantity, rxid::Real)     = keq_dT(ustrip(T), _keq_id_int(rxid)) / u"K" # 1/K unit
+keq_dT(T::Quantity, rxid::Quantity) = keq_dT(ustrip(T), _keq_id_int(rxid)) / u"K" # 1/K unit
+keq_dT(T::Quantity, rxid)           = keq_dT(ustrip(T), _keq_id_int(rxid)) / u"K" # 1/K unit
 
 @register_symbolic keq(T, rxid::Int)
 @register_symbolic keq_dT(T, rxid::Int)
