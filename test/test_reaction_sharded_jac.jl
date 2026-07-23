@@ -228,7 +228,7 @@ end
     @test all(isfinite, J_sharded.nzval)
 end
 
-@testset "reaction-sharded Jacobian rejects reversible reactions in prototype scope" begin
+@testset "reaction-sharded pattern includes explicit reverse products as dependencies" begin
     mech = Mechanism(
         species = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")],
         reactions = [
@@ -236,20 +236,41 @@ end
                 reactants = Dict(1 => 1.0),
                 products = Dict(2 => 1.0),
                 kinetics = ElementaryArrhenius(1.0, 0.0, 0.0),
-                reverse_policy = ThermoReverse(),
+                reverse_policy = ExplicitReverse(ElementaryArrhenius(0.5, 0.0, 0.0)),
             ),
         ],
     )
+    config = convenience_config(:fixedT)
+    phase = ChemPhaseSystem(mech; config=config, checks=false)
+    sys = extract_system(phase)
+    _, J_proto = ChemMechSim.build_reaction_sharded_jac(mech; config=config, checks=false)
 
-    err = try
-        ChemMechSim.build_reaction_sharded_jac(
-            mech; config=convenience_config(:fixedT), checks=false)
-        nothing
-    catch e
-        e
+    @test _stored_pattern(J_proto) == _expected_pattern(sys, [(("A", "B", "P"), ("A", "B"))])
+end
+
+@testset "reaction-sharded ThermoReverse reuses opaque keq" begin
+    mech = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    rxidx = findfirst(r -> r.reverse_policy isa ChemMechSim.ThermoReverse &&
+                           r.kinetics isa ChemMechSim.ElementaryArrhenius,
+                      mech.reactions)
+    @test rxidx !== nothing
+    sub = Mechanism(species=mech.species, reactions=[mech.reactions[rxidx]],
+                    thermo=mech.thermo, elements=mech.elements)
+    config = convenience_config(:fixedT)
+    phase = ChemPhaseSystem(sub; config=config, checks=false)
+    sys = extract_system(phase)
+    u0 = Dict(String(sp.name) => 1.0e-6 for sp in sub.species)
+    for sid in keys(sub.reactions[1].reactants)
+        u0[String(ChemMechSim.species_by_id(sub, sid).name)] = 1.0
     end
-    @test err isa ArgumentError
-    @test occursin("reaction 1", sprint(showerror, err))
+    prob = build_problem(phase, u0, (0.0, 1.0e-6))
+
+    jac_sharded!, J_proto = ChemMechSim.build_reaction_sharded_jac(sub; config=config, checks=false)
+    J_sharded = copy(J_proto)
+    jac_sharded!(J_sharded, prob.u0, prob.p, 0.0)
+    J_full = _full_sparse_jacobian(sys, prob.u0, prob.p, 0.0)
+
+    @test Matrix(J_sharded) ≈ Matrix(J_full) rtol=1e-8 atol=1e-8
 end
 
 @testset "reaction-sharded net rate uses lowering protocol" begin

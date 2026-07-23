@@ -53,7 +53,7 @@ _reaction_sharded_supported_kinetics(kin) =
 "Reverse policies the reaction-sharded Jacobian can route through the lowering `_net_rate`.
  ExplicitReverse reuses the policy's own rate law; ThermoReverse reuses the opaque keq node."
 _reaction_sharded_supported_reverse(policy::ReverseRatePolicy) =
-    policy isa Irreversible || policy isa ExplicitReverse
+    policy isa Irreversible || policy isa ExplicitReverse || policy isa ThermoReverse
 
 _reaction_sharded_supports(rx::ReactionData) =
     _reaction_sharded_supported_kinetics(rx.kinetics) &&
@@ -65,7 +65,7 @@ function _assert_reaction_sharded_supported(mech::Mechanism)
         throw(ArgumentError(
             "build_reaction_sharded_jac: unsupported reaction $i; supports " *
             "ElementaryArrhenius, ThirdBodyArrhenius, and PlogRate kinetics with " *
-            "Irreversible or ExplicitReverse policy in fixedT mode. Got kinetics=" *
+            "Irreversible, ExplicitReverse, or ThermoReverse policy in fixedT mode. Got kinetics=" *
             "$(typeof(rx.kinetics)), reverse_policy=$(typeof(rx.reverse_policy))."))
     end
     return nothing
