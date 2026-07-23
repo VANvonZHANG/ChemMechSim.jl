@@ -333,6 +333,62 @@ end
     @test Matrix(J_sharded) ≈ Matrix(J_full)
 end
 
+@testset "reaction-sharded supports fixedT Lindemann falloff" begin
+    mech = Mechanism(
+        species = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B"), SpeciesData(id=3, name="C")],
+        reactions = [
+            ReactionData(
+                reactants=Dict(1=>1.0, 2=>1.0),
+                products=Dict(3=>1.0),
+                kinetics=LindemannFalloff(
+                    ElementaryArrhenius(1.0e6, 0.0, 0.0),
+                    ElementaryArrhenius(2.0, 0.0, 0.0),
+                    Dict(2=>2.0)),
+            ),
+        ],
+    )
+    config = convenience_config(:fixedT)
+    phase = ChemPhaseSystem(mech; config=config, checks=false)
+    sys = extract_system(phase)
+    prob = build_problem(phase, Dict("A"=>1.0, "B"=>2.0, "C"=>0.0), (0.0, 0.1))
+
+    jac_sharded!, J_proto = ChemMechSim.build_reaction_sharded_jac(mech; config=config, checks=false)
+    J_sharded = copy(J_proto)
+    jac_sharded!(J_sharded, prob.u0, prob.p, 0.0)
+    J_full = _full_sparse_jacobian(sys, prob.u0, prob.p, 0.0)
+
+    @test _stored_pattern(J_proto) == _expected_pattern(sys, [(("A", "B", "C", "P"), ("A", "B", "C"))])
+    @test Matrix(J_sharded) ≈ Matrix(J_full)
+end
+
+@testset "reaction-sharded supports fixedT Troe falloff" begin
+    mech = Mechanism(
+        species = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B"), SpeciesData(id=3, name="C")],
+        reactions = [
+            ReactionData(
+                reactants=Dict(1=>1.0, 2=>1.0),
+                products=Dict(3=>1.0),
+                kinetics=TroeFalloff(
+                    ElementaryArrhenius(1.0e6, 0.0, 0.0),
+                    ElementaryArrhenius(2.0, 0.0, 0.0),
+                    Dict(2=>2.0),
+                    TroeParams(0.5, 1000.0, 1.0e30, 100.0)),
+            ),
+        ],
+    )
+    config = convenience_config(:fixedT)
+    phase = ChemPhaseSystem(mech; config=config, checks=false)
+    sys = extract_system(phase)
+    prob = build_problem(phase, Dict("A"=>1.0, "B"=>2.0, "C"=>0.0), (0.0, 0.1))
+
+    jac_sharded!, J_proto = ChemMechSim.build_reaction_sharded_jac(mech; config=config, checks=false)
+    J_sharded = copy(J_proto)
+    jac_sharded!(J_sharded, prob.u0, prob.p, 0.0)
+    J_full = _full_sparse_jacobian(sys, prob.u0, prob.p, 0.0)
+
+    @test Matrix(J_sharded) ≈ Matrix(J_full) rtol=1e-8 atol=1e-8
+end
+
 @testset "reaction-sharded Jacobian supports fixedT PLOG pressure derivatives" begin
     plog = PlogRate([
         PlogPoint(101325.0, 1.0, 0.0, 0.0),
