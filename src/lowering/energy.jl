@@ -44,32 +44,38 @@ function _energy_ode_constP(mech::Mechanism, nvar, Vvar, T, rates, tcx)
     return D(T) ~ Vvar * src / cp_sum
 end
 
+"Per-reaction Δūⱼ = Σ_prod ν·ū − Σ_react ν·ū with ū = (h/RT − 1)·R·T (ideal-gas internal energy).
+ Factored out of _energy_rhs_constV so the reaction-sharded adiabatic Jacobian can form each
+ reaction's energy contribution (rateⱼ·Δūⱼ) without duplicating the NASA7 h/RT sum."
+function _reaction_delta_u(mech::Mechanism, rx::ReactionData, T, tcx)
+    R = tcx.R
+    du = 0.0
+    for (sid, nu) in rx.products
+        du += nu * (_h_over_RT(_thermo_of(mech, sid), T, sid, tcx) - 1) * R * T
+    end
+    for (sid, nu) in rx.reactants
+        du -= nu * (_h_over_RT(_thermo_of(mech, sid), T, sid, tcx) - 1) * R * T
+    end
+    return du
+end
+
+"Σᵢ cᵢ·cvᵢ with cvᵢ = (cp/R − 1)·R (ideal-gas const-V heat-capacity density) [J/(m³·K)].
+ Factored out of _energy_rhs_constV; reused by the reaction-sharded adiabatic Jacobian."
+_cv_sum_constV(mech::Mechanism, cvar, T, tcx) =
+    sum(cvar[sp.id] * (_cp_over_R(sp.thermo, T, sp.id, tcx) - 1) * tcx.R for sp in mech.species)
+
 "Const-V adiabatic energy RHS dT/dt (the expression, not the equation). Refactored out so the
  P-ODE (Task 4) can reuse it without duplicating the Σⱼ rⱼ·Δūⱼ / Σᵢ cᵢ·cvᵢ expression."
 function _energy_rhs_constV(mech::Mechanism, cvar, T, rates, tcx)
-    R = tcx.R
     for sp in mech.species
         sp.thermo isa NASA7 ||
             error("_energy_rhs_constV: species $(sp.name) (id $(sp.id)) has no NASA7 thermo; " *
                   ":adiabatic requires NASA7 thermo on all species (spec §5.3.4). " *
                   "Use energy=:isothermal or provide NASA7 thermo.")
     end
-    # Σᵢ cᵢ·cvᵢ  [J/(m³·K)]
-    cv_sum = sum(cvar[sp.id] * (_cp_over_R(sp.thermo, T, sp.id, tcx) - 1) * R for sp in mech.species)
-    # -Σⱼ rⱼ·Δūⱼ  [J/(m³·s)],  Δūⱼ = Σ_products ν·ū − Σ_reactants ν·ū
-    src = 0.0
-    for (j, rx) in enumerate(mech.reactions)
-        delta_u = 0.0
-        for (sid, nu) in rx.products
-            th = _species_by_id(mech, sid).thermo
-            delta_u += nu * (_h_over_RT(th, T, sid, tcx) - 1) * R * T
-        end
-        for (sid, nu) in rx.reactants
-            th = _species_by_id(mech, sid).thermo
-            delta_u -= nu * (_h_over_RT(th, T, sid, tcx) - 1) * R * T
-        end
-        src += rates[j] * (-delta_u)
-    end
+    cv_sum = _cv_sum_constV(mech, cvar, T, tcx)
+    src = sum(rates[j] * (-_reaction_delta_u(mech, rx, T, tcx))
+              for (j, rx) in enumerate(mech.reactions))
     return src / cv_sum
 end
 

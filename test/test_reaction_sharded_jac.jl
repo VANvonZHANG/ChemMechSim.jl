@@ -389,7 +389,29 @@ end
     @test Matrix(J_sharded) ≈ Matrix(J_full) rtol=1e-8 atol=1e-8
 end
 
-@testset "reaction-sharded Jacobian supports fixedT PLOG pressure derivatives" begin
+@testset "reaction-sharded supports adiabatic constV Jacobian" begin
+    # Distinct NASA7 (Δu ≠ 0), A→2B (Δν ≠ 0), and a T-dependent rate: together these exercise
+    # the species rows incl. the T column, the dense energy (T) row (cvsum couples all species),
+    # and the pressure (P) row (coupled to dT/dt). Compares the full (N+2)×(N+2) Jacobian.
+    nasa_A = NASA7((4.0,0,0,0,0,1000.0,0.0),(4.0,0,0,0,0,1000.0,0.0), 200.0, 1000.0, 3500.0)
+    nasa_B = NASA7((4.0,0,0,0,0,3000.0,0.0),(4.0,0,0,0,0,3000.0,0.0), 200.0, 1000.0, 3500.0)
+    mech = Mechanism(
+        species = [SpeciesData(id=1, name="A", thermo=nasa_A), SpeciesData(id=2, name="B", thermo=nasa_B)],
+        reactions = [ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>2.0),
+                                  kinetics=ElementaryArrhenius(2.0, 0.5, 500.0))],
+    )
+    config = convenience_config(:adiabatic_constV)
+    phase = ChemPhaseSystem(mech; config=config, checks=false)
+    sys = extract_system(phase)
+    prob = build_problem(phase, Dict("A"=>1.0, "B"=>0.5, "T"=>1000.0, "P"=>101325.0), (0.0, 0.1))
+
+    jac_sharded!, J_proto = ChemMechSim.build_reaction_sharded_jac(mech; config=config, checks=false)
+    J_sharded = copy(J_proto)
+    jac_sharded!(J_sharded, prob.u0, prob.p, 0.0)
+    J_full = _full_sparse_jacobian(sys, prob.u0, prob.p, 0.0)
+
+    @test Matrix(J_sharded) ≈ Matrix(J_full) rtol=1e-8 atol=1e-8
+end
     plog = PlogRate([
         PlogPoint(101325.0, 1.0, 0.0, 0.0),
         PlogPoint(1013250.0, 3.0, 0.0, 0.0),

@@ -40,11 +40,14 @@ function _reaction_extra_dependency_states(rx::ReactionData, state_idx)
     return [state_idx["P"]]
 end
 
-"State-column indices a reaction's rate depends on (dependency sids + extra states like P).
- These are the columns the shard differentiates against and the columns it scatters into."
-function _reaction_dependency_state_indices(rx::ReactionData, mech::Mechanism, state_idx, sid_to_idx)
+"State-column indices a reaction's rate depends on. Under adiabatic, T is a state and every
+ rate's T-dependence (Arrhenius) plus the energy contribution's T-dependence make T a column;
+ PLOG adds P. These are the columns the shard differentiates against."
+function _reaction_dependency_state_indices(rx::ReactionData, mech::Mechanism, state_idx,
+                                            sid_to_idx, is_adiabatic::Bool=false)
     cols = Int[sid_to_idx[sid] for sid in _reaction_dependency_sids(rx, mech)]
     append!(cols, _reaction_extra_dependency_states(rx, state_idx))
+    is_adiabatic && haskey(state_idx, "T") && push!(cols, state_idx["T"])
     return cols
 end
 
@@ -112,25 +115,42 @@ function _species_id_to_state_index(mech::Mechanism, sys)
     return sid_to_idx
 end
 
-function _reaction_sharded_sparsity_template(mech::Mechanism, sys)
+"Build the Jacobian sparsity template. fixedT: species rows + P row over reaction dependency
+ columns. adiabatic: additionally the T (energy) and P rows are DENSE in all species (cvsum
+ couples every concentration into dT/dt, and dP/dt couples to dT/dt), and T is a dependency
+ column for every rate. PLOG adds P as a dependency column."
+function _reaction_sharded_sparsity_template(mech::Mechanism, sys, is_adiabatic::Bool)
     state_idx = _state_name_index(sys)
     sid_to_idx = _species_id_to_state_index(mech, sys)
     n = length(ModelingToolkit.unknowns(sys))
     pressure_idx = get(state_idx, "P", nothing)
+    T_idx = get(state_idx, "T", nothing)
+    species_state_idxs = collect(values(sid_to_idx))
     rows = Int[]
     cols = Int[]
 
     for rx in mech.reactions
         row_idxs = [sid_to_idx[sid] for sid in _reaction_row_sids(rx)]
         pressure_idx === nothing || push!(row_idxs, pressure_idx)
-        col_idxs = [sid_to_idx[sid] for sid in _reaction_dependency_sids(rx, mech)]
+        col_idxs = Int[sid_to_idx[sid] for sid in _reaction_dependency_sids(rx, mech)]
         append!(col_idxs, _reaction_extra_dependency_states(rx, state_idx))
-
+        is_adiabatic && T_idx !== nothing && push!(col_idxs, T_idx)
         for col in col_idxs
             for row in row_idxs
-                push!(rows, row)
-                push!(cols, col)
+                push!(rows, row); push!(cols, col)
             end
+        end
+    end
+
+    if is_adiabatic
+        # Energy (T) and pressure (P) rows are dense in species (+ T, P columns).
+        for prow in (T_idx, pressure_idx)
+            prow === nothing && continue
+            for col in species_state_idxs
+                push!(rows, prow); push!(cols, col)
+            end
+            T_idx === nothing || (push!(rows, prow); push!(cols, T_idx))
+            pressure_idx === nothing || (push!(rows, prow); push!(cols, pressure_idx))
         end
     end
 
@@ -277,24 +297,33 @@ end
  reaction's net rate w.r.t. ONLY its dependency columns (small expressions), not every state.
  `fn` is the IIP build_function output (writes into `buf`); `buf` is reused across jac! calls
  to avoid per-call allocation. `columns_by_rx`/`output_offsets` map local reaction → its
- dependency columns and the slice of `buf` holding those derivatives."
+ dependency columns and the slice of `buf` holding those derivatives. Under adiabatic,
+ `rate_offsets` additionally marks each reaction's rate-value output (consumed by the energy/
+ pressure row assembly)."
 struct ReactionDerivativeShard
     rx_indices::Vector{Int}
     columns_by_rx::Vector{Vector{Int}}
     output_offsets::Vector{UnitRange{Int}}
+    rate_offsets::Vector{Int}
     fn::Any
     buf::Vector{Float64}
 end
 
 function _reaction_derivative_shard(mech::Mechanism, sys, config::MechanismConfig,
-                                    rx_indices::Vector{Int}, dep_cols_by_rx::Vector{Vector{Int}})
+                                    rx_indices::Vector{Int}, dep_cols_by_rx::Vector{Vector{Int}},
+                                    is_adiabatic::Bool)
     state_syms = ModelingToolkit.unknowns(sys)
     param_syms = ModelingToolkit.parameters(sys)
     outputs = Any[]
     ranges = UnitRange{Int}[]
+    rate_offsets = Int[]
     for (lr, j) in pairs(rx_indices)
         rx = mech.reactions[j]
         rate_expr = _reaction_rate_expr(rx, mech, sys, config, j)
+        if is_adiabatic
+            push!(rate_offsets, length(outputs) + 1)
+            push!(outputs, rate_expr)
+        end
         first_idx = length(outputs) + 1
         for col in dep_cols_by_rx[lr]
             push!(outputs, ModelingToolkit.expand_derivatives(
@@ -306,7 +335,7 @@ function _reaction_derivative_shard(mech::Mechanism, sys, config::MechanismConfi
         outputs, state_syms, param_syms, [ModelingToolkit.t_nounits];
         expression=Val{false}, wrap_gfw=Val{false})[2]
     buf = Vector{Float64}(undef, length(outputs))
-    return ReactionDerivativeShard(rx_indices, dep_cols_by_rx, ranges, fn, buf)
+    return ReactionDerivativeShard(rx_indices, dep_cols_by_rx, ranges, rate_offsets, fn, buf)
 end
 
 "Precomputed O(1) scatter plan for one shard: for each derivative output, the exact nzval
@@ -322,7 +351,7 @@ struct ReactionShardSlotMap
 end
 
 function _build_shard_slotmap(mech::Mechanism, shard::ReactionDerivativeShard,
-                              sid_to_idx, pressure_idx, slotmap)
+                              sid_to_idx, pressure_idx, slotmap, is_adiabatic::Bool)
     slots = Int[]; outidx = Int[]; coefs = Float64[]
     pressure_slots = Int[]; pressure_outidx = Int[]; pressure_coefs = Float64[]
     for (lr, j) in pairs(shard.rx_indices)
@@ -335,10 +364,10 @@ function _build_shard_slotmap(mech::Mechanism, shard::ReactionDerivativeShard,
             for sid in row_sids
                 net = _netstoich(rx, sid)
                 iszero(net) && continue
-                key = (sid_to_idx[sid], col)
-                push!(slots, slotmap[key]); push!(outidx, oi); push!(coefs, net)
+                push!(slots, slotmap[(sid_to_idx[sid], col)]); push!(outidx, oi); push!(coefs, net)
             end
-            if pressure_idx !== nothing && !iszero(dnu)
+            # fixedT pressure row (dP/dt = R·T·ΣΔν·rate). Adiabatic assembles P row at runtime.
+            if !is_adiabatic && pressure_idx !== nothing && !iszero(dnu)
                 push!(pressure_slots, slotmap[(pressure_idx, col)])
                 push!(pressure_outidx, oi); push!(pressure_coefs, dnu)
             end
@@ -368,6 +397,7 @@ function build_reaction_sharded_jac(mech::Mechanism;
     reaction_shard_size > 0 || throw(ArgumentError("reaction_shard_size must be positive"))
     _assert_reaction_sharded_config(config)
     _assert_reaction_sharded_supported(mech)
+    is_adiabatic = config.energy === :adiabatic
     # The shard functions are generated against this system's parameter ordering, so `sys`
     # MUST be the same system object that produced the runtime parameter vector `prob.p`
     # (the ODEProblem's p). ChemPhaseSystem lowering orders parameters non-deterministically
@@ -379,30 +409,101 @@ function build_reaction_sharded_jac(mech::Mechanism;
         phase = ChemPhaseSystem(mech; config=config, checks=checks)
         sys = extract_system(phase)
     end
-    J_proto = _reaction_sharded_sparsity_template(mech, sys)
+    J_proto = _reaction_sharded_sparsity_template(mech, sys, is_adiabatic)
     state_idx = _state_name_index(sys)
     sid_to_idx = _species_id_to_state_index(mech, sys)
     pressure_idx = get(state_idx, "P", nothing)
+    T_idx = get(state_idx, "T", nothing)
     slotmap = _slot_map(J_proto)
 
-    # Dependency columns per reaction (the states its rate depends on).
-    dep_cols_by_rx = [_reaction_dependency_state_indices(rx, mech, state_idx, sid_to_idx)
+    # Dependency columns per reaction (the states its rate depends on; +T under adiabatic).
+    dep_cols_by_rx = [_reaction_dependency_state_indices(rx, mech, state_idx, sid_to_idx, is_adiabatic)
                       for rx in mech.reactions]
     # Batch reactions into shards of `reaction_shard_size`; compile one derivative function
     # per shard (differentiates each reaction's net rate w.r.t. its dependency columns only).
     nrx = length(mech.reactions)
     rx_groups = [collect(i:min(i + reaction_shard_size - 1, nrx))
                  for i in 1:reaction_shard_size:nrx]
-    shards = [_reaction_derivative_shard(mech, sys, config, group, dep_cols_by_rx[group])
+    shards = [_reaction_derivative_shard(mech, sys, config, group, dep_cols_by_rx[group], is_adiabatic)
               for group in rx_groups]
-    slotmaps = [_build_shard_slotmap(mech, shard, sid_to_idx, pressure_idx, slotmap)
+    slotmaps = [_build_shard_slotmap(mech, shard, sid_to_idx, pressure_idx, slotmap, is_adiabatic)
                 for shard in shards]
 
+    is_adiabatic && T_idx === nothing &&
+        error("build_reaction_sharded_jac: adiabatic config requires T as a state.")
+    # Adiabatic-only precompute (energy-row assembly). Computed unconditionally; the fixedT
+    # jac! branch never touches these, and the arrays are small.
+    nstates = length(ModelingToolkit.unknowns(sys))
+    nsp = length(mech.species)
+    sid_to_pos = Dict(sp.id => m for (m, sp) in enumerate(mech.species))
+    species_state_idx = [sid_to_idx[sp.id] for sp in mech.species]
+    product_pos_nu = [[(sid_to_pos[sid], nu) for (sid, nu) in rx.products] for rx in mech.reactions]
+    reactant_pos_nu = [[(sid_to_pos[sid], nu) for (sid, nu) in rx.reactants] for rx in mech.reactions]
+    dnu_vec = [sum(values(rx.products)) - sum(values(rx.reactants)) for rx in mech.reactions]
+    u_vec = Vector{Float64}(undef, nsp)
+    cv_vec = Vector{Float64}(undef, nsp)
+    dcv_dT_vec = Vector{Float64}(undef, nsp)
+    delta_u_vec = Vector{Float64}(undef, nrx)
+    delta_cv_vec = Vector{Float64}(undef, nrx)
+    dG = Vector{Float64}(undef, nstates)   # ∂(ΣΔν·rate)/∂x  (pressure-row coupling)
+    Pn = Vector{Float64}(undef, nstates)   # ∂(Σ rate·Δu)/∂x  (energy-row direct part)
+    thermo = [sp.thermo for sp in mech.species]
+
+    # Single jac! branching on energy regime. fixedT: species rows + the isothermal pressure
+    # row (dP/dt = R·T·ΣΔν·rate). adiabatic: species rows (incl. T,P columns) + the energy (T)
+    # and pressure (P) rows assembled in factored form — the T/P rows couple to every species
+    # concentration through cvsum = Σcᵢ·cvᵢ, so per-reaction differentiation of the full
+    # -(rate·Δu)/cvsum expression would reintroduce the scale problem. Instead the shards supply
+    # the SMALL per-reaction rate and ∂rate/∂x; runtime combines them with the global cvsum.
+    # Identities: dT/dt = -Σⱼ rateⱼ·Δūⱼ/cvsum; dū/dT = cv ⇒ dΔūⱼ/dT = Δcvⱼ;
+    # dP/dt = R·(T·ΣΔν·rate + (Σc)·dT/dt).
     function jac!(J::SparseArrays.SparseMatrixCSC, u, p, t)
         fill!(J.nzval, 0.0)
-        T = _temperature_value(sys, u, p, state_idx)
         pvec = _parameter_vector(p)
-        RT = R_GAS * T
+        if !is_adiabatic
+            T = _temperature_value(sys, u, p, state_idx)
+            RT = R_GAS * T
+            for (shard, sm) in zip(shards, slotmaps)
+                shard.fn(shard.buf, u, pvec, t)
+                vals = shard.buf
+                @inbounds for k in eachindex(sm.slots)
+                    J.nzval[sm.slots[k]] += sm.coefs[k] * vals[sm.outidx[k]]
+                end
+                if pressure_idx !== nothing
+                    @inbounds for k in eachindex(sm.pressure_slots)
+                        J.nzval[sm.pressure_slots[k]] += (RT * sm.pressure_coefs[k]) * vals[sm.pressure_outidx[k]]
+                    end
+                end
+            end
+            return nothing
+        end
+        # ---- adiabatic ----
+        T = Float64(u[T_idx])
+        cvsum = 0.0; dcvsum_dT = 0.0; csum = 0.0
+        @inbounds for m in 1:nsp
+            a = _nasa7_coeffs(thermo[m], T)
+            cpR = a[1] + a[2]*T + a[3]*T^2 + a[4]*T^3 + a[5]*T^4
+            cv_vec[m] = (cpR - 1) * R_GAS
+            dcv_dT_vec[m] = R_GAS * (a[2] + 2*a[3]*T + 3*a[4]*T^2 + 4*a[5]*T^3)
+            hRT = a[1] + a[2]*T/2 + a[3]*T^2/3 + a[4]*T^3/4 + a[5]*T^4/5 + a[6]/T
+            u_vec[m] = (hRT - 1) * R_GAS * T
+            cm = u[species_state_idx[m]]
+            cvsum += cm * cv_vec[m]
+            dcvsum_dT += cm * dcv_dT_vec[m]
+            csum += cm
+        end
+        @inbounds for j in 1:nrx
+            du = 0.0; dcv = 0.0
+            for (pos, nu) in product_pos_nu[j]
+                du += nu * u_vec[pos]; dcv += nu * cv_vec[pos]
+            end
+            for (pos, nu) in reactant_pos_nu[j]
+                du -= nu * u_vec[pos]; dcv -= nu * cv_vec[pos]
+            end
+            delta_u_vec[j] = du; delta_cv_vec[j] = dcv
+        end
+        fill!(dG, 0.0); fill!(Pn, 0.0)
+        S = 0.0; G = 0.0
         for (shard, sm) in zip(shards, slotmaps)
             shard.fn(shard.buf, u, pvec, t)
             _sanitize_shard_buf!(shard.buf)
@@ -410,11 +511,41 @@ function build_reaction_sharded_jac(mech::Mechanism;
             @inbounds for k in eachindex(sm.slots)
                 J.nzval[sm.slots[k]] += sm.coefs[k] * vals[sm.outidx[k]]
             end
-            if pressure_idx !== nothing
-                @inbounds for k in eachindex(sm.pressure_slots)
-                    J.nzval[sm.pressure_slots[k]] += (RT * sm.pressure_coefs[k]) * vals[sm.pressure_outidx[k]]
+            @inbounds for (lr, j) in pairs(shard.rx_indices)
+                rate = vals[shard.rate_offsets[lr]]
+                du = delta_u_vec[j]; dcv = delta_cv_vec[j]; dnur = dnu_vec[j]
+                S += rate * du
+                G += dnur * rate
+                outbase = shard.output_offsets[lr]
+                for (k, col) in enumerate(shard.columns_by_rx[lr])
+                    drate = vals[outbase[k]]
+                    dG[col] += dnur * drate
+                    Pn[col] += drate * du
+                    col == T_idx && (Pn[col] += rate * dcv)   # dΔu/dT = Δcv term
                 end
             end
+        end
+        inv_cv = 1.0 / cvsum
+        inv_cv2 = inv_cv * inv_cv
+        @inbounds begin
+            # Energy (T) row: J[T,x] = -Pn[x]/cvsum + S·(∂cvsum/∂x)/cvsum²
+            for m in 1:nsp
+                col = species_state_idx[m]
+                J.nzval[slotmap[(T_idx, col)]] = -Pn[col]*inv_cv + S*cv_vec[m]*inv_cv2
+            end
+            JTT = -Pn[T_idx]*inv_cv + S*dcvsum_dT*inv_cv2
+            J.nzval[slotmap[(T_idx, T_idx)]] = JTT
+            pressure_idx === nothing || (J.nzval[slotmap[(T_idx, pressure_idx)]] = -Pn[pressure_idx]*inv_cv)
+            # Pressure (P) row: J[P,x] = R·(δ_Tx·G + T·dG[x] + δ_cx·dTdt + (Σc)·J[T,x])
+            dTdt = -S * inv_cv
+            for m in 1:nsp
+                col = species_state_idx[m]
+                JTc = -Pn[col]*inv_cv + S*cv_vec[m]*inv_cv2
+                J.nzval[slotmap[(pressure_idx, col)]] = R_GAS*(T*dG[col] + dTdt + csum*JTc)
+            end
+            J.nzval[slotmap[(pressure_idx, T_idx)]] = R_GAS*(G + T*dG[T_idx] + csum*JTT)
+            pressure_idx === nothing ||
+                (J.nzval[slotmap[(pressure_idx, pressure_idx)]] = R_GAS*(T*dG[pressure_idx] + csum*(-Pn[pressure_idx]*inv_cv)))
         end
         return nothing
     end
