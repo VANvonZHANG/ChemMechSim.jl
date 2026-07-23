@@ -27,10 +27,13 @@ const PLOG_NEXT_ID   = Ref(0)
 
 "Numeric PLOG k(T,P) for the registered call node; looks up reaction by id."
 plog_kf(T, P, id::Int)    = plog_rate(PLOG_TABLE[id], T, P)
+plog_kf(T::Real, P::Real, id::Int) = plog_rate(PLOG_TABLE[id], T, P)
 "Numeric ∂k/∂T for the registered call node."
 plog_kf_dT(T, P, id::Int) = plog_dkdT(PLOG_TABLE[id], T, P)
+plog_kf_dT(T::Real, P::Real, id::Int) = plog_dkdT(PLOG_TABLE[id], T, P)
 "Numeric ∂k/∂P for the registered call node."
 plog_kf_dP(T, P, id::Int) = plog_dkdP(PLOG_TABLE[id], T, P)
+plog_kf_dP(T::Real, P::Real, id::Int) = plog_dkdP(PLOG_TABLE[id], T, P)
 
 # Quantity-dispatch: extract SI values, call the Float64 method, re-wrap with the stored
 # output unit. Invoked by MTK's check_units (get_unit walks the call node and fires this with
@@ -38,7 +41,14 @@ plog_kf_dP(T, P, id::Int) = plog_dkdP(PLOG_TABLE[id], T, P)
 # unitless Quantity). T is in K, P is in Pa (both SI base), so ustrip gives exactly what
 # plog_rate expects. id may arrive as Int (numeric call) or unitless Quantity (unit check).
 _id_int(id::Int)       = id
+_id_int(id::Real)      = Int(id)
 _id_int(id::Quantity)  = Int(ustrip(id))
+plog_kf(T::Real, P::Real, id::Real)    = plog_kf(T, P, _id_int(id))
+plog_kf_dT(T::Real, P::Real, id::Real) = plog_kf_dT(T, P, _id_int(id))
+plog_kf_dP(T::Real, P::Real, id::Real) = plog_kf_dP(T, P, _id_int(id))
+plog_kf(T::Quantity, P::Quantity, id::Int)    = plog_kf(ustrip(T), ustrip(P), id)    * PLOG_UNIT_TABLE[id]
+plog_kf_dT(T::Quantity, P::Quantity, id::Int) = plog_kf_dT(ustrip(T), ustrip(P), id) * PLOG_UNIT_TABLE[id] / u"K"
+plog_kf_dP(T::Quantity, P::Quantity, id::Int) = plog_kf_dP(ustrip(T), ustrip(P), id) * PLOG_UNIT_TABLE[id] / u"Pa"
 plog_kf(T::Quantity, P::Quantity, id)    = plog_kf(ustrip(T), ustrip(P), _id_int(id))    * PLOG_UNIT_TABLE[_id_int(id)]
 plog_kf_dT(T::Quantity, P::Quantity, id) = plog_kf_dT(ustrip(T), ustrip(P), _id_int(id)) * PLOG_UNIT_TABLE[_id_int(id)] / u"K"
 plog_kf_dP(T::Quantity, P::Quantity, id) = plog_kf_dP(ustrip(T), ustrip(P), _id_int(id)) * PLOG_UNIT_TABLE[_id_int(id)] / u"Pa"

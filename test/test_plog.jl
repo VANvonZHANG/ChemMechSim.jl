@@ -1,7 +1,47 @@
 using Test, ModelingToolkit
 using ChemMechSim
-using ChemMechSim: PlogPoint, PlogRate, plog_rate, symbolic_kf, RateCtx, needs_P
+using DynamicQuantities
+using ChemMechSim: PlogPoint, PlogRate, plog_rate, symbolic_kf, RateCtx, needs_P,
+                   plog_kf, plog_kf_dT, plog_kf_dP
 import ModelingToolkit: substitute, value, get_variables, getname, getdefault
+
+@testset "PLOG registered numeric helpers accept Real-valued ids" begin
+    kin = PlogRate([PlogPoint(1e4, 1e3, 0, 0), PlogPoint(1e6, 1e2, 0, 0)])
+    sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")]
+    mech = Mechanism(species=sp, reactions=[
+        ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0), kinetics=kin)
+    ])
+    @parameters T P
+    ctx = RateCtx(mech, Dict{Int,Any}(), T, 1, 1.0, nothing, nothing,
+                  Dict{Int,Any}(), P, Any[])
+    symbolic_kf(kin, ctx)
+    id = ChemMechSim.PLOG_NEXT_ID[]
+    id_float = Float64(id)
+    T_sample, P_sample = 1000.0, 101325.0
+
+    @test plog_kf(T_sample, P_sample, id_float) ≈ plog_kf(T_sample, P_sample, id)
+    @test plog_kf_dT(T_sample, P_sample, id_float) ≈ plog_kf_dT(T_sample, P_sample, id)
+    @test plog_kf_dP(T_sample, P_sample, id_float) ≈ plog_kf_dP(T_sample, P_sample, id)
+end
+
+@testset "PLOG registered Quantity helpers accept Int and unitless Quantity ids" begin
+    kin = PlogRate([PlogPoint(1e4, 1e3, 0, 0), PlogPoint(1e6, 1e2, 0, 0)])
+    sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")]
+    mech = Mechanism(species=sp, reactions=[
+        ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0), kinetics=kin)
+    ])
+    @parameters T P
+    ctx = RateCtx(mech, Dict{Int,Any}(), T, 1, 1.0, nothing, nothing,
+                  Dict{Int,Any}(), P, Any[])
+    symbolic_kf(kin, ctx)
+    id = ChemMechSim.PLOG_NEXT_ID[]
+    id_quantity = id * u"1"
+    T_quantity, P_quantity = 1000.0u"K", 101325.0u"Pa"
+
+    @test plog_kf(T_quantity, P_quantity, id_quantity) ≈ plog_kf(T_quantity, P_quantity, id)
+    @test plog_kf_dT(T_quantity, P_quantity, id_quantity) ≈ plog_kf_dT(T_quantity, P_quantity, id)
+    @test plog_kf_dP(T_quantity, P_quantity, id_quantity) ≈ plog_kf_dP(T_quantity, P_quantity, id)
+end
 
 @testset "Phase 6 T3: PLOG symbolic_kf (opaque call node) + needs_P" begin
     kin = PlogRate([PlogPoint(1e4, 1e9, 0.0, 0.0), PlogPoint(1e6, 1e7, 0.0, 0.0)])

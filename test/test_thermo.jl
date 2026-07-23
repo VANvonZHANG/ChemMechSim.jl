@@ -158,7 +158,7 @@ end
     # Verify the opaque call node evaluates to the correct K_c VALUE (not just that a node exists).
     # The split design: keq(T,id) returns exp(-Δg°/RT); _reverse_rate multiplies by (P°/RT)^Δν inline.
     # So keq(T,id) · (P°/(R·T))^Δν must equal equilibrium_constant(KcData, T) (the data-layer truth).
-    using ChemMechSim: KcData, equilibrium_constant, keq
+    using ChemMechSim: KcData, equilibrium_constant, keq, keq_dT
     import ChemMechSim: KEQ_TABLE, KEQ_NEXT_ID
 
     mech = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
@@ -173,6 +173,11 @@ end
     # For each registered id, verify keq(T, id) is behavior-preserving with the data layer.
     ids = sort(collect(keys(KEQ_TABLE)))
     @test !isempty(ids)
+    id_real = Float64(first(ids))
+    for T in (900.0, 1500.0, 2500.0)
+        @test keq(T, id_real) ≈ keq(T, first(ids))  rtol = 1e-12
+        @test keq_dT(T, id_real) ≈ keq_dT(T, first(ids))  rtol = 1e-12
+    end
     R_GAS_v = ChemMechSim.R_GAS
     P_STD_v = ChemMechSim.P_STD
     for id in ids
