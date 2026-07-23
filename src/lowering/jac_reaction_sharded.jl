@@ -26,8 +26,9 @@ function _reaction_dependency_sids(rx::ReactionData, mech::Mechanism)
     deps = Set{SpeciesID}(keys(rx.reactants))
     # Reversible rates also depend on product concentrations (reverse mass-action / K_c).
     rx.reverse_policy isa Irreversible || union!(deps, keys(rx.products))
-    # Third-body rates depend on every species concentration via [M]_eff.
-    rx.kinetics isa ThirdBodyArrhenius && union!(deps, (sp.id for sp in mech.species))
+    # Third-body and falloff rates depend on every species concentration via [M]_eff.
+    (rx.kinetics isa ThirdBodyArrhenius || rx.kinetics isa AbstractFalloff) &&
+        union!(deps, (sp.id for sp in mech.species))
     return deps
 end
 
@@ -48,7 +49,8 @@ function _reaction_dependency_state_indices(rx::ReactionData, mech::Mechanism, s
 end
 
 _reaction_sharded_supported_kinetics(kin) =
-    kin isa ElementaryArrhenius || kin isa ThirdBodyArrhenius || kin isa PlogRate
+    kin isa ElementaryArrhenius || kin isa ThirdBodyArrhenius || kin isa PlogRate ||
+    kin isa LindemannFalloff || kin isa TroeFalloff
 
 "Reverse policies the reaction-sharded Jacobian can route through the lowering `_net_rate`.
  ExplicitReverse reuses the policy's own rate law; ThermoReverse reuses the opaque keq node."
@@ -64,9 +66,10 @@ function _assert_reaction_sharded_supported(mech::Mechanism)
         _reaction_sharded_supports(rx) && continue
         throw(ArgumentError(
             "build_reaction_sharded_jac: unsupported reaction $i; supports " *
-            "ElementaryArrhenius, ThirdBodyArrhenius, and PlogRate kinetics with " *
-            "Irreversible, ExplicitReverse, or ThermoReverse policy in fixedT mode. Got kinetics=" *
-            "$(typeof(rx.kinetics)), reverse_policy=$(typeof(rx.reverse_policy))."))
+            "ElementaryArrhenius, ThirdBodyArrhenius, PlogRate, LindemannFalloff, and " *
+            "TroeFalloff kinetics with Irreversible, ExplicitReverse, or ThermoReverse policy " *
+            "in fixedT mode. Got kinetics=$(typeof(rx.kinetics)), " *
+            "reverse_policy=$(typeof(rx.reverse_policy))."))
     end
     return nothing
 end
@@ -235,6 +238,11 @@ function _reaction_sharded_symbolic_kf(kin::PlogRate, ctx::RateCtx)
     return symbolic_kf(kin, ctx)
 end
 
+"Troe/Lindemann falloff: reuse the lowering symbolic_kf (the Troe/Lindemann formula + the
+ [M]_eff term). The M_eff_j(t) variables it creates via _meff are inlined into the rate
+ expression by _reaction_rate_expr (no formula duplication here, no M_eff free variable)."
+_reaction_sharded_symbolic_kf(kin::AbstractFalloff, ctx::RateCtx) = symbolic_kf(kin, ctx)
+
 "Symbolic net rate for one reaction, reusing the lowering protocol (design §5).
  Irreversible: _reaction_sharded_symbolic_kf · mass_action(reactants). Reversible: routes
  through thermo.jl's `_net_rate`, which forms the reverse rate from the policy (ExplicitReverse
@@ -247,11 +255,22 @@ function _reaction_rate_expr(rx::ReactionData, mech::Mechanism, sys,
     P = get(state_by_name, "P", nothing)
     T = haskey(state_by_name, "T") ? state_by_name["T"] : _fixedT_parameter_symbol(sys)
     tcx = make_thermo_ctx(T)
+    meff_eqs = Any[]
     ctx = RateCtx(mech, cvar, T, j, sum(values(rx.reactants)),
-                  tcx.R, tcx.P_std, tcx.coeff_cache, P, Any[])
-    return rx.reverse_policy isa Irreversible ?
-           _reaction_sharded_symbolic_kf(rx.kinetics, ctx) * _mass_action(rx.reactants, cvar) :
-           _net_rate(rx, mech, cvar, T, j, ctx)
+                  tcx.R, tcx.P_std, tcx.coeff_cache, P, meff_eqs)
+    rate_expr = rx.reverse_policy isa Irreversible ?
+        _reaction_sharded_symbolic_kf(rx.kinetics, ctx) * _mass_action(rx.reactants, cvar) :
+        _net_rate(rx, mech, cvar, T, j, ctx)
+    # Falloff forward rates (symbolic_kf) introduce M_eff_j(t) algebraic variables via _meff.
+    # The sharded path runs no MTK tearing to eliminate them, so inline each M_eff_j → its
+    # Σα·c sum here (reuses the _meff expression; no rate-law formula duplication, and no
+    # M_eff free variable reaches build_function). Direct third-body kf uses
+    # _reaction_sharded_direct_meff (no M_eff_j), so meff_eqs stays empty for it.
+    if !isempty(meff_eqs)
+        rate_expr = ModelingToolkit.substitute(
+            rate_expr, Dict(eq.lhs => eq.rhs for eq in meff_eqs))
+    end
+    return rate_expr
 end
 
 "One compiled derivative function for a batch (shard) of reactions. Differentiates each
