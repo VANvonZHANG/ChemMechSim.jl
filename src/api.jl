@@ -1,7 +1,8 @@
 # Layered API: extract_system / build_problem / simulate / generate_function.
 # simulate/build_problem operate on a ChemPhaseSystem (the Phase 1 "reactor").
 # generate_function returns standalone Julia code (spec §6, §7).
-using SciMLBase: NoSpecialize
+using SciMLBase: NoSpecialize, ODEFunction
+using ModelingToolkit: generate_rhs
 
 "Extract the underlying MTK ODESystem from a ChemPhaseSystem."
 extract_system(phase::ChemPhaseSystem) = phase.sys
@@ -14,6 +15,16 @@ function _u0_pairs(phase::ChemPhaseSystem, u0::AbstractDict)
     return [byname[k] => v for (k, v) in u0]
 end
 
+function _normalize_jac_strategy(jac::Bool, jac_chunked::Bool, jac_strategy::Symbol)
+    jac_strategy in (:auto, :shared_cse, :mtk, :none) ||
+        throw(ArgumentError(
+            "jac_strategy must be one of :auto, :shared_cse, :mtk, :none"))
+    jac_strategy === :auto && return (jac || jac_chunked) ? :shared_cse : :none
+    jac_strategy === :mtk &&
+        throw(ArgumentError("jac_strategy=:mtk is intentionally disabled for large mechanisms; use :shared_cse or :none"))
+    return jac_strategy
+end
+
 "Build an ODEProblem from a ChemPhaseSystem. `u0` is a Dict(speciesname => value);
  `params` is an optional Vector of Pair(parameter => value) (e.g. `[T => 500.0]`).
  When P is a differential state (const-V P-ODE, Task 4 + Task 3) and `u0` omits `\"P\"`, P0 is
@@ -24,7 +35,10 @@ end
  override the T parameter via `params=` (e.g. `[T => 500.0]`) should pass `u0[\"P\"]` explicitly
  for a precise P0 — the auto-fill falls back to the T-param default, not the overridden value."
 function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
-                        params=Pair[], jac::Bool=false)
+                        params=Pair[], jac::Bool=false, jac_chunked::Bool=false,
+                        jac_strategy::Symbol=:auto,
+                        chunk_size::Int=200, cse_chunk_size::Int=chunk_size,
+                        write_chunk_size::Int=500)
     sys = phase.sys
     unks = ModelingToolkit.unknowns(sys)
     byname = Dict(String(ModelingToolkit.getname(s)) => s for s in unks)
@@ -44,8 +58,25 @@ function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
         end
         push!(pairs, byname["P"] => R_GAS * csum * Float64(T0))
     end
-    if jac
-        return ODEProblem{true, NoSpecialize}(sys, pairs, tspan; jac=true, sparse=true)
+    strategy = _normalize_jac_strategy(jac, jac_chunked, jac_strategy)
+    if strategy === :shared_cse
+        # Tier 2 shared-CSE Jacobian path. MTK's ODEProblem(::ODESystem, …; jac=<function>)
+        # does not accept a user-supplied jac, so build the ODEFunction manually and construct
+        # the ODEProblem from it. `jac_chunked` is kept as a compatibility alias; `jac=true`
+        # is the intended user entrypoint.
+        # 1. Baseline ODEProblem (no jac) gives us the MTK-compiled u0 / MTKParameters p matching
+        #    the system's state ordering.
+        prob_baseline = ODEProblem(sys, pairs, tspan)
+        # 2. RHS as a RuntimeGeneratedFunction (defers LLVM JIT until first call), no GFW wrap.
+        rhs_iip = generate_rhs(sys; expression=Val{false}, wrap_gfw=Val{false})[2]
+        # 3. Shared-CSE jac dispatcher + Float64 sparse prototype.
+        jac!, J_proto = build_shared_cse_jac(
+            sys; cse_chunk_size=cse_chunk_size, write_chunk_size=write_chunk_size)
+        # 4. Manual ODEFunction with NoSpecialize (avoids promote_f / FunctionWrappersWrapper,
+        #    Layer 1) and the shared-CSE jac (setup temporaries live in a reusable workspace
+        #    and sparse writes compile in bounded chunks).
+        ofn = ODEFunction{true, NoSpecialize}(rhs_iip; jac=jac!, jac_prototype=J_proto)
+        return ODEProblem(ofn, prob_baseline.u0, tspan, prob_baseline.p)
     else
         return ODEProblem(sys, pairs, tspan)
     end
@@ -54,9 +85,16 @@ end
 "Simulate a ChemPhaseSystem over `tspan`. `u0` is a Dict(speciesname => value);
  `params` sets parameter values (e.g. `[T => 500.0]`). Default solver Tsit5()
  (non-stiff); stiff mechanisms (Phase 5) should pass Rodas5P/CVODE_BDF."
-function simulate(phase::ChemPhaseSystem, tspan=(0.0, 1.0); u0,
-                  solver=Tsit5(), params=Pair[], kwargs...)
-    return solve(build_problem(phase, u0, tspan; params=params), solver; kwargs...)
+function simulate(phase::ChemPhaseSystem, tspan=(0.0, 1.0); u0, solver=Tsit5(),
+                  params=Pair[], jac::Bool=false, jac_chunked::Bool=false,
+                  jac_strategy::Symbol=:auto,
+                  chunk_size::Int=200, cse_chunk_size::Int=chunk_size,
+                  write_chunk_size::Int=500, kwargs...)
+    prob = build_problem(phase, u0, tspan; params=params, jac=jac,
+                         jac_chunked=jac_chunked, jac_strategy=jac_strategy,
+                         chunk_size=chunk_size, cse_chunk_size=cse_chunk_size,
+                         write_chunk_size=write_chunk_size)
+    return solve(prob, solver; kwargs...)
 end
 
 "Generate standalone RHS Julia code (an out-of-place function Expr) from an MTK system."
@@ -74,13 +112,25 @@ extract_system(r::BatchReactor) = extract_system(r.phase)
 
 "Build an ODEProblem from a BatchReactor. `u0` is a Dict(speciesname => value);
  `params` is an optional Pair vector."
-build_problem(r::BatchReactor, u0::AbstractDict, tspan; params=Pair[], jac::Bool=false) =
-    build_problem(r.phase, u0, tspan; params=params, jac=jac)
+build_problem(r::BatchReactor, u0::AbstractDict, tspan; params=Pair[], jac::Bool=false,
+              jac_chunked::Bool=false, jac_strategy::Symbol=:auto, chunk_size::Int=200,
+              cse_chunk_size::Int=chunk_size, write_chunk_size::Int=500) =
+    build_problem(r.phase, u0, tspan; params=params, jac=jac,
+                  jac_chunked=jac_chunked, jac_strategy=jac_strategy,
+                  chunk_size=chunk_size, cse_chunk_size=cse_chunk_size,
+                  write_chunk_size=write_chunk_size)
 
 "Simulate a BatchReactor over `tspan`. `u0` is a Dict(speciesname => value);
  `params` sets parameter values. Default solver Tsit5()."
-function simulate(r::BatchReactor, tspan=(0.0, 1.0); u0, solver=Tsit5(), params=Pair[], kwargs...)
-    return simulate(r.phase, tspan; u0=u0, solver=solver, params=params, kwargs...)
+function simulate(r::BatchReactor, tspan=(0.0, 1.0); u0, solver=Tsit5(),
+                  params=Pair[], jac::Bool=false, jac_chunked::Bool=false,
+                  jac_strategy::Symbol=:auto,
+                  chunk_size::Int=200, cse_chunk_size::Int=chunk_size,
+                  write_chunk_size::Int=500, kwargs...)
+    return simulate(r.phase, tspan; u0=u0, solver=solver, params=params, jac=jac,
+                    jac_chunked=jac_chunked, jac_strategy=jac_strategy,
+                    chunk_size=chunk_size, cse_chunk_size=cse_chunk_size,
+                    write_chunk_size=write_chunk_size, kwargs...)
 end
 
 "Generate standalone RHS Julia code from a BatchReactor's system."
