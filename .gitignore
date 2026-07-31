@@ -6,3 +6,7 @@ coverage/
 
 # generated plot output (examples/brusselator.jl writes these)
 examples/*.png
+
+# local Superpowers planning/state files
+.superpowers/
+docs/superpowers/
