@@ -23,3 +23,5 @@ include("lowering/kinetics.jl")
 include("lowering/thermo.jl")
 include("lowering/energy.jl")
 include("lowering/core.jl")
+
+include("lowering/jac_chunked.jl")
