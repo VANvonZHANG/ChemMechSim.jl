@@ -90,7 +90,7 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
                                meff_eqs, checks; p_differential=p_differential)
     end
     append!(eqs, meff_eqs)               # non-EOS: auto-discover path handles M_eff_j as states
-    @named raw = System(eqs, t)          # auto-discovers states [c₁..cₙ, T] and RHS params
+    raw = System(eqs, t; name=:raw, checks=checks)  # auto-discovers states [c₁..cₙ, T] and RHS params
     return mtkcompile(raw; checks=checks)
 end
 
@@ -133,13 +133,13 @@ function _lower_with_eos(eqs, t, cvars, Tparam, is_adiabatic::Bool, tcx, Pvar,
         push!(eqs, eq)
         push!(states, eq.lhs)
     end
-    @named _tmp = System(eqs, t)                   # auto-discover RHS params
+    _tmp = System(eqs, t; name=:_tmp, checks=checks)  # auto-discover RHS params
     rhsparams = ModelingToolkit.parameters(_tmp)
     rhsnames = Set(ModelingToolkit.getname(p) for p in rhsparams)
     extras = Any[]
     ModelingToolkit.getname(Rparam) in rhsnames || push!(extras, Rparam)
     is_adiabatic || (ModelingToolkit.getname(Tparam) in rhsnames || push!(extras, Tparam))  # T param only when isothermal
-    @named raw = System(eqs, t, states, [rhsparams; extras]; observed=obs)
+    raw = System(eqs, t, states, [rhsparams; extras]; name=:raw, checks=checks, observed=obs)
     return mtkcompile(raw; checks=checks)
 end
 
@@ -172,6 +172,6 @@ function _lower_constP(mech::Mechanism, config::MechanismConfig, checks::Bool=tr
     end
     eqs = append_constraint_layers!(eqs, mech, config, cvar, Tsym, rates; tcx=tcx, nvar=nvar, Vvar=Vvar)
     append!(eqs, meff_eqs)               # M_eff algebraic eqs → MTK tearing eliminates to observed
-    @named raw = System(eqs, t)
+    raw = System(eqs, t; name=:raw, checks=checks)
     return mtkcompile(raw; checks=checks)
 end

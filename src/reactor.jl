@@ -9,14 +9,19 @@ struct ChemPhaseSystem
     config::MechanismConfig
 end
 
-"Build a ChemPhaseSystem from a Mechanism (lowers with the given config)."
-function ChemPhaseSystem(mech::Mechanism; config::MechanismConfig=MechanismConfig())
-    return ChemPhaseSystem(lower_to_mtk(mech; config=config), mech, config)
+"Build a ChemPhaseSystem from a Mechanism (lowers with the given config).
+ `checks` is forwarded to `lower_to_mtk` (default true; pass false for large
+ mechanisms whose inlined K_c (NASA7) reverse-rate terms trip MTK's unit
+ validator — the equations are dimensionally correct, the check just cannot
+ fold the long ifelse(T<=Tmid,...) chains). See examples/aramco_ignition.jl."
+function ChemPhaseSystem(mech::Mechanism; config::MechanismConfig=MechanismConfig(),
+                         checks::Bool=true)
+    return ChemPhaseSystem(lower_to_mtk(mech; config=config, checks=checks), mech, config)
 end
 
 "Build a ChemPhaseSystem from a Catalyst ReactionSystem (imports, then lowers)."
-function ChemPhaseSystem(rn; config::MechanismConfig=MechanismConfig())
-    return ChemPhaseSystem(import_from_catalyst(rn); config=config)
+function ChemPhaseSystem(rn; config::MechanismConfig=MechanismConfig(), checks::Bool=true)
+    return ChemPhaseSystem(import_from_catalyst(rn); config=config, checks=checks)
 end
 
 # Reactor assembly (spec §5.5). Phase 2 ships a zero-point BatchReactor: a thin
@@ -48,13 +53,14 @@ function BatchReactor(mech::Mechanism;
         thermo_data::Symbol=:none,
         reverse_rate::Symbol=:irreversible,
         state_basis::Symbol=:concentration,
+        checks::Bool=true,
         name::Symbol=:batch)
     config = isnothing(mode) ?
         MechanismConfig(energy=energy, constraint=constraint, eos=eos,
                         thermo_data=thermo_data, reverse_rate=reverse_rate,
                         state_basis=state_basis) :
         convenience_config(mode)
-    phase = ChemPhaseSystem(mech; config=config)   # lower_to_mtk guards zero-point
+    phase = ChemPhaseSystem(mech; config=config, checks=checks)   # lower_to_mtk guards zero-point
     return BatchReactor(phase, name)
 end
 
