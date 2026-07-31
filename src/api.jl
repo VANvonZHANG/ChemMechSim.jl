@@ -16,12 +16,12 @@ function _u0_pairs(phase::ChemPhaseSystem, u0::AbstractDict)
 end
 
 function _normalize_jac_strategy(jac::Bool, jac_chunked::Bool, jac_strategy::Symbol)
-    jac_strategy in (:auto, :shared_cse, :mtk, :none) ||
+    jac_strategy in (:auto, :shared_cse, :reaction_sharded, :mtk, :none) ||
         throw(ArgumentError(
-            "jac_strategy must be one of :auto, :shared_cse, :mtk, :none"))
+            "jac_strategy must be one of :auto, :shared_cse, :reaction_sharded, :mtk, :none"))
     jac_strategy === :auto && return (jac || jac_chunked) ? :shared_cse : :none
     jac_strategy === :mtk &&
-        throw(ArgumentError("jac_strategy=:mtk is intentionally disabled for large mechanisms; use :shared_cse or :none"))
+        throw(ArgumentError("jac_strategy=:mtk is intentionally disabled for large mechanisms; use :shared_cse, :reaction_sharded, or :none"))
     return jac_strategy
 end
 
@@ -59,6 +59,13 @@ function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
         push!(pairs, byname["P"] => R_GAS * csum * Float64(T0))
     end
     strategy = _normalize_jac_strategy(jac, jac_chunked, jac_strategy)
+    # :auto defaults to :shared_cse; prefer :reaction_sharded when the mechanism + config are
+    # fully supported — it is the only path that scales to large mechanisms (shared_cse's full
+    # symbolic-Jacobian codegen explodes above ~100 species). Unsupported kinetics keep :shared_cse.
+    if strategy === :shared_cse && jac_strategy === :auto &&
+       _reaction_sharded_supports_mechconfig(phase.mech, phase.config)
+        strategy = :reaction_sharded
+    end
     if strategy === :shared_cse
         # Tier 2 shared-CSE Jacobian path. MTK's ODEProblem(::ODESystem, …; jac=<function>)
         # does not accept a user-supplied jac, so build the ODEFunction manually and construct
@@ -75,6 +82,13 @@ function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
         # 4. Manual ODEFunction with NoSpecialize (avoids promote_f / FunctionWrappersWrapper,
         #    Layer 1) and the shared-CSE jac (setup temporaries live in a reusable workspace
         #    and sparse writes compile in bounded chunks).
+        ofn = ODEFunction{true, NoSpecialize}(rhs_iip; jac=jac!, jac_prototype=J_proto)
+        return ODEProblem(ofn, prob_baseline.u0, tspan, prob_baseline.p)
+    elseif strategy === :reaction_sharded
+        prob_baseline = ODEProblem(sys, pairs, tspan)
+        rhs_iip = generate_rhs(sys; expression=Val{false}, wrap_gfw=Val{false})[2]
+        jac!, J_proto = build_reaction_sharded_jac(
+            phase.mech; config=phase.config, checks=false, sys=sys)
         ofn = ODEFunction{true, NoSpecialize}(rhs_iip; jac=jac!, jac_prototype=J_proto)
         return ODEProblem(ofn, prob_baseline.u0, tspan, prob_baseline.p)
     else

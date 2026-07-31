@@ -125,7 +125,7 @@ end
 
     @test_throws ArgumentError build_problem(phase, u0, (0.0, 0.1);
                                              jac=true, jac_strategy=:unknown)
-    @test_throws ArgumentError("jac_strategy=:mtk is intentionally disabled for large mechanisms; use :shared_cse or :none") build_problem(
+    @test_throws ArgumentError("jac_strategy=:mtk is intentionally disabled for large mechanisms; use :shared_cse, :reaction_sharded, or :none") build_problem(
         phase, u0, (0.0, 0.1); jac=true, jac_strategy=:mtk)
 end
 
