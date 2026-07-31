@@ -43,6 +43,31 @@ end
     @test plog_kf_dP(T_quantity, P_quantity, id_quantity) ≈ plog_kf_dP(T_quantity, P_quantity, id)
 end
 
+@testset "fixedT PLOG reaction-sharded sparse Jacobian executes" begin
+    kin = PlogRate([PlogPoint(1e4, 1e3, 0, 0), PlogPoint(1e6, 1e2, 0, 0)])
+    mech = Mechanism(
+        species = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")],
+        reactions = [
+            ReactionData(
+                reactants = Dict(1 => 1.0),
+                products = Dict(2 => 1.0),
+                kinetics = kin,
+            ),
+        ],
+    )
+    phase = ChemPhaseSystem(mech; config=convenience_config(:fixedT), checks=false)
+    sys = ChemMechSim.extract_system(phase)
+    prob = build_problem(phase, Dict("A"=>1.0, "B"=>0.0, "P"=>101325.0), (0.0, 0.1))
+
+    jac!, J_proto = ChemMechSim.build_reaction_sharded_jac(
+        mech; config=phase.config, checks=false, sys=sys)
+    J = copy(J_proto)
+    fill!(J.nzval, NaN)
+    jac!(J, prob.u0, prob.p, 0.0)
+
+    @test all(isfinite, J.nzval)
+end
+
 @testset "Phase 6 T3: PLOG symbolic_kf (opaque call node) + needs_P" begin
     kin = PlogRate([PlogPoint(1e4, 1e9, 0.0, 0.0), PlogPoint(1e6, 1e7, 0.0, 0.0)])
     @test needs_P(kin) == true

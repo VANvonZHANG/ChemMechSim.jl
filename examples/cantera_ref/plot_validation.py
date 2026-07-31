@@ -4,10 +4,12 @@
 Reads CSVs (time_s, T_K, X_CH4, X_O2, X_CO2, X_OH, X_H2O) from both
 ChemMechSim (Julia) and Cantera (Python ref), produces three figures:
 
-  Fig 1: GRI30  — 3×2 panels (T + 5 species), Cantera line + CMS hollow markers
-  Fig 2: FFCM2  — same layout
-  Fig 3: combined — same 6 panels, both mechanisms overlaid; double-encoded
+  Fig 1: GRI30   — 3×2 panels (T + 5 species), Cantera line + CMS hollow markers
+  Fig 2: FFCM2   — same layout
+  Fig 3: Aramco  — same layout
+  Fig 4: combined — same 6 panels, all three mechanisms overlaid; double-encoded
           legend (color = mechanism, line/marker = solver).
+  Colors: GRI30 green (#1B7837), FFCM2 blue (#2166AC), Aramco red (#B2182B).
 
 Each panel: Cantera = solid line, ChemMechSim = hollow circles placed at equal
 arc length (sparse on plateaus, denser on the ignition front).
@@ -258,15 +260,19 @@ def write_error_table(specs, out_path):
 if __name__ == "__main__":
     ALL = [
         (f"{OUT_DIR}/gri30_cms_species.csv", f"{OUT_DIR}/gri30_ref_species.csv",
-         "GRI30", "#2166AC"),
+         "GRI30", "#1B7837"),
         (f"{OUT_DIR}/ffcm2_cms_species.csv", f"{OUT_DIR}/ffcm2_ref_species.csv",
-         "FFCM2", "#D6604D"),
+         "FFCM2", "#2166AC"),
+        (f"{OUT_DIR}/aramco_cms_species.csv", f"{OUT_DIR}/aramco_ref_species.csv",
+         "Aramco", "#B2182B"),
     ]
     print("Fig 1: GRI30")
-    plot_single(ALL[0][0], ALL[0][1], "fig_gri30_validation")
+    plot_single(ALL[0][0], ALL[0][1], "fig_gri30_validation", cms_color=ALL[0][3])
     print("Fig 2: FFCM2")
-    plot_single(ALL[1][0], ALL[1][1], "fig_ffcm2_validation")
-    print("Fig 3: combined")
+    plot_single(ALL[1][0], ALL[1][1], "fig_ffcm2_validation", cms_color=ALL[1][3])
+    print("Fig 3: Aramco")
+    plot_single(ALL[2][0], ALL[2][1], "fig_aramco_validation", cms_color=ALL[2][3])
+    print("Fig 4: combined")
     plot_combined(ALL, "fig_combined_validation")
     print("Error table")
     write_error_table(ALL, f"{OUT_DIR}/validation_errors.txt")

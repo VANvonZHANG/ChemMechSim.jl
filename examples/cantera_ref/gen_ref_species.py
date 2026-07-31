@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate Cantera reference CSVs with T + 5 species for validation figures.
-Outputs: gri30_ref_species.csv, ffcm2_ref_species.csv
+Outputs: gri30_ref_species.csv, ffcm2_ref_species.csv, aramco_ref_species.csv
 Run: python3 examples/cantera_ref/gen_ref_species.py"""
 import cantera as ct
 import numpy as np
@@ -35,4 +35,6 @@ def run(yaml_path, out_csv, label):
 run("test/data/gri30.yaml", f"{DIR}/gri30_ref_species.csv", "GRI30")
 # FFCM2 (project fixture)
 run("examples/data/FFCM2.yaml", f"{DIR}/ffcm2_ref_species.csv", "FFCM2")
+# Aramco 3.0 (project fixture)
+run("examples/data/AramcoMech3.0.yaml", f"{DIR}/aramco_ref_species.csv", "Aramco")
 print("Cantera species refs generated.")

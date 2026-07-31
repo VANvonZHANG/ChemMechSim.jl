@@ -15,7 +15,7 @@ _var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unkno
 function export_mech(yaml, out_csv, label)
     println("Loading $label from $yaml ...")
     mech = load_mechanism(yaml)
-    reactor = BatchReactor(mech; mode=:adiabatic_constV)
+    reactor = BatchReactor(mech; mode=:adiabatic_constV, checks=false)  # checks=false: Aramco/FFCM2 K_c unit-fold; safe for GRI30
     sys = extract_system(reactor)
     u0 = Dict(sp.name => get(X0, sp.name, 0.0) * c_tot for sp in mech.species)
     u0["T"] = T0
@@ -40,4 +40,5 @@ end
 
 export_mech("test/data/gri30.yaml", "examples/cantera_ref/gri30_cms_species.csv", "GRI30")
 export_mech("examples/data/FFCM2.yaml", "examples/cantera_ref/ffcm2_cms_species.csv", "FFCM2")
+export_mech("examples/data/AramcoMech3.0.yaml", "examples/cantera_ref/aramco_cms_species.csv", "Aramco")
 println("Done.")

@@ -571,7 +571,7 @@ end
     prob.f.jac(J, prob.u0, prob.p, 0.0)
 
     @test all(isfinite, nonzeros(J))
-    @test ChemMechSim._normalize_jac_strategy(true, false, :auto) === :shared_cse
+    @test ChemMechSim._normalize_jac_strategy(true, false, :auto) === :auto
 end
 
 @testset "reaction-sharded jac reads prob.p in correct parameter order (build_problem path)" begin

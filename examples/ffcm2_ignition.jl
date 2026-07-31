@@ -1,6 +1,11 @@
 # Large-mech T4: FFCM2 CH4-air ignition — ChemMechSim vs Cantera.
 # Run: julia --project=. examples/ffcm2_ignition.jl
 # Requires examples/cantera_ref/ffcm2_ref_constV.csv (run the .py first).
+#
+# Status (2026-07-18): SOLVED via opaque PLOG + P differential state. FFCM2 exercises
+# same-pressure PLOG nodes (Cantera sums channels per pressure); lowering uses
+# checks=false for the same K_c-unit reason as aramco_ignition.jl (see that file's
+# header). FBDF solves cleanly.
 using ChemMechSim
 using OrdinaryDiffEq: FBDF
 using ModelingToolkit: unknowns, getname
@@ -18,7 +23,7 @@ const X0 = Dict("CH4" => 1.0/10.52, "O2" => 2.0/10.52, "N2" => 7.52/10.52)
 mech = load_mechanism(YAML_PATH)
 println("Loaded FFCM2: $(length(mech.species)) species, $(length(mech.reactions)) reactions")
 
-reactor = BatchReactor(mech; mode=:adiabatic_constV)
+reactor = BatchReactor(mech; mode=:adiabatic_constV, checks=false)
 sys = extract_system(reactor)
 u0 = Dict(sp.name => get(X0, sp.name, 0.0) * c_tot for sp in mech.species)
 u0["T"] = T0
