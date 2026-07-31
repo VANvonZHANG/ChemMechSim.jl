@@ -1,6 +1,7 @@
 # Layered API: extract_system / build_problem / simulate / generate_function.
 # simulate/build_problem operate on a ChemPhaseSystem (the Phase 1 "reactor").
 # generate_function returns standalone Julia code (spec §6, §7).
+using SciMLBase: NoSpecialize
 
 "Extract the underlying MTK ODESystem from a ChemPhaseSystem."
 extract_system(phase::ChemPhaseSystem) = phase.sys
@@ -22,7 +23,8 @@ end
  a parameter and the caller typically sets it via `params=` rather than `u0=`). Callers who
  override the T parameter via `params=` (e.g. `[T => 500.0]`) should pass `u0[\"P\"]` explicitly
  for a precise P0 — the auto-fill falls back to the T-param default, not the overridden value."
-function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan; params=Pair[])
+function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
+                        params=Pair[], jac::Bool=false)
     sys = phase.sys
     unks = ModelingToolkit.unknowns(sys)
     byname = Dict(String(ModelingToolkit.getname(s)) => s for s in unks)
@@ -42,7 +44,11 @@ function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan; params=P
         end
         push!(pairs, byname["P"] => R_GAS * csum * Float64(T0))
     end
-    return ODEProblem(sys, pairs, tspan)
+    if jac
+        return ODEProblem{true, NoSpecialize}(sys, pairs, tspan; jac=true, sparse=true)
+    else
+        return ODEProblem(sys, pairs, tspan)
+    end
 end
 
 "Simulate a ChemPhaseSystem over `tspan`. `u0` is a Dict(speciesname => value);
@@ -68,8 +74,8 @@ extract_system(r::BatchReactor) = extract_system(r.phase)
 
 "Build an ODEProblem from a BatchReactor. `u0` is a Dict(speciesname => value);
  `params` is an optional Pair vector."
-build_problem(r::BatchReactor, u0::AbstractDict, tspan; params=Pair[]) =
-    build_problem(r.phase, u0, tspan; params=params)
+build_problem(r::BatchReactor, u0::AbstractDict, tspan; params=Pair[], jac::Bool=false) =
+    build_problem(r.phase, u0, tspan; params=params, jac=jac)
 
 "Simulate a BatchReactor over `tspan`. `u0` is a Dict(speciesname => value);
  `params` sets parameter values. Default solver Tsit5()."
