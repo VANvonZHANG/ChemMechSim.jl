@@ -252,6 +252,32 @@ end
     @test occursin("reaction 1", sprint(showerror, err))
 end
 
+@testset "reaction-sharded net rate uses lowering protocol" begin
+    mech = Mechanism(
+        species = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")],
+        reactions = [
+            ReactionData(
+                reactants = Dict(1 => 1.0),
+                products = Dict(2 => 1.0),
+                kinetics = ElementaryArrhenius(2.0, 0.0, 0.0),
+                reverse_policy = ExplicitReverse(ElementaryArrhenius(0.5, 0.0, 0.0)),
+            ),
+        ],
+    )
+    config = convenience_config(:fixedT)
+    phase = ChemPhaseSystem(mech; config=config, checks=false)
+    sys = extract_system(phase)
+    prob = build_problem(phase, Dict("A" => 2.0, "B" => 3.0), (0.0, 0.1))
+
+    jac_sharded!, J_proto = ChemMechSim.build_reaction_sharded_jac(
+        mech; config=config, checks=false)
+    J_sharded = copy(J_proto)
+    jac_sharded!(J_sharded, prob.u0, prob.p, 0.0)
+
+    J_full = _full_sparse_jacobian(sys, prob.u0, prob.p, 0.0)
+    @test Matrix(J_sharded) ≈ Matrix(J_full)
+end
+
 @testset "reaction-sharded Jacobian supports fixedT third-body reactions" begin
     mech = Mechanism(
         species = [
@@ -318,6 +344,30 @@ end
     @test _stored_pattern(J_proto) == _expected_pattern(
         sys, [(("A", "B", "P"), ("A", "P"))])
     @test Matrix(J_sharded) ≈ Matrix(J_full)
+end
+
+@testset "reaction_shard_size controls compiled derivative shards" begin
+    mech = Mechanism(
+        species = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B"), SpeciesData(id=3, name="C")],
+        reactions = [
+            ReactionData(reactants=Dict(1=>1.0), products=Dict(2=>1.0),
+                         kinetics=ElementaryArrhenius(1.0, 0.0, 0.0)),
+            ReactionData(reactants=Dict(2=>1.0), products=Dict(3=>1.0),
+                         kinetics=ElementaryArrhenius(2.0, 0.0, 0.0)),
+            ReactionData(reactants=Dict(3=>1.0), products=Dict(1=>1.0),
+                         kinetics=ElementaryArrhenius(3.0, 0.0, 0.0)),
+        ],
+    )
+    jac!, J_proto, stats = ChemMechSim.build_reaction_sharded_jac(
+        mech; config=convenience_config(:fixedT), checks=false,
+        reaction_shard_size=2, return_stats=true)
+
+    @test stats.n_reactions == 3
+    @test stats.n_reaction_shards == 2
+    @test stats.n_compiled_derivative_functions == 2
+    @test stats.n_compiled_derivative_functions == stats.n_reaction_shards
+    @test stats.max_shard_reactions == 2
+    @test stats.n_nonzeros == length(nonzeros(J_proto))
 end
 
 @testset "reaction-sharded Jacobian rejects invalid shard sizes" begin
