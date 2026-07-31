@@ -53,17 +53,30 @@ function _assert_reaction_sharded_supported(mech::Mechanism)
     return nothing
 end
 
-function _assert_reaction_sharded_fixedT_config(config::MechanismConfig)
-    is_fixedT = config.energy === :isothermal &&
-                config.constraint === :constant_volume &&
-                config.eos === :ideal_gas &&
-                config.state_basis === :concentration
-    is_fixedT || throw(ArgumentError(
-        "build_reaction_sharded_jac: unsupported config; prototype supports only fixedT " *
-        "concentration mechanisms. Got energy=$(config.energy) constraint=$(config.constraint) " *
-        "eos=$(config.eos) basis=$(config.state_basis)."))
+"Config guard: the sharded Jacobian supports concentration-basis, ideal-gas, constant-volume
+ mechanisms in either :isothermal (fixedT — T is a parameter) or :adiabatic (T is a state)
+ energy regimes."
+_reaction_sharded_config_ok(config::MechanismConfig) =
+    config.state_basis === :concentration &&
+    config.constraint === :constant_volume &&
+    config.eos === :ideal_gas &&
+    config.energy in (:isothermal, :adiabatic)
+
+function _assert_reaction_sharded_config(config::MechanismConfig)
+    _reaction_sharded_config_ok(config) ||
+        throw(ArgumentError(
+            "build_reaction_sharded_jac: unsupported config; supports concentration, ideal-gas, " *
+            "constant-volume :isothermal or :adiabatic. Got energy=$(config.energy) " *
+            "constraint=$(config.constraint) eos=$(config.eos) basis=$(config.state_basis)."))
     return nothing
 end
+
+"True iff the mechanism + config are fully supported by the reaction-sharded Jacobian, so the
+ :auto strategy can prefer it over the shared_cse symbolic path (whose full Jacobian codegen
+ does not scale past ~100 species). Unsupported kinetics (Chebyshev/SRI/...) fall back to
+ shared_cse."
+_reaction_sharded_supports_mechconfig(mech::Mechanism, config::MechanismConfig) =
+    _reaction_sharded_config_ok(config) && all(_reaction_sharded_supports, mech.reactions)
 
 function _species_id_to_state_index(mech::Mechanism, sys)
     state_idx = _state_name_index(sys)
@@ -245,15 +258,25 @@ function build_reaction_sharded_jac(mech::Mechanism;
                                     config::MechanismConfig=MechanismConfig(),
                                     checks::Bool=false,
                                     reaction_shard_size::Int=100,
-                                    return_stats::Bool=false)
+                                    return_stats::Bool=false,
+                                    sys=nothing)
     reaction_shard_size > 0 || throw(ArgumentError("reaction_shard_size must be positive"))
     # Prototype note: reaction_shard_size is reported in stats only. The current fixedT
     # elementary path already builds one derivative function per reaction; future work can
     # batch those functions into actual shards when broadening this path beyond the prototype.
-    _assert_reaction_sharded_fixedT_config(config)
+    _assert_reaction_sharded_config(config)
     _assert_reaction_sharded_supported(mech)
-    phase = ChemPhaseSystem(mech; config=config, checks=checks)
-    sys = extract_system(phase)
+    # The shard functions are generated against this system's parameter ordering, so `sys`
+    # MUST be the same system object that produced the runtime parameter vector `prob.p`
+    # (the ODEProblem's p). ChemPhaseSystem lowering orders parameters non-deterministically
+    # (hashed-container iteration), so reconstructing it here would desync the shard's
+    # parameter layout from `prob.p` and silently misread every rate parameter. When called
+    # from build_problem we pass the problem's own `sys`; standalone callers may omit it and
+    # get a freshly-constructed system (whose param order then must match whatever p they use).
+    if sys === nothing
+        phase = ChemPhaseSystem(mech; config=config, checks=checks)
+        sys = extract_system(phase)
+    end
     J_proto = _reaction_sharded_sparsity_template(mech, sys)
     state_idx = _state_name_index(sys)
     sid_to_idx = _species_id_to_state_index(mech, sys)
