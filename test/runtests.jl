@@ -28,3 +28,4 @@ include("test_custom_ratelaw.jl")
 include("test_plog.jl")
 
 include("test_gri30.jl")
+include("test_large_mechanism_smoke.jl")
