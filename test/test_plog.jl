@@ -43,7 +43,7 @@ end
     @test plog_kf_dP(T_quantity, P_quantity, id_quantity) ≈ plog_kf_dP(T_quantity, P_quantity, id)
 end
 
-@testset "fixedT PLOG shared-CSE sparse Jacobian executes" begin
+@testset "fixedT PLOG reaction-sharded sparse Jacobian executes" begin
     kin = PlogRate([PlogPoint(1e4, 1e3, 0, 0), PlogPoint(1e6, 1e2, 0, 0)])
     mech = Mechanism(
         species = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")],
@@ -59,7 +59,8 @@ end
     sys = ChemMechSim.extract_system(phase)
     prob = build_problem(phase, Dict("A"=>1.0, "B"=>0.0, "P"=>101325.0), (0.0, 0.1))
 
-    jac!, J_proto = ChemMechSim.build_shared_cse_jac(sys)
+    jac!, J_proto = ChemMechSim.build_reaction_sharded_jac(
+        mech; config=phase.config, checks=false, sys=sys)
     J = copy(J_proto)
     fill!(J.nzval, NaN)
     jac!(J, prob.u0, prob.p, 0.0)

@@ -24,6 +24,4 @@ include("lowering/thermo.jl")
 include("lowering/energy.jl")
 include("lowering/core.jl")
 
-include("lowering/jac_shared_cse.jl")
 include("lowering/jac_reaction_sharded.jl")
-include("lowering/jac_chunked.jl")

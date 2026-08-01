@@ -96,9 +96,8 @@ function _assert_reaction_sharded_config(config::MechanismConfig)
 end
 
 "True iff the mechanism + config are fully supported by the reaction-sharded Jacobian, so the
- :auto strategy can prefer it over the shared_cse symbolic path (whose full Jacobian codegen
- does not scale past ~100 species). Unsupported kinetics (Chebyshev/SRI/...) fall back to
- shared_cse."
+ :auto strategy can use it. Unsupported kinetics (Chebyshev/SRI/...) fall back to the ODE
+ solver's ForwardDiff (:none)."
 _reaction_sharded_supports_mechconfig(mech::Mechanism, config::MechanismConfig) =
     _reaction_sharded_config_ok(config) && all(_reaction_sharded_supports, mech.reactions)
 
