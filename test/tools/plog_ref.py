@@ -3,7 +3,7 @@
 Generates test/data/plog_ref_rates.csv: rows of (T_K, P_Pa, k_fwd) for a
 1-PLOG-reaction mechanism, across clamp + interpolation + extrapolation pressures.
 
-Run: python3 examples/cantera_ref/plog_ref.py
+Run: python3 test/tools/plog_ref.py
 (writes test/data/plog_ref_rates.csv so it's committed + CI-readable; the CSV is
 the CI interface — Cantera itself is NOT a CI dep.)
 """
@@ -14,7 +14,7 @@ import os
 # A 1-PLOG-reaction mechanism committed alongside this script. Its 3 rate-constants
 # EXACTLY match test/data/plog_minimal.yaml (same P/A/b/Ea), so the kf Cantera computes
 # here is directly comparable to ChemMechSim's plog_rate on the minimal fixture.
-gas = ct.Solution("examples/cantera_ref/plog_mech.yaml")
+gas = ct.Solution(os.path.join(os.path.dirname(os.path.abspath(__file__)), "plog_mech.yaml"))
 
 # Temperatures spanning the NASA7 mid/high range.
 Ts = [800.0, 1000.0, 1500.0, 2000.0, 2500.0]
@@ -37,8 +37,9 @@ for T in Ts:
         k = float(gas.forward_rate_constants[0])   # the single PLOG reaction's kf
         rows.append((T, P, k))
 
-# Write to test/data/ (committed, CI-readable) — not examples/cantera_ref/ (gitignored *.csv).
-out_path = "test/data/plog_ref_rates.csv"
+# Write to test/data/ (committed, CI-readable; Cantera is not a CI dep). Paths are
+# __file__-relative so the script runs correctly regardless of the caller's CWD.
+out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "plog_ref_rates.csv")
 os.makedirs(os.path.dirname(out_path), exist_ok=True)
 with open(out_path, "w", newline="") as f:
     w = csv.writer(f)

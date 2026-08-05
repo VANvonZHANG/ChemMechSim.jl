@@ -1,5 +1,5 @@
 # Phase 2.5a demo: mixed Catalyst/direct lowering + T-dependent Arrhenius.
-# Run:  julia --project=. examples/mixed_lowering.jl
+# Run:  julia --project=. examples/demos/mixed_lowering.jl
 using ChemMechSim
 using ModelingToolkit: equations, unknowns, getname, parameters
 

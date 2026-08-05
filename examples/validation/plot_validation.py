@@ -19,7 +19,7 @@ Quantitative errors (Δt_ign, max ΔX per species) are written to
 validation_errors.txt rather than annotated inside the panels.
 
 Usage:
-  python3 examples/cantera_ref/plot_validation.py
+  python3 examples/validation/plot_validation.py
 """
 import matplotlib as mpl
 import matplotlib.pyplot as plt

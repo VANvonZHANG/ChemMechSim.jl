@@ -1,6 +1,6 @@
 # Large-mech T4: FFCM2 CH4-air ignition — ChemMechSim vs Cantera.
-# Run: julia --project=. examples/ffcm2_ignition.jl
-# Requires examples/cantera_ref/ffcm2_ref_constV.csv (run the .py first).
+# Run: julia --project=. examples/validation/ffcm2_ignition.jl
+# Requires examples/validation/ffcm2_ref_constV.csv (run the .py first).
 #
 # Status (2026-07-18): SOLVED via opaque PLOG + P differential state. FFCM2 exercises
 # same-pressure PLOG nodes (Cantera sums channels per pressure); lowering uses
@@ -11,8 +11,8 @@ using OrdinaryDiffEq: FBDF
 using ModelingToolkit: unknowns, getname
 using DelimitedFiles
 
-const YAML_PATH = joinpath(@__DIR__, "data", "FFCM2.yaml")
-const REF_CSV = joinpath(@__DIR__, "cantera_ref", "ffcm2_ref_constV.csv")
+const YAML_PATH = joinpath(@__DIR__, "..", "mechanism", "FFCM2.yaml")
+const REF_CSV = joinpath(@__DIR__, "ffcm2_ref_constV.csv")
 
 _var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unknowns(sys))]
 
@@ -46,5 +46,5 @@ if has_ref
     println("Cantera:     t_ignition=$(round(ct_t_ign*1e3,digits=3)) ms, T_end=$(round(ct_T[end],digits=1)) K")
     println("ignition-delay relative diff: $(round(rel*100,digits=2))%  (tol 2%)  →  ", rel < 0.02 ? "PASS" : "FAIL")
 else
-    println("(no Cantera ref at $REF_CSV — run examples/cantera_ref/ffcm2_ref.py first)")
+    println("(no Cantera ref at $REF_CSV — run examples/validation/ffcm2_ref.py first)")
 end

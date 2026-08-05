@@ -1,5 +1,5 @@
 # Phase 3 demo: :fixedT isothermal reactor with thermodynamic reverse rate + EOS pressure output.
-# Run:  julia --project=. examples/fixedT_reactor.jl
+# Run:  julia --project=. examples/demos/fixedT_reactor.jl
 using ChemMechSim
 using ModelingToolkit: equations, unknowns, parameters, getname, observed
 using OrdinaryDiffEq: Rodas5P

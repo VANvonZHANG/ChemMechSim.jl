@@ -1,5 +1,5 @@
 # Custom rate law example (Plan A T7): a user-defined scaled-Arrhenius law.
-# Run: julia --project=. examples/custom_ratelaw.jl
+# Run: julia --project=. examples/demos/custom_ratelaw.jl
 #
 # The user defines struct + formula + paramspec/needs_T ONLY — no ChemMechSim/lowering
 # edits — and the law lowers into a simulatable MTK system. This demonstrates the L2

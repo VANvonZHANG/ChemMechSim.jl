@@ -1,17 +1,17 @@
 # Phase 5b example: GRI30 CH4-air ignition — ChemMechSim vs Cantera + CairoMakie plot.
-# Run: julia --project=. examples/gri30_ignition.jl
-# Requires examples/cantera_ref/gri30_ref_constV.csv (run the .py first).
+# Run: julia --project=. examples/validation/gri30_ignition.jl
+# Requires examples/validation/gri30_ref_constV.csv (run the .py first).
 using ChemMechSim
 using OrdinaryDiffEq: FBDF
 using ModelingToolkit: unknowns, getname
 using DelimitedFiles
 using CairoMakie
 
-const YAML_PATH = joinpath(@__DIR__, "data", "gri30.yaml")
-const YAML_FALLBACK = joinpath(@__DIR__, "..", "test", "data", "gri30.yaml")
+const YAML_PATH = joinpath(@__DIR__, "..", "mechanism", "gri30.yaml")
+const YAML_FALLBACK = joinpath(@__DIR__, "..", "..", "test", "data", "gri30.yaml")
 const yaml = isfile(YAML_PATH) ? YAML_PATH : YAML_FALLBACK
-const REF_CSV = joinpath(@__DIR__, "cantera_ref", "gri30_ref_constV.csv")
-const PNG_OUT = joinpath(@__DIR__, "cantera_ref", "gri30_ignition.png")
+const REF_CSV = joinpath(@__DIR__, "gri30_ref_constV.csv")
+const PNG_OUT = joinpath(@__DIR__, "gri30_ignition.png")
 
 _var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unknowns(sys))]
 
@@ -45,7 +45,7 @@ if has_ref
     println("Cantera:     t_ignition=$(round(ct_t_ign*1e3,digits=3)) ms, T_end=$(round(ct_T[end],digits=1)) K")
     println("ignition-delay relative diff: $(round(rel*100,digits=2))%  (tol 10%)  →  ", rel < 0.10 ? "PASS" : "FAIL")
 else
-    println("(no Cantera ref at $REF_CSV — run examples/cantera_ref/gri30_ref.py first)")
+    println("(no Cantera ref at $REF_CSV — run examples/validation/gri30_ref.py first)")
 end
 
 # 2-panel plot: T(t) vs Cantera + key species (CH4, O2, CO2, OH)

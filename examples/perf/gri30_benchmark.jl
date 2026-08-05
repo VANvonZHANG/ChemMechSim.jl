@@ -1,11 +1,11 @@
-# Phase 5b perf benchmark for GRI30. Run: julia --project=. examples/gri30_benchmark.jl
+# Phase 5b perf benchmark for GRI30. Run: julia --project=. examples/perf/gri30_benchmark.jl
 using ChemMechSim
 using ChemMechSim: lower_to_mtk, convenience_config, generate_jacobian
 using ModelingToolkit: calculate_jacobian, unknowns
 using OrdinaryDiffEq: FBDF
 using SparseArrays: nnz
 
-const YAML = joinpath(@__DIR__, "data", "gri30.yaml")
+const YAML = joinpath(@__DIR__, "..", "mechanism", "gri30.yaml")
 const R, T0, P0 = 8.314, 1500.0, 101325.0
 const c_tot = P0 / (R * T0)
 const X0 = Dict("CH4" => 1.0/10.52, "O2" => 2.0/10.52, "N2" => 7.52/10.52)

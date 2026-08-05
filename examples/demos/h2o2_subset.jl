@@ -1,5 +1,5 @@
 # Phase 2.5b demo: H2-O2 subset lowered through MIXED paths (Catalyst + direct MTK), unit-aware.
-# Run:  julia --project=. examples/h2o2_subset.jl
+# Run:  julia --project=. examples/demos/h2o2_subset.jl
 using ChemMechSim
 using ModelingToolkit: equations, unknowns, getname, parameters
 using OrdinaryDiffEq

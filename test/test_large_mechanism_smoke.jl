@@ -8,7 +8,7 @@ using SparseArrays
 # jac=! solve timing is covered separately (examples + the Aramco validation).
 
 function _fixture(path...)
-    p = joinpath(@__DIR__, "..", "examples", "data", path...)
+    p = joinpath(@__DIR__, "..", "examples", "mechanism", path...)
     return isfile(p) ? p : nothing
 end
 

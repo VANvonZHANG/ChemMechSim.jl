@@ -1,6 +1,6 @@
 # Phase 6 T5: coverage — full Aramco 3.0 + FFCM2 parse + lower (all PLOG reactions).
-# Local coverage script (not a CI test). Mechanism fixtures live in examples/data/.
-# Run: julia --project=. examples/aramco_ffcm2_plog_load.jl
+# Local coverage script (not a CI test). Mechanism fixtures live in examples/mechanism/.
+# Run: julia --project=. examples/perf/aramco_ffcm2_plog_load.jl
 #
 # Known limitations surfaced by this coverage run (documented, not blocking T5):
 #  - FFCM2 has 6 PLOG reactions with duplicate pressure points within a single entry
@@ -14,7 +14,7 @@
 using ChemMechSim
 using ChemMechSim: PlogRate
 
-for path in ["examples/data/AramcoMech3.0.yaml", "examples/data/FFCM2.yaml"]
+for path in ["examples/mechanism/AramcoMech3.0.yaml", "examples/mechanism/FFCM2.yaml"]
     println("=" ^ 60)
     println("Loading: $path")
     local mech

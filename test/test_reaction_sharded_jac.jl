@@ -585,7 +585,7 @@ end
     # so the shard functions and prob.p share one parameter layout. This test builds via
     # build_problem(jac=true) — the real entry point — and finite-difference checks the
     # factored T-row, which is exquisitely sensitive to the rate-param misalignment.
-    yaml = joinpath(@__DIR__, "..", "examples", "data", "gri30.yaml")
+    yaml = joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml")
     isfile(yaml) || return   # skip when mechanism data isn't shipped
     mech = load_mechanism(yaml)
     reactor = BatchReactor(mech; mode=:adiabatic_constV, checks=false)
@@ -622,7 +622,7 @@ end
 
 @testset "reaction-sharded TroeFalloff + ThermoReverse matches exact symbolic jac" begin
     # GRI30 rxn 241: CH + N2 -> HCNN, TroeFalloff | ThermoReverse.
-    yaml = joinpath(@__DIR__, "..", "examples", "data", "gri30.yaml")
+    yaml = joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml")
     isfile(yaml) || return   # skip when mechanism data isn't shipped
     mech = load_mechanism(yaml)
     # Find CH + N2 -> HCNN (TroeFalloff + ThermoReverse) — rxn index 241 in canonical GRI30.

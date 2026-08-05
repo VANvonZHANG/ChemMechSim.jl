@@ -1,16 +1,16 @@
 # Phase 5a example: H2-O2 ignition — ChemMechSim vs Cantera (if ref CSV present) + CairoMakie plot.
-# Run: julia --project=. examples/h2o2_ignition.jl
-# Requires examples/cantera_ref/h2o2_ref_{constV,constP}.csv for Cantera compare (run the .py first).
+# Run: julia --project=. examples/validation/h2o2_ignition.jl
+# Requires examples/validation/h2o2_ref_{constV,constP}.csv for Cantera compare (run the .py first).
 using ChemMechSim
 using OrdinaryDiffEq: Rodas5P
 using ModelingToolkit: unknowns, getname
 using DelimitedFiles
 using CairoMakie
 
-const YAML_PATH = joinpath(@__DIR__, "data", "h2o2.yaml")
-const YAML_FALLBACK = joinpath(@__DIR__, "..", "test", "data", "h2o2.yaml")
+const YAML_PATH = joinpath(@__DIR__, "..", "mechanism", "h2o2.yaml")
+const YAML_FALLBACK = joinpath(@__DIR__, "..", "..", "test", "data", "h2o2.yaml")
 const yaml = isfile(YAML_PATH) ? YAML_PATH : YAML_FALLBACK
-const REF_DIR = joinpath(@__DIR__, "cantera_ref")
+const REF_DIR = @__DIR__
 const PNG_OUT = joinpath(REF_DIR, "h2o2_ignition.png")
 
 _var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unknowns(sys))]
@@ -68,7 +68,7 @@ for (col, (mode, prefix, ref_csv_name)) in enumerate([
         println("  Cantera t_ignition=$(round(t_ign_ct*1e6, digits=2)) μs, rel diff=$(round(rel*100, digits=2))% (tol $(tol*100)%)")
         println("  ", rel < tol ? "PASS" : "FAIL")
     else
-        println("  (no Cantera ref at $ref_csv — run examples/cantera_ref/h2o2_ignition.py first)")
+        println("  (no Cantera ref at $ref_csv — run examples/validation/h2o2_ignition.py first)")
     end
 
     # trajectories for plotting

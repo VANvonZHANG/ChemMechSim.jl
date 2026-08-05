@@ -1,5 +1,5 @@
 # Brusselator limit-cycle demo for ChemMechSim (Phase 1 MVP).
-# Run:  julia --project=. examples/brusselator.jl
+# Run:  julia --project=. examples/demos/brusselator.jl
 #
 # Produces a phase-portrait PNG if Plots is loadable in this environment;
 # otherwise prints the limit-cycle statistics (the cycle is demonstrated
@@ -38,8 +38,9 @@ if has_plots
     p1 = plot(sol; idxs=[xv, yv], title="Brusselator (A=1, B=3)", xlabel="t")
     p2 = plot(sol; idxs=(xv, yv), title="limit cycle", xlabel="X", ylabel="Y")
     plot(p1, p2; layout=(1, 2), size=(1000, 400))
-    savefig("examples/brusselator.png")
-    println("saved examples/brusselator.png")
+    png_out = joinpath(@__DIR__, "brusselator.png")
+    savefig(png_out)
+    println("saved ", png_out)
 else
     println("Plots not loadable in this env; skipping PNG (limit cycle shown numerically above).")
 end

@@ -1,6 +1,6 @@
 # Large-mech T4: Aramco 3.0 CH4-air ignition — ChemMechSim vs Cantera.
-# Run: julia --project=. examples/aramco_ignition.jl
-# Requires examples/cantera_ref/aramco_ref_constV.csv (run the .py first).
+# Run: julia --project=. examples/validation/aramco_ignition.jl
+# Requires examples/validation/aramco_ref_constV.csv (run the .py first).
 #
 # Status (2026-07-18): SOLVED via opaque PLOG call node + P differential state
 # (Phase 2.5c/6 lowering changes). FBDF(chunk_size=1) solve completes with flat memory:
@@ -22,8 +22,8 @@ using OrdinaryDiffEq: FBDF
 using ModelingToolkit: unknowns, getname
 using DelimitedFiles
 
-const YAML_PATH = joinpath(@__DIR__, "data", "AramcoMech3.0.yaml")
-const REF_CSV = joinpath(@__DIR__, "cantera_ref", "aramco_ref_constV.csv")
+const YAML_PATH = joinpath(@__DIR__, "..", "mechanism", "AramcoMech3.0.yaml")
+const REF_CSV = joinpath(@__DIR__, "aramco_ref_constV.csv")
 
 _var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unknowns(sys))]
 
@@ -58,6 +58,6 @@ if has_ref
     println("Cantera:     t_ignition=$(round(ct_t_ign*1e3,digits=3)) ms, T_end=$(round(ct_T[end],digits=1)) K")
     println("ignition-delay relative diff: $(round(rel*100,digits=2))%  (tol 2%)  →  ", rel < 0.02 ? "PASS" : "FAIL")
 else
-    println("(no Cantera ref at $REF_CSV — run examples/cantera_ref/aramco_ref.py first)")
+    println("(no Cantera ref at $REF_CSV — run examples/validation/aramco_ref.py first)")
 end
 
