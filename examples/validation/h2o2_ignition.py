@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Cantera reference solution for H2-O2 ignition (Phase 5a validation).
 
-Outputs:
-  h2o2_ref_constV.csv — constant-volume ignition (ct.IdealGasReactor)
-  h2o2_ref_constP.csv — constant-pressure ignition (ct.IdealGasConstPressureReactor)
+Outputs (into output/):
+  output/h2o2_ref_constV.csv — constant-volume ignition (ct.IdealGasReactor)
+  output/h2o2_ref_constP.csv — constant-pressure ignition (ct.IdealGasConstPressureReactor)
 
 Columns: t, T, X_<species> for each species in the mechanism.
 
@@ -11,6 +11,7 @@ Run:  pip install cantera && python h2o2_ignition.py
 """
 import cantera as ct
 import numpy as np
+import os
 
 
 # Use the same h2o2.yaml shipped with Cantera (identical schema to
@@ -53,9 +54,11 @@ def run_constP(t_end=1e-3, n=2001):
     return cols, out
 
 
-# Write both reference CSVs
+# Write both reference CSVs into output/ (paths __file__-relative, run from anywhere).
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+os.makedirs(OUT_DIR, exist_ok=True)
 colsV, outV = run_constV()
 colsP, outP = run_constP()
-np.savetxt("h2o2_ref_constV.csv", outV, delimiter=",", header=",".join(colsV), comments="")
-np.savetxt("h2o2_ref_constP.csv", outP, delimiter=",", header=",".join(colsP), comments="")
-print("Wrote h2o2_ref_constV.csv and h2o2_ref_constP.csv")
+np.savetxt(os.path.join(OUT_DIR, "h2o2_ref_constV.csv"), outV, delimiter=",", header=",".join(colsV), comments="")
+np.savetxt(os.path.join(OUT_DIR, "h2o2_ref_constP.csv"), outP, delimiter=",", header=",".join(colsP), comments="")
+print(f"Wrote {OUT_DIR}/h2o2_ref_constV.csv and h2o2_ref_constP.csv")

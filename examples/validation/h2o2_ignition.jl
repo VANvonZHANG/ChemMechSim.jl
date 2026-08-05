@@ -10,7 +10,8 @@ using CairoMakie
 const YAML_PATH = joinpath(@__DIR__, "..", "mechanism", "h2o2.yaml")
 const YAML_FALLBACK = joinpath(@__DIR__, "..", "..", "test", "data", "h2o2.yaml")
 const yaml = isfile(YAML_PATH) ? YAML_PATH : YAML_FALLBACK
-const REF_DIR = @__DIR__
+const REF_DIR = joinpath(@__DIR__, "output")
+mkpath(REF_DIR)
 const PNG_OUT = joinpath(REF_DIR, "h2o2_ignition.png")
 
 _var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unknowns(sys))]

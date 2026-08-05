@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Generate Cantera reference CSVs with T + 5 species for validation figures.
-Outputs: gri30_ref_species.csv, ffcm2_ref_species.csv, aramco_ref_species.csv
+Outputs: output/{gri30,ffcm2,aramco}_ref_species.csv
 Run: python3 examples/validation/gen_ref_species.py"""
 import cantera as ct
 import numpy as np
 import os
 
 DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(DIR, "output")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 SPECIES = ["CH4", "O2", "CO2", "OH", "H2O"]
 HEADER = "time_s,T_K," + ",".join(f"X_{s}" for s in SPECIES)
 
@@ -32,9 +34,9 @@ def run(yaml_path, out_csv, label):
     print(f"wrote {out_csv} ({len(rows)} rows, T_max={max(out[:,1]):.1f} K)")
 
 # GRI30 (Cantera built-in)
-run("test/data/gri30.yaml", f"{DIR}/gri30_ref_species.csv", "GRI30")
+run("test/data/gri30.yaml", f"{OUTPUT_DIR}/gri30_ref_species.csv", "GRI30")
 # FFCM2 (project fixture)
-run("examples/mechanism/FFCM2.yaml", f"{DIR}/ffcm2_ref_species.csv", "FFCM2")
+run("examples/mechanism/FFCM2.yaml", f"{OUTPUT_DIR}/ffcm2_ref_species.csv", "FFCM2")
 # Aramco 3.0 (project fixture)
-run("examples/mechanism/AramcoMech3.0.yaml", f"{DIR}/aramco_ref_species.csv", "Aramco")
+run("examples/mechanism/AramcoMech3.0.yaml", f"{OUTPUT_DIR}/aramco_ref_species.csv", "Aramco")
 print("Cantera species refs generated.")

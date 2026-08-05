@@ -1,5 +1,2 @@
-*.csv
-*.png
-*.svg
-*.pdf
-validation_errors.txt
+# Generated outputs (CSVs, figures, error table) — produced by the .py/.jl scripts.
+output/

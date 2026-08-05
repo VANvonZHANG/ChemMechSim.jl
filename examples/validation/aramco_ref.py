@@ -1,6 +1,6 @@
 """Cantera reference for Aramco 3.0 CH4-air const-V adiabatic ignition.
 Run:  python3 examples/validation/aramco_ref.py
-Writes examples/validation/aramco_ref_constV.csv (time_s, T_K).
+Writes examples/validation/output/aramco_ref_constV.csv (time_s, T_K).
 Compare against examples/validation/aramco_ignition.jl."""
 import cantera as ct
 import numpy as np
@@ -21,6 +21,6 @@ while sim.time < t_end:
     ts.append(sim.time)
     Ts.append(reactor.T)
 out = np.column_stack([np.array(ts), np.array(Ts)])
-np.savetxt("examples/validation/aramco_ref_constV.csv", out, delimiter=",",
+np.savetxt("examples/validation/output/aramco_ref_constV.csv", out, delimiter=",",
            header="time_s,T_K", comments="", fmt="%.9e")
 print(f"wrote aramco_ref_constV.csv  ({len(ts)} rows, T_max={max(Ts):.1f} K)")

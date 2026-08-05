@@ -23,7 +23,7 @@ using ModelingToolkit: unknowns, getname
 using DelimitedFiles
 
 const YAML_PATH = joinpath(@__DIR__, "..", "mechanism", "AramcoMech3.0.yaml")
-const REF_CSV = joinpath(@__DIR__, "aramco_ref_constV.csv")
+const REF_CSV = joinpath(@__DIR__, "output", "aramco_ref_constV.csv")
 
 _var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unknowns(sys))]
 

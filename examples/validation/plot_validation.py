@@ -51,7 +51,8 @@ mpl.rcParams.update({
     "figure.constrained_layout.hspace": 0.02,
 })
 
-OUT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+os.makedirs(OUT_DIR, exist_ok=True)
 PANELS = [
     ("T_K",   r"$T$ (K)"),
     ("X_CH4", r"$X_{\mathrm{CH_4}}$"),

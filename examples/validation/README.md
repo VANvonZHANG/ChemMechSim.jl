@@ -3,7 +3,8 @@
 Scripts that validate ChemMechSim against [Cantera](https://cantera.org/) on real
 mechanisms (GRI30, H2-O2, FFCM2, Aramco 3.0). **Cantera is not a CI dependency** —
 the Python scripts here generate reference CSVs that are then compared (offline) with
-ChemMechSim output. Generated CSVs / figures / `validation_errors.txt` are gitignored.
+ChemMechSim output. All generated artifacts (CSVs, figures, `validation_errors.txt`)
+are written under `output/` and gitignored; `output/` is created on first run.
 
 ## Setup
 
@@ -41,8 +42,9 @@ and a quantitative error table (`validation_errors.txt`):
     # 3. Figures + error table
     python3 examples/validation/plot_validation.py
 
-Outputs (gitignored): `fig_{gri30,ffcm2,aramco,combined}_validation.{svg,pdf,png}` and
-`validation_errors.txt` (Δt_ign % + max ΔX per species, per mechanism).
+Outputs (gitignored, under `output/`): `fig_{gri30,ffcm2,aramco,combined}_validation.{svg,pdf,png}`
+and `validation_errors.txt` (Δt_ign % + max ΔX per species, per mechanism). Workflow A's
+per-mech ref CSVs and ignition PNGs also land in `output/`.
 
 `export_species.jl` uses `jac=true` + `FBDF(linsolve=UMFPACKFactorization())` uniformly
 across all mechanisms — required for Aramco (581 sp) where the default dense Jacobian

@@ -52,7 +52,8 @@ end
 
 # @__DIR__-relative paths so the script runs from any CWD (repo root, examples/, …).
 const HERE = @__DIR__
-const REFS = HERE
+const REFS = joinpath(HERE, "output")
+mkpath(REFS)
 export_mech(joinpath(HERE, "..", "..", "test", "data", "gri30.yaml"), joinpath(REFS, "gri30_cms_species.csv"), "GRI30")
 export_mech(joinpath(HERE, "..", "mechanism", "FFCM2.yaml"),         joinpath(REFS, "ffcm2_cms_species.csv"), "FFCM2")
 export_mech(joinpath(HERE, "..", "mechanism", "AramcoMech3.0.yaml"), joinpath(REFS, "aramco_cms_species.csv"), "Aramco")

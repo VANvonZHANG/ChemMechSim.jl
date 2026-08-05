@@ -10,8 +10,10 @@ using CairoMakie
 const YAML_PATH = joinpath(@__DIR__, "..", "mechanism", "gri30.yaml")
 const YAML_FALLBACK = joinpath(@__DIR__, "..", "..", "test", "data", "gri30.yaml")
 const yaml = isfile(YAML_PATH) ? YAML_PATH : YAML_FALLBACK
-const REF_CSV = joinpath(@__DIR__, "gri30_ref_constV.csv")
-const PNG_OUT = joinpath(@__DIR__, "gri30_ignition.png")
+const OUT = joinpath(@__DIR__, "output")
+const REF_CSV = joinpath(OUT, "gri30_ref_constV.csv")
+const PNG_OUT = joinpath(OUT, "gri30_ignition.png")
+mkpath(OUT)
 
 _var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unknowns(sys))]
 
