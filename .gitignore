@@ -4,6 +4,10 @@
 *.lcov
 coverage/
 
+# Python bytecode (validation/ ref scripts, test/tools/)
+__pycache__/
+*.pyc
+
 # generated plot output (examples/brusselator.jl writes these)
 examples/*.png
 

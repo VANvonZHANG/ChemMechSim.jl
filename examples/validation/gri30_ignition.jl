@@ -42,6 +42,19 @@ has_ref = isfile(REF_CSV)
 if has_ref
     data, _ = readdlm(REF_CSV, ',', header=true)
     ct_t, ct_T = vec(data[:,1]), vec(data[:,2])
+    # Cantera's adaptive stepper can overshoot t_end on the final step (the ref CSV's
+    # last sample is ~5.04 ms). Clip to <5 ms, then append a linearly interpolated
+    # endpoint at exactly 5 ms along Cantera's own trajectory, so the plotted line
+    # covers the full window without spilling past it.
+    ct_t_raw, ct_T_raw = ct_t, ct_T
+    m = ct_t_raw .< 5.0e-3
+    ct_t, ct_T = ct_t_raw[m], ct_T_raw[m]
+    if ct_t_raw[end] >= 5.0e-3
+        j = findlast(<(5.0e-3), ct_t_raw)        # last raw sample < 5 ms
+        frac = (5.0e-3 - ct_t_raw[j]) / (ct_t_raw[j+1] - ct_t_raw[j])
+        push!(ct_t, 5.0e-3)
+        push!(ct_T, ct_T_raw[j] + frac * (ct_T_raw[j+1] - ct_T_raw[j]))
+    end
     ct_t_ign = ct_t[argmax(abs.(diff(ct_T) ./ diff(ct_t))) + 1]
     rel = abs(t_ign - ct_t_ign) / ct_t_ign
     println("Cantera:     t_ignition=$(round(ct_t_ign*1e3,digits=3)) ms, T_end=$(round(ct_T[end],digits=1)) K")

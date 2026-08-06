@@ -68,6 +68,24 @@ def _read(path):
     return {n.strip(): d[n] for n in (d.dtype.names or ())}
 
 
+def _clip_to_window(ref, t_max):
+    """Clip a Cantera ref trajectory to end exactly at t_max (no overshoot, no gap).
+
+    The ref scripts integrate with `while sim.time < t_end: sim.step()`, so Cantera's
+    adaptive final step can overshoot t_end (notably FFCM2: last sub-window sample at
+    4.31 ms, then a 1.1 ms jump to 5.44 ms). Drop samples past t_max and append one
+    point at exactly t_max by linear interpolation along Cantera's own trajectory, so
+    the plotted line covers the full ChemMechSim window without spilling past it.
+    """
+    t = ref["time_s"]
+    m = t < t_max
+    out = {k: v[m] for k, v in ref.items()}
+    if t[-1] >= t_max:  # raw overshot t_max → append an interpolated endpoint
+        for k in out:
+            out[k] = np.append(out[k], np.interp(t_max, t, ref[k]))
+    return out
+
+
 def _ign_delay(t, T):
     """Ignition-delay time: t at the steepest temperature rise (argmax |dT/dt|)."""
     dTdt = np.abs(np.diff(T) / np.diff(t))
@@ -135,7 +153,7 @@ def _stylish_ax(ax, i, ylabel):
 def plot_single(cms_path, ref_path, prefix,
                 cms_color="#2166AC", ref_color="#333333"):
     cms = _read(cms_path)
-    ref = _read(ref_path)
+    ref = _clip_to_window(_read(ref_path), cms["time_s"][-1])
     t_cms = cms["time_s"] * 1e3
     t_ref = ref["time_s"] * 1e3
 
@@ -162,7 +180,11 @@ def plot_single(cms_path, ref_path, prefix,
 
 
 def plot_combined(specs, prefix):
-    datas = [(_read(c), _read(r), lbl, col) for c, r, lbl, col in specs]
+    datas = []
+    for c, r, lbl, col in specs:
+        cms_d = _read(c)
+        ref_d = _clip_to_window(_read(r), cms_d["time_s"][-1])
+        datas.append((cms_d, ref_d, lbl, col))
 
     fig, axes = plt.subplots(3, 2, figsize=(4.5, 5.0), constrained_layout=True)
     flat = axes.flatten()
