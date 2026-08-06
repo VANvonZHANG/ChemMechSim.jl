@@ -2,15 +2,18 @@
 # Local coverage script (not a CI test). Mechanism fixtures live in examples/mechanism/.
 # Run: julia --project=. examples/perf/aramco_ffcm2_plog_load.jl
 #
-# Known limitations surfaced by this coverage run (documented, not blocking T5):
-#  - FFCM2 has 6 PLOG reactions with duplicate pressure points within a single entry
-#    (Cantera sums channels at each node). The T4 parser rejects duplicates per spec §5.1
-#    (out-of-scope for Phase 6 T1-T5; flagged as a known edge). FFCM2 parse aborts at the
-#    first such reaction. A future task could extend PlogPoint to hold multi-channel (A,b,Ea)
-#    sets per pressure (Cantera sum-then-interp semantics).
-#  - Aramco parses fully (504 PLOG) but lowering hits pre-existing MTK dimension warnings
-#    on some non-PLOG reactions (three-body/elementary with exotic species). These are
-#    unrelated to PLOG (PLOG lowers cleanly in isolation — see test_plog.jl T3).
+# Coverage behavior (this script lowers with default checks=true):
+#  - Both mechanisms PARSE cleanly, including all PLOG reactions. FFCM2's 6 PLOG
+#    reactions that carry duplicate pressure points within one entry (Cantera sums
+#    channels at each node) are accepted — same-pressure sum-at-pressure support
+#    landed in commit 23f9d68 (large-mech T3). Aramco's 504 PLOG reactions all have
+#    distinct pressure nodes.
+#  - Both mechanisms LOWER-FAIL here with ModelingToolkitBase.ValidationError. This
+#    is NOT PLOG-related and NOT parse-related: the inlined NASA7 K_c reverse-rate
+#    terms trip MTK's unit validator on the full energy ODE (a known large-mech
+#    K_c-unit-fold limitation). The validation/ ignition scripts bypass it with
+#    `checks=false` and lower + solve both mechanisms fine (see aramco_ignition.jl
+#    header). This script deliberately keeps checks=true to surface the limitation.
 using ChemMechSim
 using ChemMechSim: PlogRate
 
