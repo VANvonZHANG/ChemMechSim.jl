@@ -203,10 +203,11 @@ def plot_combined(specs, prefix):
     # Two separated, framed legends in the figure's upper-right corner (over
     # the CH4 panel, whose upper-right stays empty): "mechanism" (color
     # swatches) stacked above "solver" (gray line / ×).  Bold titles, thin
-    # frames, both left-edge aligned so the boxes line up neatly.
+    # frames, both right-edge aligned (anchored to the CH4 panel's right edge)
+    # so the boxes line up neatly and clear the descending CH4 curves.
     def _boxed(handles, title, y):
-        leg = fig.legend(handles=handles, loc="upper left",
-                         bbox_to_anchor=(0.735, y), title=title,
+        leg = fig.legend(handles=handles, loc="upper right",
+                         bbox_to_anchor=(0.965, y), title=title,
                          title_fontsize=5, fontsize=5, handlelength=1.5,
                          labelspacing=0.3, borderpad=0.4, frameon=True)
         leg.get_title().set_fontweight("bold")
