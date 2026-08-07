@@ -29,13 +29,10 @@ mpl.rcParams.update({
 })
 
 COLORS  = {"klu": "#1b7837", "umfpack": "#2166ac", "sparspak": "#5aae61",
-           "mumps": "#762a83", "pardiso": "#ff7f00",
-           "gmres": "#b2182b", "gmres_ilu": "#d6604d"}
-MARKERS = {"klu": "o", "umfpack": "s", "sparspak": "D", "mumps": "P", "pardiso": "X",
-           "gmres": "^", "gmres_ilu": "v"}
+           "mumps": "#762a83", "pardiso": "#ff7f00"}
+MARKERS = {"klu": "o", "umfpack": "s", "sparspak": "D", "mumps": "P", "pardiso": "X"}
 LABELS  = {"klu": "KLU", "umfpack": "UMFPACK", "sparspak": "Sparspak",
-           "mumps": "MUMPS", "pardiso": "Pardiso",
-           "gmres": "GMRES", "gmres_ilu": "GMRES+ILU(0)"}
+           "mumps": "MUMPS", "pardiso": "Pardiso"}
 
 
 def _save(fig, prefix, out_dir):

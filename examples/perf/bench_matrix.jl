@@ -207,11 +207,11 @@ function run_endtoend(prob, alg, repeats::Int, warmup::Bool, reltol, abstol, T_i
 end
 
 # ---- standalone linear-solve micro-benchmark: time solve(LinearProblem) per call on W = αI − J ----
-# solve(LinearProblem(W,b), alg) does init (factorize, for direct) + triangular solve each call,
-# i.e. the per-Newton-step cost when BDF's W = I/hγ−J changes. GMRES-bare iterates each call.
+# solve(LinearProblem(W,b), alg) does init (symbolic + numeric factorize, for direct) + triangular
+# solve each call — the per-Newton-step linear-solve cost (warm; the one-time symbolic is compiled
+# away by the compile probe + the micro-bench's own warmup). Direct-sparse solvers only now.
 function run_microbench(W_sample, ls_alg, repeats::Int)
     (W_sample === nothing) && return (ok=false, per_call_s=NaN, alloc=0, note="no W sample")
-    (ls_alg === nothing)   && return (ok=false, per_call_s=NaN, alloc=0, note="precs not isolated standalone (gmres_ilu)")
     n = size(W_sample, 1)
     Random.seed!(0)
     b = rand(n)
@@ -276,7 +276,7 @@ function write_meta(path, cfg, mech_names, solver_names)
         "julia_threads"=> Threads.nthreads(),
         "packages"     => Dict(n => pkgv(n) for n in
                               ("ChemMechSim", "OrdinaryDiffEq", "LinearSolve", "ModelingToolkit",
-                               "Sparspak", "IncompleteLU", "Catalyst", "SciMLBase")),
+                               "Sparspak", "MUMPS", "Pardiso", "Catalyst", "SciMLBase")),
         "git_sha"      => try; readchomp(`git -C $(@__DIR__) rev-parse HEAD`); catch; "unknown"; end,
         "config"       => Dict("mechs" => mech_names, "solvers" => solver_names,
                                "repeats" => cfg.repeats, "warmup" => cfg.warmup,
