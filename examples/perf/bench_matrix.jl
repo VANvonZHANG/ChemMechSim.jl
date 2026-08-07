@@ -161,14 +161,31 @@ function build_for_mech(mc::MechConfig, tspan::Tuple{Float64,Float64})
     return (mech=mech, prob=prob, T_idx=T_idx, t_build=t_build, n_states=n_states, nnz=nz, W_sample=W_sample)
 end
 
-# ---- end-to-end solve (warmup + N timed runs); returns rows + the last successful solution ----
+# ---- one-time compile probe: the FIRST solve in a fresh process for this mech (designated ----
+# solver). Dominated by Julia compilation of the reaction-sharded Jacobian codegen (scales with
+# mechanism size; ~570 s for Aramco). Paid once per process, ~solver-independent — NOT a per-
+# solver metric. This is the single-shot user experience; the per-solver comparison is the warm
+# `run_endtoend` below (the shared jac compile is already done by this probe).
+function compile_probe(prob, alg, reltol, abstol, T_idx)
+    GC.gc()
+    try
+        sol, t, alloc, _gc, _mem = @timed solve(prob, alg; reltol=reltol, abstol=abstol)
+        @printf(" compile+1st solve: %.1fs  %d steps  %s\n", t, length(sol), sol.retcode)
+        return (first_solve_s=t, steps=length(sol), retcode=string(sol.retcode))
+    catch e
+        println(" compile probe CRASH: $(first(split(sprint(showerror, e), '\n')))")
+        return (first_solve_s=NaN, steps=0, retcode="COMPILE_CRASH")
+    end
+end
+
+# ---- end-to-end solve (warmup absorbs each solver's own linsolve compile; shared jac compile ----
+# is done by the compile probe). Returns warm rows + the last successful solution.
 function run_endtoend(prob, alg, repeats::Int, warmup::Bool, reltol, abstol, T_idx)
     if warmup
         try
-            solve(prob, alg; reltol=reltol, abstol=abstol)   # discard (compile / prime)
+            solve(prob, alg; reltol=reltol, abstol=abstol)   # discard (this solver's linsolve compile)
         catch e
-            msg = first(split(sprint(showerror, e), '\n'))
-            println(" warmup CRASH: $msg")
+            println(" warmup CRASH: $(first(split(sprint(showerror, e), '\n')))")
             return (rows=[(run_idx=1, wall_s=NaN, alloc_bytes=0, steps=0, retcode="WARMUP_CRASH", T_end=NaN)], last_sol=nothing)
         end
     end
@@ -180,10 +197,9 @@ function run_endtoend(prob, alg, repeats::Int, warmup::Bool, reltol, abstol, T_i
             T_end = (T_idx === nothing || isempty(sol.u)) ? NaN : Float64(sol.u[end][T_idx])
             push!(rows, (run_idx=r, wall_s=t, alloc_bytes=alloc, steps=length(sol), retcode=string(sol.retcode), T_end=T_end))
             last_sol = sol
-            @printf(" run %d: %.2fs  %d steps  %s\n", r, t, length(sol), sol.retcode)
+            @printf(" warm %d: %.2fs  %d steps  %s\n", r, t, length(sol), sol.retcode)
         catch e
-            msg = first(split(sprint(showerror, e), '\n'))
-            println(" run $r CRASH: $msg")
+            println(" warm $r CRASH: $(first(split(sprint(showerror, e), '\n')))")
             push!(rows, (run_idx=r, wall_s=NaN, alloc_bytes=0, steps=0, retcode="CRASH", T_end=NaN))
         end
     end
@@ -287,6 +303,8 @@ function main()
 
     fm     = open(joinpath(cfg.out_dir, "bench_matrix.csv"), "w")
     println(fm, "mech,n_species,n_reactions,n_states,nnz_jac,density_pct,linsolve,run_idx,wall_s,alloc_bytes,steps,retcode,T_end")
+    fcompile = open(joinpath(cfg.out_dir, "bench_compile.csv"), "w")
+    println(fcompile, "mech,n_states,first_solve_s,solver_used,steps,retcode")
     fmicro = cfg.microbench ? open(joinpath(cfg.out_dir, "bench_linsolve_micro.csv"), "w") : nothing
     fmicro !== nothing && println(fmicro, "mech,n_states,nnz_jac,linsolve,per_call_s,alloc_bytes,note")
     facc   = cfg.accuracy   ? open(joinpath(cfg.out_dir, "bench_accuracy.csv"), "w") : nothing
@@ -303,6 +321,13 @@ function main()
         nsp, nrx = length(b.mech.species), length(b.mech.reactions)
         density = b.n_states > 0 ? b.nnz / b.n_states^2 * 100 : 0.0
         println("  $nsp sp, $nrx rxn, $(b.n_states) states, nnz(jac)=$(b.nnz) ($(round(density, digits=1))% dense), build=$(round(b.t_build, digits=1))s")
+
+        # one-time compile probe (mech-level, first selected solver) — separate from per-solver warm.
+        # Dominated by the reaction-sharded Jacobian codegen compile; ~solver-independent.
+        cp = compile_probe(b.prob, sconfigs[1].fbdf, cfg.reltol, cfg.abstol, b.T_idx)
+        println(fcompile, join(Any[mc.name, b.n_states, isnan(cp.first_solve_s) ? "" : round(cp.first_solve_s, digits=2),
+                             sconfigs[1].name, cp.steps, cp.retcode], ","))
+        flush(fcompile)
 
         function write_rows(res, sc)
             for r in res.rows
@@ -344,7 +369,7 @@ function main()
         end
     end
 
-    close(fm); fmicro !== nothing && close(fmicro); facc !== nothing && close(facc)
+    close(fm); close(fcompile); fmicro !== nothing && close(fmicro); facc !== nothing && close(facc)
     println("\nDone. CSVs + meta in $(cfg.out_dir)")
 end
 
