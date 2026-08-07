@@ -57,10 +57,14 @@ See [`validation/README.md`](validation/README.md) for details.
 
 ## perf/
 
-| Script | Phase | Measures |
-|---|---|---|
-| `gri30_benchmark.jl` | 5b | GRI30 lowering + Jacobian codegen + solve timing (cold vs warm) |
-| `aramco_ffcm2_plog_load.jl` | 6 | Large-mechanism (Aramco/FFCM2) parse + lower coverage, all PLOG reactions |
+| Script | Measures |
+|---|---|
+| `gri30_benchmark.jl` | GRI30 pipeline breakdown — lowering + Jacobian codegen + solve timing (cold vs warm) on the default (no-jac) path |
+| `bench_matrix.jl` + `plot_bench.py` | mechanism × linear-solver benchmark matrix on the `jac=true` path (GRI30/FFCM2/Aramco × 5 linear solvers): end-to-end solve time + a standalone linear-solve micro-benchmark + trajectory accuracy vs a reference. Streams CSVs → publication figures. Run on the target machine: `julia --project=. examples/perf/bench_matrix.jl --repeats 5`, then `python3 examples/perf/plot_bench.py`. |
+
+> `aramco_linsolve_probe.jl` (the single-mech prototype) and `aramco_ffcm2_plog_load.jl`
+> (parse/lower coverage) were removed — `bench_matrix.jl` supersedes the probe, and parse
+> failures surface as BUILD_FAIL rows in the matrix.
 
 ## mechanism/
 
