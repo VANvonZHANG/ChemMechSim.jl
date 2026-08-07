@@ -53,7 +53,7 @@ def _style(ax, xlabel, ylabel):
 
 
 def plot_e2e(df, out_dir):
-    """median end-to-end solve time vs N states, with IQR error bars."""
+    """median end-to-end (warm) solve time vs N states, with IQR error bars."""
     ns = df.groupby("mech")["n_states"].first()
     g = (df.groupby(["mech", "linsolve"])["wall_s"]
            .agg(["median", "count", lambda s: np.nanpercentile(s, 25), lambda s: np.nanpercentile(s, 75)])
@@ -69,8 +69,26 @@ def plot_e2e(df, out_dir):
         ax.errorbar(sub["n_states"], sub["median"], yerr=[lo, hi],
                     marker=MARKERS.get(ls, "o"), color=COLORS.get(ls, "#333"),
                     linestyle="-", capsize=2, elinewidth=0.6, label=LABELS.get(ls, ls))
-    _style(ax, "mechanism size (N states)", "end-to-end solve time (s, median)")
-    _save(fig, "fig_bench_e2e", out_dir); plt.close(fig)
+    _style(ax, "mechanism size (N states)", "end-to-end solve time (s, warm, median)")
+    _save(fig, "fig_bench_e2e_warm", out_dir); plt.close(fig)
+
+
+def plot_compile(df, out_dir):
+    """one-time first-solve cost (compile-dominated) vs N states — the single-shot user cost.
+    Mech-level (one row per mech), ~solver-independent — the reaction-sharded Jacobian codegen
+    compile, paid once per process. Annotates each point with its value."""
+    df = df[df["first_solve_s"].notna()]
+    if df.empty:
+        print("  (no bench_compile.csv data — skip)"); return
+    df = df.sort_values("n_states")
+    fig, ax = plt.subplots(figsize=(4.2, 3.2))
+    ax.plot(df["n_states"], df["first_solve_s"], marker="o", color="#2166ac",
+            linestyle="-", label="first solve (compile)")
+    for _, row in df.iterrows():
+        ax.annotate(f"{row['first_solve_s']:.0f}s", (row["n_states"], row["first_solve_s"]),
+                    textcoords="offset points", xytext=(5, 5), fontsize=5)
+    _style(ax, "mechanism size (N states)", "first-solve time (s, one-time compile)")
+    _save(fig, "fig_bench_compile", out_dir); plt.close(fig)
 
 
 def plot_micro(df, out_dir):
@@ -115,13 +133,17 @@ def main():
     df = df[df["wall_s"].notna()]                      # drop CRASH / WARMUP_CRASH rows
     if df.empty:
         sys.exit(f"{mtx} has no successful rows — nothing to plot")
-    print(f"end-to-end: {len(df)} rows; mechs={sorted(df['mech'].unique())}, "
+    print(f"warm end-to-end: {len(df)} rows; mechs={sorted(df['mech'].unique())}, "
           f"solvers={sorted(df['linsolve'].unique())}")
     plot_e2e(df, d)
-    print("Fig 1: end-to-end solve time vs N states")
+    print("Fig: end-to-end WARM solve time vs N states")
+    compile_path = os.path.join(d, "bench_compile.csv")
+    if os.path.exists(compile_path):
+        print("Fig: one-time compile (first solve) vs N states")
+        plot_compile(pd.read_csv(compile_path), d)
     micro_path = os.path.join(d, "bench_linsolve_micro.csv")
     if os.path.exists(micro_path):
-        print("Fig 2: linear-solve per-call cost vs N states")
+        print("Fig: linear-solve per-call cost vs N states (warm)")
         plot_micro(pd.read_csv(micro_path), d)
     accuracy_table(os.path.join(d, "bench_accuracy.csv"), d)
     print("\nDone.")
