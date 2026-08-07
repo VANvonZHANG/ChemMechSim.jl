@@ -8,7 +8,7 @@
 #
 # Run (framework only — run on the target machine for paper numbers):
 #   julia --project=. examples/perf/bench_matrix.jl \
-#       [--mechs gri30,ffcm2,aramco] [--solvers klu,umfpack,sparspak,gmres,gmres_ilu] \
+#       [--mechs gri30,ffcm2,aramco] [--solvers klu,umfpack,sparspak,mumps,pardiso] \
 #       [--repeats 1] [--no-warmup] [--reltol 1e-8] [--abstol 1e-12] [--tspan-ms 5.0] \
 #       [--no-microbench] [--no-accuracy] [--quick] [--out-dir DIR]
 #
@@ -25,7 +25,7 @@ using ChemMechSim
 using OrdinaryDiffEq: FBDF
 using SciMLBase: solve
 using LinearSolve: KLUFactorization, UMFPACKFactorization, SparspakFactorization,
-                   KrylovJL_GMRES, LinearProblem
+                   MUMPSFactorization, PardisoJL, LinearProblem
 using ModelingToolkit: unknowns, getname
 using SparseArrays: nnz
 using LinearAlgebra: BLAS, I
@@ -36,7 +36,7 @@ using Dates
 using Pkg
 using Random
 
-# ---- optional deps (gate Sparspak / IncompleteLU rows; probe auto-skips what's missing) ----
+# ---- optional direct-sparse backends (auto-skip whatever isn't installed) ----
 const HAS_SPARSPAK = Ref(false)
 try
     @eval using Sparspak
@@ -44,21 +44,19 @@ try
 catch
     println("[gate] Sparspak not loaded — `] add Sparspak` to enable that row")
 end
-const HAS_ILU = Ref(false)
+const HAS_MUMPS = Ref(false)
 try
-    @eval using IncompleteLU
-    HAS_ILU[] = true
+    @eval using MUMPS
+    HAS_MUMPS[] = true
 catch
-    println("[gate] IncompleteLU not loaded — `] add IncompleteLU` to enable the gmres_ilu row")
+    println("[gate] MUMPS not loaded — `] add MUMPS` to enable that row")
 end
-
-# ILU(0) preconditioner callback for FBDF (same recipe as aramco_linsolve_probe.jl).
-function precs_ilu0(W, du, u, p, t, newW, Plprev, Prprev, solverdata)
-    if newW === nothing || newW
-        return IncompleteLU.ilu(convert(AbstractMatrix, W); τ = 0.0), nothing
-    else
-        return Plprev, nothing
-    end
+const HAS_PARDISO = Ref(false)
+try
+    @eval using Pardiso
+    HAS_PARDISO[] = true
+catch
+    println("[gate] Pardiso not loaded — `] add Pardiso` (or MKL) to enable that row")
 end
 
 # ---- mechanism configs (each its own natural ignition problem; @__DIR__-relative) ----
@@ -86,12 +84,12 @@ end
 function solver_configs(selected)
     sel = lowercase.(selected)
     avail = SolverConfig[
-        SolverConfig("klu",     FBDF(linsolve=KLUFactorization()),   KLUFactorization()),
+        SolverConfig("klu",     FBDF(linsolve=KLUFactorization()),     KLUFactorization()),
         SolverConfig("umfpack", FBDF(linsolve=UMFPACKFactorization()), UMFPACKFactorization()),
-        SolverConfig("gmres",   FBDF(linsolve=KrylovJL_GMRES()),     KrylovJL_GMRES()),
     ]
     HAS_SPARSPAK[] && push!(avail, SolverConfig("sparspak", FBDF(linsolve=SparspakFactorization()), SparspakFactorization()))
-    HAS_ILU[]      && push!(avail, SolverConfig("gmres_ilu", FBDF(linsolve=KrylovJL_GMRES(), concrete_jac=true, precs=precs_ilu0), nothing))
+    HAS_MUMPS[]    && push!(avail, SolverConfig("mumps",    FBDF(linsolve=MUMPSFactorization()),    MUMPSFactorization()))
+    HAS_PARDISO[]  && push!(avail, SolverConfig("pardiso",  FBDF(linsolve=PardisoJL()),             PardisoJL()))
     out = [c for c in avail if c.name in sel]
     avail_names = getfield.(avail, :name)
     isempty(out) && error("no solvers selected (got $sel); available: $(join(avail_names, ','))")
@@ -102,7 +100,7 @@ end
 
 # ---- CLI ----
 function parse_cli(args::Vector{String})
-    cfg = (mechs="gri30,ffcm2,aramco", solvers="klu,umfpack,sparspak,gmres,gmres_ilu",
+    cfg = (mechs="gri30,ffcm2,aramco", solvers="klu,umfpack,sparspak,mumps,pardiso",
            repeats=1, warmup=true, reltol=1e-8, abstol=1e-12, tspan_ms=nothing,
            microbench=true, accuracy=true, out_dir=joinpath(@__DIR__, "output"))
     i = 1
