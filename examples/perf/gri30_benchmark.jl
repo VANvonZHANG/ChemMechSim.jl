@@ -15,6 +15,9 @@ using ChemMechSim
 using OrdinaryDiffEq: FBDF
 using SciMLBase: solve
 using Printf
+using YAML
+using Dates
+using Pkg
 
 const R = 8.314
 const P0 = 101325.0
@@ -48,6 +51,27 @@ for (name, yaml, T0, X0) in MECHS
     flush(FCSV)
 end
 close(FCSV)
+
+# reproducibility metadata
+deps = Pkg.dependencies()
+pkgv(name) = begin
+    for (_u, info) in deps
+        info.name == name && return string(info.version)
+    end
+    return "n/a"
+end
+meta = Dict(
+    "timestamp" => Dates.format(now(), "yyyy-mm-ddTHH:MM:SS"),
+    "hostname" => gethostname(),
+    "cpu" => try; Sys.cpu_info()[1].model; catch; "?" end,
+    "cpu_threads" => Sys.CPU_THREADS,
+    "ram_GB" => round(Sys.total_memory() / 2^30, digits=1),
+    "julia" => string(VERSION),
+    "packages" => Dict(n => pkgv(n) for n in
+                      ("ChemMechSim", "OrdinaryDiffEq", "LinearSolve", "ModelingToolkit", "SciMLBase")),
+    "git_sha" => try; readchomp(`git -C $(@__DIR__) rev-parse HEAD`); catch; "unknown"; end,
+)
+YAML.write_file(joinpath(@__DIR__, "output", "bench_pipeline_meta.yaml"), meta)
 println("\nWrote $(joinpath(@__DIR__, "output", "bench_pipeline.csv"))")
 println("\njit_compile = cold − warm = one-time Julia JIT compilation of MTK-generated RHS + Jacobian.")
 println("Optimization lever: shrink generated code via opaque registered functions (less to compile).")
