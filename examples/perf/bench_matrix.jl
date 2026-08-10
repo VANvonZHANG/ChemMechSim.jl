@@ -47,9 +47,10 @@ end
 const HAS_MUMPS = Ref(false)
 try
     @eval using MUMPS
+    @eval MUMPS.MPI.Initialized() || MUMPS.MPI.Init()   # MUMPS.jl requires MPI be initialized before any factorize; it never auto-inits (mumps_struc.jl:158 throws otherwise), which silently made every MUMPS solve return zero → FBDF Unstable.
     HAS_MUMPS[] = true
-catch
-    println("[gate] MUMPS not loaded — `] add MUMPS` to enable that row")
+catch e
+    println("[gate] MUMPS not loaded — `] add MUMPS` to enable that row ($(first(split(sprint(showerror,e),'\n'))))")
 end
 const HAS_PARDISO = Ref(false)
 try
