@@ -24,6 +24,7 @@ include("test_adiabatic.jl")
 include("test_yaml_parser.jl")
 include("test_custom_ratelaw.jl")
 include("test_plog.jl")
+include("test_jacobian_sparsity_figure.jl")
 
 include("test_gri30.jl")
 include("test_large_mechanism_smoke.jl")
