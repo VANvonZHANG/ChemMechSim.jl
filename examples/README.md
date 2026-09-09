@@ -21,6 +21,7 @@ framework. Read in this order; each assumes the one before it.
 | Script | Phase | Demonstrates |
 |---|---|---|
 | `brusselator.jl` | 1 | MVP: ODE system, limit cycle, optional plotting |
+| `brusselator_inputs.jl` | 1 | One system, three input routes (programmatic / Catalyst import / YAML) -> one `Mechanism` |
 | `batch_reactor.jl` | 2 | `BatchReactor` script API + convenience modes |
 | `mixed_lowering.jl` | 2.5a | Mixed Catalyst / direct MTK lowering, T-dependent Arrhenius |
 | `h2o2_subset.jl` | 2.5b | H2-O2 subset, unit-aware mixed lowering |

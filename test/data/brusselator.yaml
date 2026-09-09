@@ -1,0 +1,26 @@
+# Minimal Cantera-YAML (ChemMechSim subset) fixture for the Brusselator
+# oscillator. Two extensions beyond stock Cantera YAML, both accepted by
+# ChemMechSim's parser:
+#   * source/sink terms are written with an empty reactant/product side
+#     (" => X" / "X => ");
+#   * abstract species carry placeholder compositions from the real element
+#     table (molecular weight is unused in the :kinetic mode).
+phases:
+  - name: brusselator
+    thermo: ideal-gas
+    elements: [C, O]
+    species: [X, Y]
+species:
+  - name: X
+    composition: {C: 1}
+  - name: Y
+    composition: {O: 1}
+reactions:
+  - equation: " => X"                                # source: empty reactant side
+    rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}
+  - equation: 2 X + Y => 3 X
+    rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}
+  - equation: X => Y
+    rate-constant: {A: 3.0, b: 0.0, Ea: 0.0}
+  - equation: "X => "                                # sink: empty product side
+    rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}
