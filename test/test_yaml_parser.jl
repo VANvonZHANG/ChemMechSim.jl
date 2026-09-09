@@ -179,3 +179,21 @@ end
     @test length(gri.reactions) > 0
     @test !any(r -> r.kinetics isa PlogRate, gri.reactions)
 end
+
+@testset "brusselator.yaml: empty-side source/sink terms (abstract species)" begin
+    mech = load_mechanism(joinpath(@__DIR__, "data", "brusselator.yaml"))
+    @test length(mech.species) == 2
+    @test sort([s.name for s in mech.species]) == ["X", "Y"]
+    @test length(mech.reactions) == 4
+    # source (=> X) and sink (X =>): exactly one empty reactant / product side
+    @test count(r -> isempty(r.reactants), mech.reactions) == 1
+    @test count(r -> isempty(r.products),  mech.reactions) == 1
+    # all constant-rate, irreversible; SI units leave A unchanged
+    for r in mech.reactions
+        @test r.kinetics isa ElementaryArrhenius
+        @test r.kinetics.b == 0.0 && r.kinetics.Ea == 0.0
+        @test r.reverse_policy isa Irreversible
+    end
+    r3 = mech.reactions[3]                       # X => Y with A = 3.0
+    @test r3.kinetics.A == 3.0
+end
