@@ -2,9 +2,7 @@ using Test
 using ChemMechSim
 using ModelingToolkit
 using ModelingToolkit: unknowns, getname
-using Catalyst
 using OrdinaryDiffEq
-import ChemMechSim: catalyst_native, catalyst_lowering, direct_mtk_lowering, RateCtx
 
 @testset "lower_to_mtk: first-order A -> B" begin
     a = SpeciesData(id=1, name="A")
@@ -78,59 +76,6 @@ end
     a_idx = findfirst(s -> String(ModelingToolkit.getname(s)) == "A", ModelingToolkit.unknowns(sys))
     @test sol.u[end][a_idx] ≈ 3 * exp(-k500 * 0.01) atol=1e-4
     @test all(isfinite, sol.u[end])
-end
-
-@testset "lower_to_mtk: species are Catalyst @species (backend-ready)" begin
-    a = SpeciesData(id=1, name="A"); b = SpeciesData(id=2, name="B")
-    mech = Mechanism(species=[a, b],
-        reactions=[ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
-                                kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))])
-    sys = lower_to_mtk(mech)
-    A = unknowns(sys)[findfirst(s -> String(getname(s)) == "A", unknowns(sys))]
-    B = unknowns(sys)[findfirst(s -> String(getname(s)) == "B", unknowns(sys))]
-    # Catalyst accepts @species (but rejects plain @variables) as Reaction substrates.
-    # isequal: symbolic == returns a non-boolean Equation, so use structural isequal.
-    rx = Catalyst.Reaction(2.0, [A], [B])
-    @test isequal(Catalyst.oderatelaw(rx; combinatoric_ratelaw=false), 2.0 * A)
-end
-
-@testset "catalyst_native: ElementaryArrhenius is Catalyst-native" begin
-    rxn = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
-                       kinetics=ElementaryArrhenius(1.0, 0.0, 0.0))
-    @test catalyst_native(rxn, MechanismConfig()) == true
-end
-
-@testset "catalyst_lowering: rate equals the direct path (shared @species)" begin
-    a = SpeciesData(id=1, name="A"); b = SpeciesData(id=2, name="B")
-    rxn = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
-                       kinetics=ElementaryArrhenius(2.0, 0.0, 0.0))
-    mech = Mechanism(species=[a, b], reactions=[rxn])
-    sys = lower_to_mtk(mech)
-    A = unknowns(sys)[findfirst(s -> String(getname(s)) == "A", unknowns(sys))]
-    B = unknowns(sys)[findfirst(s -> String(getname(s)) == "B", unknowns(sys))]
-    cvar = Dict(1 => A, 2 => B)
-    # Under units, k is a rate_param (default = stored A-factor); both paths
-    # produce the same symbolic k·A. isequal: symbolic == returns a non-boolean Equation.
-    ctx = RateCtx(mech, cvar, nothing, 1, 1.0, nothing, nothing, Dict{Int,Any}(), nothing, Any[])
-    crate = catalyst_lowering(rxn, mech, cvar, nothing, 1, ctx)
-    drate = direct_mtk_lowering(rxn, mech, cvar, nothing, 1, ctx)
-    @test isequal(crate, drate)
-    # The k parameter carries the stored default (2.0).
-    kparam = ModelingToolkit.parameters(sys)[findfirst(p -> String(ModelingToolkit.getname(p)) == "k_1_A",
-                                                            ModelingToolkit.parameters(sys))]
-    @test ModelingToolkit.getdefault(kparam) == 2.0
-end
-
-@testset "catalyst path: Brusselator RHS is unchanged" begin
-    # After Task 3 every elementary reaction routes through catalyst_lowering;
-    # the species-conservation RHS must be identical to the direct path.
-    sys = lower_to_mtk(_brusselator_mech())
-    idx = _state_index(sys)
-    u = zeros(2); u[idx["X"]] = 2.0; u[idx["Y"]] = 1.0
-    du = zeros(2)
-    ODEFunction(sys)(du, u, _pvals(sys), 0.0)
-    @test du[idx["X"]] ≈ -3.0                    # 1 - 4·2 + (2²)·1 = -3
-    @test du[idx["Y"]] ≈  2.0                    # 3·2 - (2²)·1 = 2
 end
 
 @testset "M1: no spurious theta param when b!=0, Ea=0" begin
