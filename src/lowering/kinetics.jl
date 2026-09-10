@@ -1,11 +1,8 @@
 # Rate-law lowering (§5.2, §5.4, §3.3): turn an AbstractKinetics rate law into a symbolic
-# rate expression. Two paths share the same unit-bearing k and the same @species:
-#   - catalyst_lowering  : plain elementary Arrhenius via Catalyst.Reaction + oderatelaw
-#                          (combinatoric_ratelaw=false), spec §3.3 layer 2;
-#   - direct_mtk_lowering: everything else (third-body, Troe, Lindemann, ...), building the
-#                          symbolic rate directly, spec §3.3 layer 3.
-# lower_reaction dispatches between them. symbolic_kf returns the effective forward rate
-# constant EXCLUDING the mass-action term (so thermo.jl's ThermoReverse can form kr=kf/Kc).
+# rate expression. All rate laws lower through the direct MTK path (building the symbolic
+# rate directly, dispatching on kinetics type) on the shared unit-bearing k and @species.
+# symbolic_kf returns the effective forward rate constant EXCLUDING the mass-action term
+# (so thermo.jl's ThermoReverse can form kr=kf/Kc).
 
 using ModelingToolkit: @register_symbolic, @register_derivative
 using DynamicQuantities: Quantity, ustrip
@@ -83,23 +80,16 @@ function _mass_action(stoich::Dict{SpeciesID,Float64}, cvar)
     return ma
 end
 
-"Whether a reaction lowers via the Catalyst mass-action backend (spec §3.3/§5.4).
- True for plain elementary Arrhenius (mass-action); false for rate types Catalyst
- does not represent natively (third-body/falloff/PLOG/Chebyshev/etc.)."
-catalyst_native(rx::ReactionData, config::MechanismConfig) =
-    rx.kinetics isa ElementaryArrhenius
-
-"Symbolic NET rate for one reaction (forward minus reverse). Irreducible elementary
- reactions may go via the Catalyst path; everything else (and all reversible reactions)
- use the direct path. `j` is the reaction index (for naming its rate parameters)."
+"Symbolic NET rate for one reaction (forward minus reverse). All reactions lower through
+ the direct MTK path, dispatching on kinetics type. `j` is the reaction index (for naming
+ its rate parameters)."
 function lower_reaction(rx::ReactionData, mech::Mechanism, cvar, T, config::MechanismConfig, j::Int, ctx::RateCtx)
     rx.reverse_policy isa Irreversible ||
         return _net_rate(rx, mech, cvar, T, j, ctx)            # ThermoReverse (Task 6)
-    return catalyst_native(rx, config) ? catalyst_lowering(rx, mech, cvar, T, j, ctx) :
-                                         direct_mtk_lowering(rx, mech, cvar, T, j, ctx)
+    return direct_mtk_lowering(rx, mech, cvar, T, j, ctx)
 end
 
-"Direct-MTK lowering path: build the symbolic rate by dispatching on kinetics type."
+"The lowering path: build the symbolic rate by dispatching on kinetics type."
 direct_mtk_lowering(rx::ReactionData, mech::Mechanism, cvar, T, j::Int, ctx::RateCtx) =
     _direct_rate(rx.kinetics, rx, mech, cvar, T, j, ctx)
 
@@ -276,19 +266,4 @@ function _meff(ctx::RateCtx, efficiencies::Dict{SpeciesID,Float64})
     end
     push!(ctx.meff_eqs, Mvar ~ s)           # register the algebraic equation
     return Mvar
-end
-
-"Catalyst mass-action lowering path (spec §5.4). Builds a Catalyst.Reaction on the
- shared @species with the SAME unit-bearing k, then reads its rate law via oderatelaw."
-function catalyst_lowering(rx::ReactionData, mech::Mechanism, cvar, T, j::Int, ctx::RateCtx)
-    kin = rx.kinetics
-    kin isa ElementaryArrhenius ||
-        error("catalyst_lowering: only ElementaryArrhenius is Catalyst-native so far.")
-    k = symbolic_kf(kin, ctx)
-    subs       = [cvar[sid] for sid in keys(rx.reactants)]
-    substoich  = collect(values(rx.reactants))
-    prods      = [cvar[sid] for sid in keys(rx.products)]
-    prodstoich = collect(values(rx.products))
-    crate = Catalyst.Reaction(k, subs, prods, substoich, prodstoich)
-    return Catalyst.oderatelaw(crate; combinatoric_ratelaw=false)
 end
