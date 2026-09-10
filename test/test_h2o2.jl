@@ -4,7 +4,7 @@ using ModelingToolkit
 using ModelingToolkit: unknowns, getname, parameters
 using OrdinaryDiffEq
 
-"7-species H2-O2 subset: 3 elementary (catalyst) + 2 third-body (direct) + 1 Troe (direct)."
+"7-species H2-O2 subset: 3 elementary + 2 third-body + 1 Troe (all via the direct MTK path)."
 function _h2o2_mech()
     H2 = SpeciesData(id=1, name="H2");  O2  = SpeciesData(id=2, name="O2")
     H2O= SpeciesData(id=3, name="H2O"); H   = SpeciesData(id=4, name="H")
@@ -52,7 +52,7 @@ end
 
 const _H2O2_NAMES = ["H2","O2","H2O","H","O","OH","HO2"]   # id order (id = position)
 
-@testset "§3.4 #6: H2-O2 mixed lowering matches handwritten RHS" begin
+@testset "§3.4 #6: H2-O2 unit-aware lowering matches handwritten RHS" begin
     mech = _h2o2_mech(); phase = ChemPhaseSystem(mech); sys = extract_system(phase)
     idx = _state_index(sys); Tv = 1000.0
     c = [2.0, 1.5, 0.5, 0.3, 0.1, 0.4, 0.2]               # id-ordered concentrations
@@ -86,7 +86,7 @@ end
     end
 end
 
-@testset "§3.4 #5: Jacobian of the mixed system is generated" begin
+@testset "§3.4 #5: Jacobian of the multi-kinetics system is generated" begin
     sys = extract_system(ChemPhaseSystem(_h2o2_mech()))
     jac = ModelingToolkit.calculate_jacobian(sys)
     @test size(jac) == (7, 7)                              # builds => symbolic Jacobian feasible
