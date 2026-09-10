@@ -1,8 +1,7 @@
 # Lowering pipeline: Mechanism + config → MTK ODESystem (spec §5.4, §5.6).
 # Unit-aware: @species carry [unit=conc], T [unit=K], and each reaction's rate
 # constant k is a unit-bearing parameter (stoichiometrically derived unit), so
-# MTK's dimension check fires at System construction. The Catalyst mass-action
-# backend (catalyst_lowering via oderatelaw) shares the same unit-bearing k.
+# MTK's dimension check fires at System construction.
 #
 # Split into focused files under src/lowering/, included here in dependency order
 # into the ChemMechSim module (no submodules — just file organization, matching
