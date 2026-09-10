@@ -8,8 +8,8 @@ coverage/
 __pycache__/
 *.pyc
 
-# generated plot output (examples/brusselator.jl writes these)
-examples/*.png
+# generated plot output (examples/demos/brusselator.jl writes this)
+examples/demos/*.png
 
 # local Superpowers planning/state files
 .superpowers/

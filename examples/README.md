@@ -20,8 +20,7 @@ framework. Read in this order; each assumes the one before it.
 
 | Script | Phase | Demonstrates |
 |---|---|---|
-| `brusselator.jl` | 1 | MVP: ODE system, limit cycle, optional plotting |
-| `brusselator_inputs.jl` | 1 | One system, three input routes (programmatic / Catalyst import / YAML) -> one `Mechanism` |
+| `brusselator.jl` | 1 | Three input routes (programmatic / Catalyst import / YAML) -> one `Mechanism`; limit-cycle solve + CairoMakie phase portrait |
 | `batch_reactor.jl` | 2 | `BatchReactor` script API + convenience modes |
 | `h2o2_subset.jl` | 2.5b | H2-O2 subset, unit-aware lowering, elementary + third-body + Troe |
 | `fixedT_reactor.jl` | 3 | Isothermal reactor, thermodynamic reverse rate, EOS pressure output |
