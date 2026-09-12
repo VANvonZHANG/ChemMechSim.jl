@@ -5,6 +5,7 @@
 using ChemMechSim
 using Catalyst: @reaction_network
 using ModelingToolkit: equations, unknowns, getname
+using OrdinaryDiffEq: solve, Tsit5
 using CairoMakie
 
 _var(sys, name) = unknowns(sys)[findfirst(s -> String(getname(s)) == name, unknowns(sys))]
@@ -57,6 +58,29 @@ end
 spread = maximum(X40) - minimum(X40)
 println(spread < 1e-6 ? "PASS: three routes agree (same Mechanism => same limit cycle)" :
                         "FAIL: routes diverge -- X(40) spread = $spread")
+
+# -- Beyond the one-call layer: validate, explicit config, problem, code export --
+# (the abstract Brusselator species carry no element table, so validate reports
+#  warnings rather than errors on this toy system)
+rep = validate(mech_programmatic)
+println("\nvalidate(mech_programmatic): ", length(rep.errors), " errors, ",
+        length(rep.warnings), " warnings")
+
+config = convenience_config(:kinetic)             # mode symbol -> MechanismConfig
+println("convenience_config(:kinetic) -> ", typeof(config),
+        "  (BatchReactor's mode kwarg expands to the same config)")
+reactor = BatchReactor(mech_yaml; mode=:kinetic)  # one-call convenience entry
+sys_b   = extract_system(reactor)                 # the ODESystem behind the reactor
+
+prob  = build_problem(reactor, Dict("X"=>1.0, "Y"=>0.5), (0.0, 40.0))
+sol_b = solve(prob, Tsit5(); reltol=1e-9, abstol=1e-9)   # problem/algorithm separation
+println("build_problem + solve:  X(40) = ",
+        round(Float64(sol_b(40.0; idxs=_var(sys_b, "X"))), digits=6), "  (== simulate)")
+
+rhs_code = generate_function(sys_b)   # standalone RHS Julia code (an Expr)
+jac_code = generate_jacobian(sys_b)   # standalone Jacobian Julia code (an Expr)
+println("code export: generate_function -> ", typeof(rhs_code),
+        ", generate_jacobian -> ", typeof(jac_code))
 
 # -- Limit-cycle statistics + portrait (last route's sol; all routes agree) --
 sys = extract_system(ChemPhaseSystem(mech_yaml))
