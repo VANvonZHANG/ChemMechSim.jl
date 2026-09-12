@@ -34,5 +34,5 @@ using Test
 
     points = read(joinpath(out_dir, "jacobian_sparsity_points.csv"), String)
     @test !occursin("bench,h2o2", points)
-    @test !isfile(joinpath(out_dir, "fig07_jacobian_sparsity.png"))
+    @test !isfile(joinpath(out_dir, "fig04_jacobian_sparsity.png"))
 end

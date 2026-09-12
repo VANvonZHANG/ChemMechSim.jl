@@ -1,5 +1,7 @@
 #!/usr/bin/env julia
-# Fig. 7 Jacobian nonzero-pattern workflow.
+# Fig. 4 Jacobian nonzero-pattern workflow.
+# Default mechanisms are the three paper benchmarks in ascending size:
+# GRI-Mech 3.0, FFCM 2.0, Aramco 3.0.
 #
 # Run from the package root:
 #   julia --project=. examples/perf/jacobian_sparsity_figure.jl
@@ -7,7 +9,7 @@
 #   julia --project=. examples/perf/jacobian_sparsity_figure.jl --sources sharded,bench
 #
 # Outputs under examples/perf/output/ by default:
-#   fig07_jacobian_sparsity.{svg,pdf,png}
+#   fig04_jacobian_sparsity.{svg,pdf,png}
 #   jacobian_sparsity_summary.csv
 #   jacobian_sparsity_points.csv
 
@@ -23,20 +25,22 @@ const DEFAULT_OUT_DIR = joinpath(HERE, "output")
 const DEFAULT_BENCH_CSV = joinpath(DEFAULT_OUT_DIR, "bench_matrix.csv")
 
 struct MechSpec
-    name::String
+    name::String    # short key used in CSVs and on the CLI
+    label::String   # display name used in figure titles
     yaml::String
 end
 
 const MECHS = Dict(
-    "gri30" => MechSpec("gri30", joinpath(HERE, "..", "mechanism", "gri30.yaml")),
-    "aramco" => MechSpec("aramco", joinpath(HERE, "..", "mechanism", "AramcoMech3.0.yaml")),
-    "ffcm2" => MechSpec("ffcm2", joinpath(HERE, "..", "mechanism", "FFCM2.yaml")),
-    "h2o2" => MechSpec("h2o2", joinpath(HERE, "..", "mechanism", "h2o2.yaml")),
+    "gri30" => MechSpec("gri30", "GRI-Mech 3.0", joinpath(HERE, "..", "mechanism", "gri30.yaml")),
+    "aramco" => MechSpec("aramco", "Aramco 3.0", joinpath(HERE, "..", "mechanism", "AramcoMech3.0.yaml")),
+    "ffcm2" => MechSpec("ffcm2", "FFCM 2.0", joinpath(HERE, "..", "mechanism", "FFCM2.yaml")),
+    "h2o2" => MechSpec("h2o2", "H2-O2", joinpath(HERE, "..", "mechanism", "h2o2.yaml")),
 )
 
 struct PatternData
     source::String
     mech::String
+    label::String
     n_states::Int
     n_nonzeros::Int
     density_pct::Float64
@@ -62,7 +66,7 @@ function _usage()
       julia --project=. examples/perf/jacobian_sparsity_figure.jl [options]
 
     Options:
-      --mechs LIST          Comma list: gri30,aramco,ffcm2,h2o2. Default: gri30,aramco
+      --mechs LIST          Comma list: gri30,aramco,ffcm2,h2o2. Default: gri30,ffcm2,aramco
       --sources LIST        Comma list: sharded,mtk,bench. Default: sharded
       --out-dir DIR         Output directory. Default: examples/perf/output
       --bench-csv FILE      bench_matrix.csv path for source=bench
@@ -79,7 +83,7 @@ end
 
 function parse_args(args::Vector{String})
     cfg = Dict{Symbol,Any}(
-        :mechs => ["gri30", "aramco"],
+        :mechs => ["gri30", "ffcm2", "aramco"],
         :sources => ["sharded"],
         :out_dir => DEFAULT_OUT_DIR,
         :bench_csv => DEFAULT_BENCH_CSV,
@@ -148,7 +152,7 @@ function _pattern(source, spec::MechSpec, J::SparseMatrixCSC)
     rows, cols = _sparse_points(J)
     n = size(J, 1)
     nz = nnz(J)
-    return PatternData(source, spec.name, n, nz, 100 * nz / n^2, rows, cols)
+    return PatternData(source, spec.name, spec.label, n, nz, 100 * nz / n^2, rows, cols)
 end
 
 function _system_for(mech)
@@ -268,7 +272,7 @@ function _plot_patterns_loaded(patterns::Vector{PatternData}, out_dir::String)
     for (i, p) in enumerate(patterns)
         ax = CairoMakie.Axis(
             fig[1, i];
-            title="$(uppercase(p.mech)): $(p.n_states) states, nnz=$(p.n_nonzeros), density=$(_fmt(p.density_pct; digits=1))%",
+            title="$(p.label): $(p.n_states) states, nnz=$(p.n_nonzeros), density=$(_fmt(p.density_pct; digits=1))%",
             xlabel="state index",
             ylabel=i == 1 ? "state index" : "",
             aspect=CairoMakie.DataAspect(),
@@ -281,7 +285,7 @@ function _plot_patterns_loaded(patterns::Vector{PatternData}, out_dir::String)
     end
 
     for ext in ("svg", "pdf", "png")
-        path = joinpath(out_dir, "fig07_jacobian_sparsity.$ext")
+        path = joinpath(out_dir, "fig04_jacobian_sparsity.$ext")
         CairoMakie.save(path, fig; dpi=300)
         println("wrote $path")
     end
