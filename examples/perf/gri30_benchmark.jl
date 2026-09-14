@@ -7,10 +7,13 @@
 # the real perf bottleneck for large mechanisms — NOT the linear-solver choice.
 #
 # Stages per mechanism:
-#   build   = build_problem(jac=true, reaction_sharded) → lowering + mtkcompile + Jac codegen
-#   cold    = first solve → Julia JIT compiles the generated code + integrates
-#   warm    = second solve → native code cached, integrate only
-#   jit_compile = cold − warm → the one-time Julia compilation cost
+#   parse         = load_mechanism(yaml) → Mechanism
+#   lower         = BatchReactor(...) → lower_to_mtk + mtkcompile (produces the ODESystem)
+#   build_problem = build_problem(jac=true, reaction_sharded) → RHS / sharded-Jac codegen + assembly
+#   build         = parse + lower + build_problem
+#   cold          = first solve → Julia JIT compiles the generated code + integrates
+#   warm          = second solve → native code cached, integrate only
+#   jit_compile   = cold − warm → the one-time Julia compilation cost
 using ChemMechSim
 using OrdinaryDiffEq: FBDF
 using SciMLBase: solve
@@ -29,25 +32,46 @@ const MECHS = [
 ]
 
 mkpath(joinpath(@__DIR__, "output"))
-const FCSV = open(joinpath(@__DIR__, "output", "bench_pipeline.csv"), "w")
-println(FCSV, "mech,n_species,n_reactions,n_states,build_s,cold_s,warm_s,jit_compile_s")
 
-@printf("%-8s %5s %5s %6s %8s %8s %8s %11s  %s\n", "mech", "sp", "rxn", "st", "build", "cold", "warm", "jit_compile", "retcode")
+# ---- untimed warmup pass: force compilation of the parse/lower/build/solve harness on a ----
+# tiny mechanism, so the per-mechanism stage times below measure work, not harness JIT
+# (without this, the FIRST mechanism's parse/lower/build_problem absorb one-time compilation
+#  of the YAML parser, the lowering pipeline and the codegen path).
+let yaml = joinpath(@__DIR__, "..", "mechanism", "h2o2.yaml")
+    mech = load_mechanism(yaml)
+    c_tot = P0 / (R * 1500.0)
+    X0 = Dict("H2" => 2.0, "O2" => 1.0, "N2" => 3.76)
+    u0 = Dict(sp.name => get(X0, sp.name, 0.0) * c_tot / 7.76 for sp in mech.species); u0["T"] = 1500.0
+    reactor = BatchReactor(mech; mode=:adiabatic_constV, checks=false)
+    prob = build_problem(reactor, u0, (0.0, 1e-6); jac=true, jac_strategy=:reaction_sharded)
+    sol = solve(prob, FBDF(); reltol=1e-8, abstol=1e-12)
+    println("warmup (h2o2, untimed): ", sol.retcode)
+end
+
+const FCSV = open(joinpath(@__DIR__, "output", "bench_pipeline.csv"), "w")
+println(FCSV, "mech,n_species,n_reactions,n_states,parse_s,lower_s,build_problem_s,build_s,cold_s,warm_s,jit_compile_s")
+
+@printf("%-8s %5s %5s %6s %7s %7s %7s %8s %8s %7s %9s  %s\n", "mech", "sp", "rxn", "st", "parse", "lower", "bprob", "build", "cold", "warm", "jit", "retcode")
 println("-"^78)
 
 for (name, yaml, T0, X0) in MECHS
-    mech = load_mechanism(yaml)
+    t_parse = @elapsed mech = load_mechanism(yaml)
     nsp, nrx = length(mech.species), length(mech.reactions)
     c_tot = P0 / (R * T0)
     u0 = Dict(sp.name => get(X0, sp.name, 0.0) * c_tot for sp in mech.species); u0["T"] = T0
-    reactor = BatchReactor(mech; mode=:adiabatic_constV, checks=false)
-    t_build = @elapsed prob = build_problem(reactor, u0, TSPAN; jac=true, jac_strategy=:reaction_sharded)
+    t_lower = @elapsed reactor = BatchReactor(mech; mode=:adiabatic_constV, checks=false)
+    t_bprob = @elapsed prob = build_problem(reactor, u0, TSPAN; jac=true, jac_strategy=:reaction_sharded)
+    t_build = t_parse + t_lower + t_bprob
     n_st = length(prob.u0)
     t_cold = @elapsed sol = solve(prob, FBDF(); reltol=1e-8, abstol=1e-12)
     t_warm = @elapsed solve(prob, FBDF(); reltol=1e-8, abstol=1e-12)
     jit = t_cold - t_warm
-    @printf("%-8s %5d %5d %6d %8.2f %8.2f %8.2f %11.2f  %s\n", name, nsp, nrx, n_st, t_build, t_cold, t_warm, jit, sol.retcode)
-    println(FCSV, join([name, nsp, nrx, n_st, round(t_build, digits=2), round(t_cold, digits=2), round(t_warm, digits=2), round(jit, digits=2)], ","))
+    @printf("%-8s %5d %5d %6d %7.2f %7.2f %7.2f %8.2f %8.2f %7.2f %9.2f  %s\n",
+            name, nsp, nrx, n_st, t_parse, t_lower, t_bprob, t_build, t_cold, t_warm, jit, sol.retcode)
+    println(FCSV, join([name, nsp, nrx, n_st,
+                        round(t_parse, digits=2), round(t_lower, digits=2), round(t_bprob, digits=2),
+                        round(t_build, digits=2), round(t_cold, digits=2), round(t_warm, digits=2),
+                        round(jit, digits=2)], ","))
     flush(FCSV)
 end
 close(FCSV)
