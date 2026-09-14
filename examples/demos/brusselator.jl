@@ -59,7 +59,7 @@ spread = maximum(X40) - minimum(X40)
 println(spread < 1e-6 ? "PASS: three routes agree (same Mechanism => same limit cycle)" :
                         "FAIL: routes diverge -- X(40) spread = $spread")
 
-# -- Beyond the one-call layer: validate, explicit config, problem, code export --
+# -- Beyond the three routes: validate, config, one call vs step by step, code export --
 # Each block names the data-structure transformation it performs.
 # (the abstract Brusselator species carry no element table, so validate reports
 #  warnings rather than errors on this toy system)
@@ -81,19 +81,34 @@ reactor = BatchReactor(mech_yaml; mode=:kinetic)
 # BatchReactor -> ODESystem: the symbolic equations behind the reactor.
 sys_b = extract_system(reactor)
 
-# BatchReactor + u0 Dict(species => value) + tspan -> SciMLBase.ODEProblem
-# (numeric problem carrying the RHS and Jacobian functions).
+# -- One call vs step by step: both rungs reach the same ODESolution --
+
+# One call: BatchReactor + tspan + u0 -> ODESolution
+#   (simulate composes build_problem + solve).
+sol_one = simulate(reactor, (0.0, 40.0); u0=Dict("X"=>1.0, "Y"=>0.5),
+                   reltol=1e-9, abstol=1e-9)
+
+# Step by step, the MTK intermediate explicit:
+#   Mechanism + MechanismConfig -> ODESystem: the direct lowering primitive;
+#   ChemPhaseSystem's constructor (and hence extract_system) calls exactly this.
+sys_d = lower_to_mtk(mech_yaml; config=config)
+#   BatchReactor + u0 Dict(species => value) + tspan -> SciMLBase.ODEProblem
+#   (numeric problem carrying the RHS and Jacobian functions).
 prob = build_problem(reactor, Dict("X"=>1.0, "Y"=>0.5), (0.0, 40.0))
-# ODEProblem + algorithm -> ODESolution: the problem/algorithm separation lets
-# any OrdinaryDiffEq integrator be swapped in with one argument.
+#   ODEProblem + algorithm -> ODESolution: the problem/algorithm separation
+#   lets any OrdinaryDiffEq integrator be swapped in with one argument.
 sol_b = solve(prob, Tsit5(); reltol=1e-9, abstol=1e-9)
-println("build_problem + solve:  X(40) = ",
+
+println("one call:     X(40) = ",
+        round(Float64(sol_one(40.0; idxs=_var(sys_b, "X"))), digits=6))
+println("step by step: X(40) = ",
         round(Float64(sol_b(40.0; idxs=_var(sys_b, "X"))), digits=6), "  (== simulate)")
 
 # ODESystem -> standalone RHS / Jacobian Julia code (Exprs independent of
-# ChemMechSim; first use compiles them to native functions).
-rhs_code = generate_function(sys_b)
-jac_code = generate_jacobian(sys_b)
+# ChemMechSim; first use compiles them to native functions). Works directly
+# on the bare intermediate returned by lower_to_mtk.
+rhs_code = generate_function(sys_d)
+jac_code = generate_jacobian(sys_d)
 println("code export: generate_function -> ", typeof(rhs_code),
         ", generate_jacobian -> ", typeof(jac_code))
 
