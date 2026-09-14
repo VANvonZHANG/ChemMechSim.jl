@@ -48,9 +48,9 @@ X40 = Float64[]
 sol = nothing
 for (tag, m) in routes
     global sol
-    phase = ChemPhaseSystem(m)
-    sys   = extract_system(phase)
-    sol   = simulate(phase, (0.0, 40.0); u0=Dict("X"=>1.0, "Y"=>0.5), reltol=1e-9, abstol=1e-9)
+    phase = ChemPhaseSystem(m)     # Mechanism -> ChemPhaseSystem (holds lowered ODESystem)
+    sys   = extract_system(phase)  # ChemPhaseSystem -> ODESystem
+    sol   = simulate(phase, (0.0, 40.0); u0=Dict("X"=>1.0, "Y"=>0.5), reltol=1e-9, abstol=1e-9)  # -> ODESolution
     x40   = Float64(sol(40.0; idxs=_var(sys, "X")))
     push!(X40, x40)
     println("  ", rpad(tag, 18), "X(40) = ", round(x40, digits=6))
@@ -60,25 +60,40 @@ println(spread < 1e-6 ? "PASS: three routes agree (same Mechanism => same limit 
                         "FAIL: routes diverge -- X(40) spread = $spread")
 
 # -- Beyond the one-call layer: validate, explicit config, problem, code export --
+# Each block names the data-structure transformation it performs.
 # (the abstract Brusselator species carry no element table, so validate reports
 #  warnings rather than errors on this toy system)
+
+# Mechanism (plain structs) -> ValidationReport {errors, warnings, info};
+# pure data-layer checks, no MTK involved.
 rep = validate(mech_programmatic)
 println("\nvalidate(mech_programmatic): ", length(rep.errors), " errors, ",
         length(rep.warnings), " warnings")
 
-config = convenience_config(:kinetic)             # mode symbol -> MechanismConfig
-println("convenience_config(:kinetic) -> ", typeof(config),
-        "  (BatchReactor's mode kwarg expands to the same config)")
-reactor = BatchReactor(mech_yaml; mode=:kinetic)  # one-call convenience entry
-sys_b   = extract_system(reactor)                 # the ODESystem behind the reactor
+# mode Symbol -> MechanismConfig (the six axis values of the :kinetic preset);
+# BatchReactor's mode kwarg expands to exactly this config.
+config = convenience_config(:kinetic)
+println("convenience_config(:kinetic) -> ", typeof(config))
 
-prob  = build_problem(reactor, Dict("X"=>1.0, "Y"=>0.5), (0.0, 40.0))
-sol_b = solve(prob, Tsit5(); reltol=1e-9, abstol=1e-9)   # problem/algorithm separation
+# Mechanism + mode Symbol -> BatchReactor; the reactor wraps a ChemPhaseSystem,
+# which lowers the Mechanism into a unit-carrying ModelingToolkit.ODESystem.
+reactor = BatchReactor(mech_yaml; mode=:kinetic)
+# BatchReactor -> ODESystem: the symbolic equations behind the reactor.
+sys_b = extract_system(reactor)
+
+# BatchReactor + u0 Dict(species => value) + tspan -> SciMLBase.ODEProblem
+# (numeric problem carrying the RHS and Jacobian functions).
+prob = build_problem(reactor, Dict("X"=>1.0, "Y"=>0.5), (0.0, 40.0))
+# ODEProblem + algorithm -> ODESolution: the problem/algorithm separation lets
+# any OrdinaryDiffEq integrator be swapped in with one argument.
+sol_b = solve(prob, Tsit5(); reltol=1e-9, abstol=1e-9)
 println("build_problem + solve:  X(40) = ",
         round(Float64(sol_b(40.0; idxs=_var(sys_b, "X"))), digits=6), "  (== simulate)")
 
-rhs_code = generate_function(sys_b)   # standalone RHS Julia code (an Expr)
-jac_code = generate_jacobian(sys_b)   # standalone Jacobian Julia code (an Expr)
+# ODESystem -> standalone RHS / Jacobian Julia code (Exprs independent of
+# ChemMechSim; first use compiles them to native functions).
+rhs_code = generate_function(sys_b)
+jac_code = generate_jacobian(sys_b)
 println("code export: generate_function -> ", typeof(rhs_code),
         ", generate_jacobian -> ", typeof(jac_code))
 
