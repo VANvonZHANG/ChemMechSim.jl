@@ -133,15 +133,20 @@ function parse_cli(args::Vector{String})
 end
 
 # ---- build one mechanism's problem (jac=true, reaction-sharded) + sample the Jacobian ----
+# t_build covers the whole construction: parse + lowering/mtkcompile (BatchReactor) + build_problem.
 function build_for_mech(mc::MechConfig, tspan::Tuple{Float64,Float64})
-    mech = load_mechanism(mc.yaml)
-    c_tot = mc.P0 / (R_GAS * mc.T0)
-    u0 = Dict(sp.name => get(mc.X0, sp.name, 0.0) * c_tot for sp in mech.species)
-    u0["T"] = mc.T0
-    reactor = BatchReactor(mech; mode=:adiabatic_constV, checks=false)   # checks=false: K_c unit-fold
+    local mech, reactor, u0
+    t_load = @elapsed begin
+        mech = load_mechanism(mc.yaml)
+        c_tot = mc.P0 / (R_GAS * mc.T0)
+        u0 = Dict(sp.name => get(mc.X0, sp.name, 0.0) * c_tot for sp in mech.species)
+        u0["T"] = mc.T0
+    end
+    t_react = @elapsed reactor = BatchReactor(mech; mode=:adiabatic_constV, checks=false)   # checks=false: K_c unit-fold
     sys = extract_system(reactor)
     T_idx = findfirst(s -> String(getname(s)) == "T", unknowns(sys))
-    t_build = @elapsed prob = build_problem(reactor, u0, tspan; jac=true, jac_strategy=:reaction_sharded)
+    t_bprob = @elapsed prob = build_problem(reactor, u0, tspan; jac=true, jac_strategy=:reaction_sharded)
+    t_build = t_load + t_react + t_bprob
     J_proto = isdefined(prob.f, :jac_prototype) ? prob.f.jac_prototype : nothing
     n_states = length(prob.u0)
     nz = J_proto === nothing ? 0 : nnz(J_proto)

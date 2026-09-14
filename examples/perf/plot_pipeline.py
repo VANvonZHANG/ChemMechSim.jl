@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Pipeline-cost decomposition figure (build / JIT compile / warm integrate).
+"""Pipeline-cost decomposition figure (parse / lowering / build_problem / JIT / warm).
 
 Reads output/bench_pipeline.csv (from gri30_benchmark.jl) and produces a stacked
-horizontal bar chart: each mechanism is one bar, segmented into build (lowering),
-jit_compile (one-time Julia compilation), and warm (integration). Visually shows
-that JIT compilation dominates and scales with mechanism size.
+horizontal bar chart with TWO bars per mechanism:
+  - coarse bar: build (total) / JIT compile / warm integrate
+  - fine bar:   parse / lowering / build_problem / JIT compile / warm integrate
+Both bars have the same total height (build total = parse + lowering +
+build_problem); the fine bar splits the build segment into its three stages.
+Visually shows that JIT compilation dominates and scales with mechanism size.
 
 Usage: python3 examples/perf/plot_pipeline.py [--out-dir examples/perf/output]
 """
@@ -23,8 +26,32 @@ mpl.rcParams.update({
     "legend.frameon": False,
 })
 
-COLORS = {"build": "#2166ac", "jit_compile": "#b2182b", "warm": "#1b7837"}
-LABELS = {"build": "build (lowering)", "jit_compile": "JIT compile", "warm": "warm integrate"}
+COLORS = {
+    "build":         "#4393c3",   # total (coarse bar only)
+    "parse":         "#d1e5f0",   # build split: three shades of blue
+    "lower":         "#92c5de",
+    "build_problem": "#2166ac",
+    "jit_compile":   "#b2182b",
+    "warm":          "#1b7837",
+}
+LABELS = {
+    "build":         "build (total)",
+    "parse":         "  parse",
+    "lower":         "  lowering + mtkcompile",
+    "build_problem": "  build_problem (codegen)",
+    "jit_compile":   "JIT compile",
+    "warm":          "warm integrate",
+}
+
+
+def stacked(ax, y, df, stages, height):
+    left = np.zeros(len(df))
+    for stage in stages:
+        vals = df[f"{stage}_s"].values
+        ax.barh(y, vals, left=left, height=height, color=COLORS[stage],
+                label=LABELS[stage], edgecolor="white", linewidth=0.3)
+        left += vals
+    return left
 
 
 def main():
@@ -39,18 +66,19 @@ def main():
 
     mechs = df["mech"].tolist()
     y = np.arange(len(mechs))
+    off, h = 0.20, 0.34   # bar pair: coarse above (y-off), fine below (y+off)
 
-    fig, ax = plt.subplots(figsize=(4.5, 2.5))
-    left = np.zeros(len(mechs))
-    for stage in ("build", "jit_compile", "warm"):
-        vals = df[f"{stage}_s"].values
-        ax.barh(y, vals, left=left, height=0.5, color=COLORS[stage], label=LABELS[stage],
-                edgecolor="white", linewidth=0.3)
-        if stage == "jit_compile":
-            for i, v in enumerate(vals):
-                ax.text(left[i] + v / 2, y[i], f"{v:.0f}s", ha="center", va="center",
-                        fontsize=5, color="white", fontweight="bold")
-        left += vals
+    fig, ax = plt.subplots(figsize=(4.5, 2.8))
+
+    # coarse bar: build total / JIT / warm; label the JIT seconds (the headline number)
+    total = stacked(ax, y - off, df, ("build", "jit_compile", "warm"), h)
+    jit = df["jit_compile_s"].values
+    for i in range(len(df)):
+        ax.text(total[i] - jit[i] / 2, y[i] - off, f"{jit[i]:.0f}s", ha="center",
+                va="center", fontsize=5, color="white", fontweight="bold")
+
+    # fine bar: parse / lowering / build_problem / JIT / warm
+    stacked(ax, y + off, df, ("parse", "lower", "build_problem", "jit_compile", "warm"), h)
 
     ax.set_yticks(y)
     ax.set_yticklabels([f"{m}\n({r} sp)" for m, r in zip(mechs, df["n_species"])])
