@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pipeline-cost decomposition figure, two panels, no log scale.
 
-Reads output/bench_pipeline.csv (from gri30_benchmark.jl):
+Reads output/bench_pipeline.csv (from bench_pipeline_stages.jl):
   (a) stacked horizontal bars, linear scale with a BROKEN x axis (0–52 s and
       190–260 s) so GRI-Mech 3.0 (~13 s) and FFCM 2.0 (~40 s) keep real width
       next to Aramco 3.0 (~249 s; post PLOG-runtime-fix medians); segments: build/JIT/warm;
@@ -52,7 +52,7 @@ def main():
     d = args.out_dir
     csv = os.path.join(d, "bench_pipeline.csv")
     if not os.path.exists(csv):
-        raise SystemExit(f"no {csv} — run gri30_benchmark.jl first")
+        raise SystemExit(f"no {csv} — run bench_pipeline_stages.jl first")
     df = pd.read_csv(csv).sort_values("n_states")
     mechs = df["mech"].tolist()
     ylabels = [f"{MECH_LABEL[m]}\n({r} sp)" for m, r in zip(mechs, df["n_species"])]

@@ -58,12 +58,12 @@ See [`validation/README.md`](validation/README.md) for details.
 
 | Script | Measures |
 |---|---|
-| `gri30_benchmark.jl` | GRI30 pipeline breakdown — lowering + Jacobian codegen + solve timing (cold vs warm) on the default (no-jac) path |
-| `bench_matrix.jl` + `plot_bench.py` | mechanism × linear-solver benchmark matrix on the `jac=true` path (GRI30/FFCM2/Aramco × 5 linear solvers): end-to-end solve time + a standalone linear-solve micro-benchmark + trajectory accuracy vs a reference. Streams CSVs → publication figures. Run on the target machine: `julia --project=. examples/perf/bench_matrix.jl --repeats 5`, then `python3 examples/perf/plot_bench.py`. |
+| `bench_pipeline_stages.jl` | Pipeline-stage decomposition benchmark — parse / lowering / build_problem / cold / warm (JIT = cold − warm) per mechanism (GRI30/FFCM2/Aramco) on the reaction-sharded Jacobian path, with an untimed h2o2 warmup; writes `output/bench_pipeline.csv` |
+| `bench_linsolver_matrix.jl` + `plot_bench.py` | mechanism × linear-solver benchmark matrix on the `jac=true` path (GRI30/FFCM2/Aramco × 5 linear solvers): end-to-end solve time + a standalone linear-solve micro-benchmark + trajectory accuracy vs a reference. Streams CSVs → publication figures. Run on the target machine: `julia --project=. examples/perf/bench_linsolver_matrix.jl --repeats 5`, then `python3 examples/perf/plot_bench.py`. |
 | `jacobian_sparsity_figure.jl` | Fig. 7 Jacobian nonzero-pattern workflow. Supports all three data paths: `--sources sharded` for the reaction-sharded sparse template used for the publication figure; `--sources mtk` for `ModelingToolkit.calculate_jacobian(sys; sparse=true)` cross-checks on small/medium mechanisms; `--sources bench` to import `bench_matrix.csv` summary statistics when only `nnz`/density, not row-col coordinates, are needed. |
 
 > `aramco_linsolve_probe.jl` (the single-mech prototype) and `aramco_ffcm2_plog_load.jl`
-> (parse/lower coverage) were removed — `bench_matrix.jl` supersedes the probe, and parse
+> (parse/lower coverage) were removed — `bench_linsolver_matrix.jl` supersedes the probe, and parse
 > failures surface as BUILD_FAIL rows in the matrix.
 
 ## mechanism/

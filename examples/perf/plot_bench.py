@@ -113,7 +113,7 @@ def accuracy_table(path, out_dir):
     with pd.option_context("display.width", 120, "display.max_columns", None):
         print(df.to_string(index=False))
     with open(os.path.join(out_dir, "bench_accuracy_readable.txt"), "w") as f:
-        f.write("Trajectory accuracy vs umfpack reference (per bench_matrix.jl)\n\n")
+        f.write("Trajectory accuracy vs umfpack reference (per bench_linsolver_matrix.jl)\n\n")
         with pd.option_context("display.width", 120):
             f.write(df.to_string(index=False) + "\n")
 
@@ -125,7 +125,7 @@ def main():
     d = args.out_dir
     mtx = os.path.join(d, "bench_matrix.csv")
     if not os.path.exists(mtx):
-        sys.exit(f"no {mtx} — run `julia --project=. examples/perf/bench_matrix.jl ...` first")
+        sys.exit(f"no {mtx} — run `julia --project=. examples/perf/bench_linsolver_matrix.jl ...` first")
     df = pd.read_csv(mtx)
     df = df[df["wall_s"].notna()]                      # drop CRASH / WARMUP_CRASH rows
     if df.empty:

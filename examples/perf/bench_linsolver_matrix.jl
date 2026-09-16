@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# bench_matrix.jl — mechanism × linear-solver benchmark matrix (paper-grade perf data).
+# bench_linsolver_matrix.jl — mechanism × linear-solver benchmark matrix (paper-grade perf data).
 #
 # For each mechanism × each linear solver × N repeats: end-to-end FBDF(jac=true) solve,
 # PLUS a standalone linear-solve micro-benchmark (isolates W\b per-call cost from the
@@ -7,7 +7,7 @@
 # reproducibility metadata YAML for plotting.
 #
 # Run (framework only — run on the target machine for paper numbers):
-#   julia --project=. examples/perf/bench_matrix.jl \
+#   julia --project=. examples/perf/bench_linsolver_matrix.jl \
 #       [--mechs gri30,ffcm2,aramco] [--solvers klu,umfpack,sparspak,mumps,pardiso] \
 #       [--repeats 1] [--no-warmup] [--reltol 1e-8] [--abstol 1e-12] [--tspan-ms 5.0] \
 #       [--no-microbench] [--no-accuracy] [--quick] [--out-dir DIR]
@@ -302,7 +302,7 @@ function main()
     mech_names  = [strip(lowercase(String(m))) for m in split(cfg.mechs, ",")]
     solver_names= [strip(lowercase(String(s))) for s in split(cfg.solvers, ",")]
     sconfigs = solver_configs(solver_names)
-    println("bench_matrix: mechs=$mech_names  solvers=$(getfield.(sconfigs, :name))  " *
+    println("bench_linsolver_matrix: mechs=$mech_names  solvers=$(getfield.(sconfigs, :name))  " *
             "repeats=$(cfg.repeats)  warmup=$(cfg.warmup)  microbench=$(cfg.microbench)  accuracy=$(cfg.accuracy)")
     have_ref = any(c.name == REF_NAME for c in sconfigs)
     cfg.accuracy && !have_ref && println("[accuracy] '$REF_NAME' not in solver set — accuracy column will be empty")
