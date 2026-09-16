@@ -129,12 +129,69 @@ end
 
 "Numeric PLOG rate constant k(T,P) — MTK-free standalone eval (Cantera comparison, plots, tests).
  Uses P_STD as the dimensionless-reference scaffold (its value cancels in the ratios).
- Groups same-pressure points (sum k_i(T) at each unique P) before interpolating — Cantera semantics."
+ Groups same-pressure points (sum k_i(T) at each unique P) before log-log interpolation —
+ Cantera semantics. Allocation-free bracket walk: only the (at most two) groups bracketing
+ P are evaluated; the old evaluate-all-channels path computed and discarded the rest."
 function plog_rate(kin::PlogRate, T::Real, P::Real)
-    ks = [_arrhenius_body(p.A, p.b, p.Ea / R_GAS, T) for p in kin.points]
-    log_Pi = [log(p.P / P_STD) for p in kin.points]      # may have duplicates (helper groups)
-    s_ks, s_lp = _plog_sum_at_pressures(ks, log_Pi)
-    return _plog_interpolate(s_ks, log(P / P_STD), s_lp)
+    log_P = log(P / P_STD)
+    st, i0, i1, j0, j1, lp_lo, lp_hi = _plog_bracket(kin, log_P)
+    k_lo = _plog_group_k(kin, i0, i1, T)
+    (st === :lo) && return k_lo
+    k_hi = _plog_group_k(kin, j0, j1, T)
+    (st === :hi) && return k_hi
+    f = (log_P - lp_lo) / (lp_hi - lp_lo)
+    return _plog_interp_segment(k_lo, k_hi, f)      # k_lo·(k_hi/k_lo)^f — multiplicative form
+end
+
+"""
+    _plog_bracket(kin, log_P) -> (state, i0, i1, j0, j1, lp_lo, lp_hi)
+
+Single allocation-free walk over `kin.points` finding the pressure group bracketing
+`log_P = log(P/P_STD)`. Points with exactly equal log(P/P_STD) form one group (their rates
+sum — Cantera same-pressure semantics); groups are strictly increasing because the parser
+sorts points by P (cantera_yaml.jl).
+
+- `:lo`      — `log_P <= lp` of the first group (low clamp, exact node, or the degenerate
+              single-group case): only `(i0, i1)` is meaningful.
+- `:between` — strictly inside: lo group `i0:i1`, hi group `j0:j1`. At `log_P == lp_hi`
+              the caller computes f = 1.0 exactly, reproducing the old segment-fold value
+              at nodes (NOT the raw group sum).
+- `:hi`      — `log_P` above the last group (high clamp): only `(j0, j1)` is meaningful.
+"""
+function _plog_bracket(kin::PlogRate, log_P::Real)
+    pts = kin.points
+    n = length(pts)
+    gs = 1                        # current group: channels gs:ge, log-pressure lp
+    ge = 1
+    lp = log(pts[1].P / P_STD)
+    pgs = pge = 0                 # next-lower group: channels pgs:pge, log-pressure plp
+    plp = 0.0
+    have_prev = false
+    while true
+        while ge < n && log(pts[ge + 1].P / P_STD) == lp
+            ge += 1               # extend group over same-pressure points
+        end
+        if log_P <= lp
+            return (have_prev ? (:between, pgs, pge, gs, ge, plp, lp)
+                              : (:lo, gs, ge, gs, ge, lp, lp))
+        end
+        have_prev = true
+        pgs, pge, plp = gs, ge, lp
+        ge == n && return (:hi, gs, ge, gs, ge, lp, lp)
+        gs = ge + 1
+        ge = gs
+        lp = log(pts[gs].P / P_STD)
+    end
+end
+
+"Sum of Arrhenius k(T) over channels i:j (one pressure group), accumulated in channel
+order — the same order (and thus the same Float64 rounding) as the old grouped-sum path."
+function _plog_group_k(kin::PlogRate, i::Int, j::Int, T::Real)
+    s = _arrhenius_body(kin.points[i].A, kin.points[i].b, kin.points[i].Ea / R_GAS, T)
+    for m in (i + 1):j
+        s += _arrhenius_body(kin.points[m].A, kin.points[m].b, kin.points[m].Ea / R_GAS, T)
+    end
+    return s
 end
 
 "Arrhenius kᵢ(T)=A·T^b·exp(-θ/T) and its T-derivative kᵢ'=kᵢ·(b/T+θ/T²). Returns (kᵢ, kᵢ')."
