@@ -2,7 +2,7 @@
 """Cantera external baseline: cold (first) vs warm (second) solve time.
 
 Runs the SAME ignition problem (const-V adiabatic CH4-air, T0=1500 K, P0=1 atm,
-phi=1, 5 ms) through Cantera's ReactorNet for GRI30 and Aramco 3.0. Reports
+phi=1, 5 ms) through Cantera's ReactorNet for GRI30, FFCM 2.0 and Aramco 3.0. Reports
 cold + warm wall-clock time so the paper can compare:
   - Cantera cold (C++ pre-compiled — just load + solve)
   - Cantera warm (re-stepping — cheap)
@@ -22,6 +22,7 @@ T_END = 5.0e-3
 
 MECHS = [
     ("gri30",  os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mechanism", "gri30.yaml")),
+    ("ffcm2",  os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mechanism", "FFCM2.yaml")),
     ("aramco", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mechanism", "AramcoMech3.0.yaml")),
 ]
 
