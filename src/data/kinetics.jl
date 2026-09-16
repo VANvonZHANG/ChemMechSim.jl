@@ -198,16 +198,30 @@ end
 _arrhenius_k_dkT(A, b, θ, T) = (k = A*T^b*exp(-θ/T); (k, k*(b/T + θ/T^2)))
 
 "∂k/∂T for PLOG (analytic, MTK-free, generic over Real). Same pressure-grouping + log-log
- interpolation structure as plog_rate, with each point using kᵢ' instead of kᵢ. In-segment
- (f is P-only): ∂k/∂T = k·[(1-f)(k_lo'/k_lo) + f(k_hi'/k_hi)]. Low/high clamps → endpoint kᵢ'."
+ interpolation structure as plog_rate, with each group using Σkᵢ' instead of Σkᵢ.
+ In-segment (f is P-only): ∂k/∂T = k·[(1-f)(k_lo'/k_lo) + f(k_hi'/k_hi)]. Clamps → endpoint
+ group's Σkᵢ'. Allocation-free (shares _plog_bracket with plog_rate)."
 function plog_dkdT(kin::PlogRate, T::Real, P::Real)
-    kd = [_arrhenius_k_dkT(p.A, p.b, p.Ea / R_GAS, T) for p in kin.points]
-    ks  = [first(x) for x in kd]
-    dks = [last(x)  for x in kd]
-    logPi = [log(p.P / P_STD) for p in kin.points]
-    s_ks,  s_lp = _plog_sum_at_pressures(ks,  logPi)
-    s_dks, _   = _plog_sum_at_pressures(dks, logPi)
-    return _plog_interp_derivT(s_ks, s_dks, log(P / P_STD), s_lp)
+    log_P = log(P / P_STD)
+    st, i0, i1, j0, j1, lp_lo, lp_hi = _plog_bracket(kin, log_P)
+    k_lo, dk_lo = _plog_group_k_dkT(kin, i0, i1, T)
+    (st === :lo) && return dk_lo
+    k_hi, dk_hi = _plog_group_k_dkT(kin, j0, j1, T)
+    (st === :hi) && return dk_hi
+    f = (log_P - lp_lo) / (lp_hi - lp_lo)
+    seg_k = k_lo^(1 - f) * k_hi^f                 # power form — verbatim from the old path
+    return seg_k * ((1 - f) * dk_lo / k_lo + f * dk_hi / k_hi)
+end
+
+"Per-group sums of (Σk, Σk′) over channels i:j, accumulated in channel order (same
+rounding as the old separately-summed ks/dks arrays)."
+function _plog_group_k_dkT(kin::PlogRate, i::Int, j::Int, T::Real)
+    k, dk = _arrhenius_k_dkT(kin.points[i].A, kin.points[i].b, kin.points[i].Ea / R_GAS, T)
+    for m in (i + 1):j
+        km, dkm = _arrhenius_k_dkT(kin.points[m].A, kin.points[m].b, kin.points[m].Ea / R_GAS, T)
+        k += km; dk += dkm
+    end
+    return (k, dk)
 end
 
 "∂k/∂P for PLOG (analytic, MTK-free). In-segment: ∂k/∂P = k·ln(k_hi/k_lo)·(1/P)/(logPᵢ₊₁−logPᵢ).
