@@ -175,7 +175,7 @@ end
     @test kin.points[1].A ≈ 1.2e15
     @test kin.points[1].Ea ≈ 0.0
     # gri30 (no PLOG) still loads unchanged
-    gri = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    gri = load_mechanism(joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml"))
     @test length(gri.reactions) > 0
     @test !any(r -> r.kinetics isa PlogRate, gri.reactions)
 end

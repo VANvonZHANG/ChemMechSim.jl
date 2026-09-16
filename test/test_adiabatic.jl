@@ -227,7 +227,7 @@ end
 end
 
 @testset ":fixedT const-V: P is a differential state" begin
-    mech = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    mech = load_mechanism(joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml"))
     phase = ChemMechSim.ChemPhaseSystem(mech; config=convenience_config(:fixedT))
     sys = ChemMechSim.extract_system(phase)
     unk_names = Set(String(ModelingToolkit.getname(u)) for u in unknowns(sys))

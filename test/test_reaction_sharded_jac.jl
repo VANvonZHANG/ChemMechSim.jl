@@ -249,7 +249,7 @@ end
 end
 
 @testset "reaction-sharded ThermoReverse reuses opaque keq" begin
-    mech = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    mech = load_mechanism(joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml"))
     rxidx = findfirst(r -> r.reverse_policy isa ChemMechSim.ThermoReverse &&
                            r.kinetics isa ChemMechSim.ElementaryArrhenius,
                       mech.reactions)
