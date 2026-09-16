@@ -84,49 +84,6 @@ end
 "One interpolation segment (multiplicative form, dimensionless ratio → passes dim check)."
 _plog_interp_segment(k_lo, k_hi, f) = k_lo * (k_hi / k_lo)^f
 
-"Full PLOG interpolation with low/high clamping. ks = N k_i(T) values; log_P = ln(P/P_ref);
- log_Pi = N ln(P_i/P_ref) (ascending). Folds ifelse from the high end (Num-safe: builds one
- nested ifelse expression when called with symbolic inputs)."
-function _plog_interpolate(ks, log_P, log_Pi)
-    n = length(ks)
-    n == length(log_Pi) || error("_plog_interpolate: ks ($(length(ks))) / log_Pi ($(length(log_Pi))) length mismatch")
-    n == 1 && return ks[1]                              # degenerate single-point → constant rate
-    result = ks[n]                                      # high clamp
-    for i in (n - 1):-1:1
-        f = (log_P - log_Pi[i]) / (log_Pi[i + 1] - log_Pi[i])
-        seg = _plog_interp_segment(ks[i], ks[i + 1], f)
-        # log_P ≤ log_Pi[i]   → low-side clamp ks[i]
-        # log_Pi[i] < log_P ≤ log_Pi[i+1] → this segment
-        # else → whatever we'd built above
-        result = ifelse(log_P <= log_Pi[i], ks[i],
-                        ifelse(log_P <= log_Pi[i + 1], seg, result))
-    end
-    return result
-end
-
-"Group points by unique log-pressure (after sort), summing ks within each group. Returns
- (unique_ks, unique_log_Pi) for downstream _plog_interpolate. Pure arithmetic, generic.
- Matches Cantera's same-pressure PLOG semantics (rates sum at each pressure, then interpolate).
- Assumes ks/log_Pi are already sorted ascending by log_Pi (the parser sorts by P before building
- PlogRate). Exact Float64 equality on log_Pi is safe: Pa-converted atm values from the same YAML
- entry produce bit-identical log_Pi (same Float64 multiply + log call)."
-function _plog_sum_at_pressures(ks, log_Pi)
-    n = length(ks)
-    n == length(log_Pi) || error("_plog_sum_at_pressures: length mismatch")
-    out_ks = Any[]; out_lp = Any[]
-    i = 1
-    while i ≤ n
-        j = i
-        s = ks[i]
-        while j + 1 ≤ n && log_Pi[j + 1] == log_Pi[i]   # same pressure (exact-equal: log_Pi are log(P/P_STD), Float64)
-            j += 1; s += ks[j]
-        end
-        push!(out_ks, s); push!(out_lp, log_Pi[i])
-        i = j + 1
-    end
-    return (out_ks, out_lp)
-end
-
 "Numeric PLOG rate constant k(T,P) — MTK-free standalone eval (Cantera comparison, plots, tests).
  Uses P_STD as the dimensionless-reference scaffold (its value cancels in the ratios).
  Groups same-pressure points (sum k_i(T) at each unique P) before log-log interpolation —
@@ -238,38 +195,6 @@ function plog_dkdP(kin::PlogRate, T::Real, P::Real)
     return seg_k * log(k_hi / k_lo) * (1 / P) / (lp_hi - lp_lo)
 end
 
-"Segment-fold for ∂k/∂T (ks=N summed k, dks=N summed k'). Folds high→low like _plog_interpolate."
-function _plog_interp_derivT(ks, dks, log_P, log_Pi)
-    n = length(ks)
-    n == 1 && return dks[1]
-    out = dks[n]                                  # high clamp
-    for i in (n - 1):-1:1
-        f = (log_P - log_Pi[i]) / (log_Pi[i + 1] - log_Pi[i])
-        klo, khi = ks[i], ks[i + 1]
-        seg_k = klo^(1 - f) * khi^f
-        seg_d = seg_k * ((1 - f) * dks[i] / klo + f * dks[i + 1] / khi)
-        out = ifelse(log_P <= log_Pi[i], dks[i],
-                     ifelse(log_P <= log_Pi[i + 1], seg_d, out))
-    end
-    return out
-end
-
-"Segment-fold for ∂k/∂P (ks=N summed k). Clamps → 0."
-function _plog_interp_derivP(ks, log_P, log_Pi, P)
-    n = length(ks)
-    n == 1 && return 0.0
-    out = 0.0                                     # high clamp
-    for i in (n - 1):-1:1
-        klo, khi = ks[i], ks[i + 1]
-        f = (log_P - log_Pi[i]) / (log_Pi[i + 1] - log_Pi[i])
-        seg_k = klo^(1 - f) * khi^f
-        seg_d = seg_k * log(khi / klo) * (1 / P) / (log_Pi[i + 1] - log_Pi[i])
-        out = ifelse(log_P <= log_Pi[i], 0.0,
-                     ifelse(log_P <= log_Pi[i + 1], seg_d, out))
-    end
-    return out
-end
-
 struct ChebyshevRate <: AbstractKinetics end
 
 # —— generic formula bodies (pure arithmetic; MTK-free; Real and symbolic Num both work) ——
@@ -360,8 +285,9 @@ needs_P(::AbstractKinetics) = false
 # —— PLOG symbolic lowering moved to src/lowering/kinetics.jl (opaque call node) ——
 # PLOG k(T,P) is now emitted as a registered Julia call `plog_kf(T,P,id)` with analytic
 # ∂k/∂T, ∂k/∂P (the sin→cos pattern), so calculate_jacobian stays cheap. The numeric
-# helpers plog_rate / plog_dkdT / plog_dkdP / _plog_interpolate / _plog_sum_at_pressures
-# / _arrhenius_dimless_body all stay here (data layer, MTK-free).
+# helpers plog_rate / plog_dkdT / plog_dkdP (allocation-free bracket walk, 2026-09-16:
+# the old Any[]-grouping path allocated ~4.7 KB per call and dominated FFCM/Aramco warm
+# solves) / _arrhenius_dimless_body all stay here (data layer, MTK-free).
 
 "PLOG is pressure-dependent."
 needs_P(kin::PlogRate) = true
