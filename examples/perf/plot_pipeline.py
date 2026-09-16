@@ -2,9 +2,9 @@
 """Pipeline-cost decomposition figure, two panels, no log scale.
 
 Reads output/bench_pipeline.csv (from gri30_benchmark.jl):
-  (a) stacked horizontal bars, linear scale with a BROKEN x axis (0–85 s and
-      470–530 s) so GRI-Mech 3.0 (~11 s) and FFCM 2.0 (~64 s) keep real width
-      next to Aramco 3.0 (~511 s, Julia 1.12 medians); segments: build/JIT/warm;
+  (a) stacked horizontal bars, linear scale with a BROKEN x axis (0–52 s and
+      190–260 s) so GRI-Mech 3.0 (~13 s) and FFCM 2.0 (~40 s) keep real width
+      next to Aramco 3.0 (~249 s; post PLOG-runtime-fix medians); segments: build/JIT/warm;
   (b) build breakdown only, linear scale (0–60 s): each mechanism's build bar
       split into parse / lowering / build_problem.
 
@@ -64,8 +64,8 @@ def main():
     # ---- (a) broken-axis stacked bars: same bars drawn on both axes ----
     y, totals = stacked_barh(ax1, df, ("build", "jit_compile", "warm"), A_COLORS, A_LABELS)
     stacked_barh(ax2, df, ("build", "jit_compile", "warm"), A_COLORS, A_LABELS)
-    ax1.set_xlim(0, 85)    # GRI (~11 s) and FFCM (~64 s) live fully here
-    ax2.set_xlim(470, 530)  # Aramco JIT tail + warm (~511 s total)
+    ax1.set_xlim(0, 52)    # GRI (~13 s) and FFCM (~40 s) live fully here
+    ax2.set_xlim(190, 260)  # Aramco JIT tail + warm (~249 s total)
     ax1.set_title("(a) stacked, linear", loc="left", fontsize=7)
     ax1.set_xlabel("time (s)", fontsize=6)
 
@@ -73,13 +73,13 @@ def main():
     # JIT labels: on the left range where the segment lives inside it
     for i in range(len(df)):
         c = totals[i] - jit[i] / 2
-        if 4 < c < 80 and jit[i] > 8:
+        if 4 < c < 48 and jit[i] > 8:
             ax1.text(c, y[i], f"{jit[i]:.0f}s", ha="center", va="center",
                      fontsize=5, color="white", fontweight="bold")
     # Aramco's JIT tail + total end live on the right range
     for i in range(len(df)):
-        if totals[i] > 470:  # only Aramco crosses into the right range
-            ax2.text((470 + totals[i] - df["warm_s"].values[i]) / 2, y[i],
+        if totals[i] > 190:  # only Aramco crosses into the right range
+            ax2.text((190 + totals[i] - df["warm_s"].values[i]) / 2, y[i],
                      f"{jit[i]:.0f}s", ha="center", va="center",
                      fontsize=5, color="white", fontweight="bold")
             ax2.text(totals[i] + 4, y[i], f"{totals[i]:.0f}s", ha="left",
