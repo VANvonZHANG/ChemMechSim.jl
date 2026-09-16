@@ -1,7 +1,8 @@
 using Test, ModelingToolkit
 using ChemMechSim
 using DynamicQuantities
-using ChemMechSim: PlogPoint, PlogRate, plog_rate, symbolic_kf, RateCtx, needs_P,
+using ChemMechSim: PlogPoint, PlogRate, plog_rate, plog_dkdT, plog_dkdP,
+                   symbolic_kf, RateCtx, needs_P,
                    plog_kf, plog_kf_dT, plog_kf_dP
 import ModelingToolkit: substitute, value, get_variables, getname, getdefault
 
@@ -133,4 +134,123 @@ end
     @test plog_rate(kin, 1000.0, 1e6) ≈ 1e7          # at P=1e6
     # between: f=0.5 at log-mid → 4e9·(1e7/4e9)^0.5
     @test plog_rate(kin, 1000.0, sqrt(1e5*1e6)) ≈ 4e9 * (1e7/4e9)^0.5
+end
+
+# —— 2026-09-16 零分配重写的保真网：oracle = 旧（分配型）实现的逐字拷贝 ————————————
+# 逐位对照 + @allocated==0。旧实现细节见 git 历史本 testset 引入前的 src/data/kinetics.jl。
+struct _OraclePt; P::Float64; A::Float64; b::Float64; Ea::Float64; end
+
+_orr_arr(A, b, θ, T) = A * T^b * exp(-θ / T)
+function _orr_k_dkT(A, b, θ, T)
+    k = A * T^b * exp(-θ / T)
+    return (k, k * (b / T + θ / T^2))
+end
+const _ORR_R = 8.314
+const _ORR_PSTD = 1.0e5
+_orr_seg(k_lo, k_hi, f) = k_lo * (k_hi / k_lo)^f
+function _orr_group(ks, log_Pi)
+    out_ks = Float64[]; out_lp = Float64[]
+    i = 1
+    while i ≤ length(ks)
+        j = i; s = ks[i]
+        while j + 1 ≤ length(ks) && log_Pi[j + 1] == log_Pi[i]
+            j += 1; s += ks[j]
+        end
+        push!(out_ks, s); push!(out_lp, log_Pi[i])
+        i = j + 1
+    end
+    return (out_ks, out_lp)
+end
+function _orr_rate(kin, T, P)
+    pts = kin.points
+    ks = [_orr_arr(p.A, p.b, p.Ea / _ORR_R, T) for p in pts]
+    lp = [log(p.P / _ORR_PSTD) for p in pts]
+    s_ks, s_lp = _orr_group(ks, lp)
+    log_P = log(P / _ORR_PSTD); n = length(s_ks)
+    n == 1 && return s_ks[1]
+    result = s_ks[n]
+    for i in (n - 1):-1:1
+        f = (log_P - s_lp[i]) / (s_lp[i + 1] - s_lp[i])
+        seg = _orr_seg(s_ks[i], s_ks[i + 1], f)
+        result = ifelse(log_P <= s_lp[i], s_ks[i],
+                        ifelse(log_P <= s_lp[i + 1], seg, result))
+    end
+    return result
+end
+function _orr_dkdT(kin, T, P)
+    pts = kin.points
+    kd = [_orr_k_dkT(p.A, p.b, p.Ea / _ORR_R, T) for p in pts]
+    ks = [first(x) for x in kd]; dks = [last(x) for x in kd]
+    lp = [log(p.P / _ORR_PSTD) for p in pts]
+    s_ks, s_lp = _orr_group(ks, lp); s_dks, _ = _orr_group(dks, lp)
+    log_P = log(P / _ORR_PSTD); n = length(s_ks)
+    n == 1 && return s_dks[1]
+    out = s_dks[n]
+    for i in (n - 1):-1:1
+        f = (log_P - s_lp[i]) / (s_lp[i + 1] - s_lp[i])
+        klo, khi = s_ks[i], s_ks[i + 1]
+        seg_k = klo^(1 - f) * khi^f
+        seg_d = seg_k * ((1 - f) * s_dks[i] / klo + f * s_dks[i + 1] / khi)
+        out = ifelse(log_P <= s_lp[i], s_dks[i],
+                     ifelse(log_P <= s_lp[i + 1], seg_d, out))
+    end
+    return out
+end
+function _orr_dkdP(kin, T, P)
+    pts = kin.points
+    ks = [_orr_arr(p.A, p.b, p.Ea / _ORR_R, T) for p in pts]
+    lp = [log(p.P / _ORR_PSTD) for p in pts]
+    s_ks, s_lp = _orr_group(ks, lp)
+    log_P = log(P / _ORR_PSTD); n = length(s_ks)
+    n == 1 && return 0.0
+    out = 0.0
+    for i in (n - 1):-1:1
+        klo, khi = s_ks[i], s_ks[i + 1]
+        f = (log_P - s_lp[i]) / (s_lp[i + 1] - s_lp[i])
+        seg_k = klo^(1 - f) * khi^f
+        seg_d = seg_k * log(khi / klo) * (1 / P) / (s_lp[i + 1] - s_lp[i])
+        out = ifelse(log_P <= s_lp[i], 0.0,
+                     ifelse(log_P <= s_lp[i + 1], seg_d, out))
+    end
+    return out
+end
+
+@testset "PLOG zero-alloc rewrite is bit-identical to the old implementation" begin
+    # 6 channels, duplicate pressure at 1e4 (helper pair), nonzero b/Ea
+    kin6 = PlogRate([PlogPoint(1e3, 1e12, -0.5, 2e4),
+                     PlogPoint(1e4, 3e15,  0.3, 5e4),
+                     PlogPoint(1e4, 7e14,  0.2, 4e4),
+                     PlogPoint(1e5, 2e13, -0.1, 1e5),
+                     PlogPoint(1e6, 5e11,  0.0, 6e4),
+                     PlogPoint(1e7, 8e10,  0.5, 3e4)])
+    Ts = [300.0, 800.0, 1500.0, 2500.0]
+    # below range, log grid through range, exact nodes, above range
+    Ps = vcat([1e2], 10.0 .^ (2.0:0.25:7.0), [1e3, 1e4, 1e5, 1e6, 1e7, 3e7])
+    for T in Ts, P in Ps
+        @test isequal(plog_rate(kin6, T, P),  _orr_rate(kin6, T, P))
+        @test isequal(plog_dkdT(kin6, T, P),  _orr_dkdT(kin6, T, P))
+        @test isequal(plog_dkdP(kin6, T, P),  _orr_dkdP(kin6, T, P))
+    end
+    # degenerate single-channel PlogRate (programmatic-only; parser forbids it)
+    kin1 = PlogRate([PlogPoint(5e4, 1e13, 0.25, 3e4)])
+    for T in Ts, P in Ps
+        @test isequal(plog_rate(kin1, T, P), _orr_rate(kin1, T, P))
+        @test isequal(plog_dkdT(kin1, T, P), _orr_dkdT(kin1, T, P))
+        @test isequal(plog_dkdP(kin1, T, P), _orr_dkdP(kin1, T, P))
+    end
+end
+
+@testset "PLOG runtime calls allocate nothing" begin
+    kin6 = PlogRate([PlogPoint(1e3, 1e12, -0.5, 2e4),
+                     PlogPoint(1e4, 3e15,  0.3, 5e4),
+                     PlogPoint(1e4, 7e14,  0.2, 4e4),
+                     PlogPoint(1e5, 2e13, -0.1, 1e5),
+                     PlogPoint(1e6, 5e11,  0.0, 6e4),
+                     PlogPoint(1e7, 8e10,  0.5, 3e4)])
+    plog_rate(kin6, 1500.0, 101325.0)   # warm-up: compile outside the measurement
+    plog_dkdT(kin6, 1500.0, 101325.0)
+    plog_dkdP(kin6, 1500.0, 101325.0)
+    @test (@allocated plog_rate(kin6, 1500.0, 101325.0)) == 0
+    @test (@allocated plog_dkdT(kin6, 1500.0, 101325.0)) == 0
+    @test (@allocated plog_dkdP(kin6, 1500.0, 101325.0)) == 0
 end
