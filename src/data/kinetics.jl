@@ -224,13 +224,18 @@ function _plog_group_k_dkT(kin::PlogRate, i::Int, j::Int, T::Real)
     return (k, dk)
 end
 
-"∂k/∂P for PLOG (analytic, MTK-free). In-segment: ∂k/∂P = k·ln(k_hi/k_lo)·(1/P)/(logPᵢ₊₁−logPᵢ).
- Clamps → 0 (k constant w.r.t. P outside range)."
+"∂k/∂P for PLOG (analytic, MTK-free). In-segment:
+ ∂k/∂P = k_lo^(1-f)·k_hi^f · ln(k_hi/k_lo)·(1/P)/(lp_hi−lp_lo). Clamps → 0 (k constant
+ w.r.t. P outside range). Allocation-free (shares _plog_bracket with plog_rate)."
 function plog_dkdP(kin::PlogRate, T::Real, P::Real)
-    ks = [_arrhenius_body(p.A, p.b, p.Ea / R_GAS, T) for p in kin.points]
-    logPi = [log(p.P / P_STD) for p in kin.points]
-    s_ks, s_lp = _plog_sum_at_pressures(ks, logPi)
-    return _plog_interp_derivP(s_ks, log(P / P_STD), s_lp, P)
+    log_P = log(P / P_STD)
+    st, i0, i1, j0, j1, lp_lo, lp_hi = _plog_bracket(kin, log_P)
+    (st === :lo || st === :hi) && return 0.0
+    k_lo = _plog_group_k(kin, i0, i1, T)
+    k_hi = _plog_group_k(kin, j0, j1, T)
+    f = (log_P - lp_lo) / (lp_hi - lp_lo)
+    seg_k = k_lo^(1 - f) * k_hi^f                 # power form — verbatim from the old path
+    return seg_k * log(k_hi / k_lo) * (1 / P) / (lp_hi - lp_lo)
 end
 
 "Segment-fold for ∂k/∂T (ks=N summed k, dks=N summed k'). Folds high→low like _plog_interpolate."
