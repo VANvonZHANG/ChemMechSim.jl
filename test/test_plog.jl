@@ -138,7 +138,15 @@ end
 
 # —— 2026-09-16 零分配重写的保真网：oracle = 旧（分配型）实现的逐字拷贝 ————————————
 # 逐位对照 + @allocated==0。旧实现细节见 git 历史本 testset 引入前的 src/data/kinetics.jl。
-struct _OraclePt; P::Float64; A::Float64; b::Float64; Ea::Float64; end
+
+# Shared 6-channel fixture: duplicate pressure at 1e4 (same-P summing path),
+# nonzero b/Ea; used by the oracle testset and the alloc testset below.
+const _PLOG_TEST_KIN6 = PlogRate([PlogPoint(1e3, 1e12, -0.5, 2e4),
+                                  PlogPoint(1e4, 3e15,  0.3, 5e4),
+                                  PlogPoint(1e4, 7e14,  0.2, 4e4),
+                                  PlogPoint(1e5, 2e13, -0.1, 1e5),
+                                  PlogPoint(1e6, 5e11,  0.0, 6e4),
+                                  PlogPoint(1e7, 8e10,  0.5, 3e4)])
 
 _orr_arr(A, b, θ, T) = A * T^b * exp(-θ / T)
 function _orr_k_dkT(A, b, θ, T)
@@ -216,37 +224,32 @@ function _orr_dkdP(kin, T, P)
 end
 
 @testset "PLOG zero-alloc rewrite is bit-identical to the old implementation" begin
-    # 6 channels, duplicate pressure at 1e4 (helper pair), nonzero b/Ea
-    kin6 = PlogRate([PlogPoint(1e3, 1e12, -0.5, 2e4),
-                     PlogPoint(1e4, 3e15,  0.3, 5e4),
-                     PlogPoint(1e4, 7e14,  0.2, 4e4),
-                     PlogPoint(1e5, 2e13, -0.1, 1e5),
-                     PlogPoint(1e6, 5e11,  0.0, 6e4),
-                     PlogPoint(1e7, 8e10,  0.5, 3e4)])
+    kin6 = _PLOG_TEST_KIN6
     Ts = [300.0, 800.0, 1500.0, 2500.0]
     # below range, log grid through range, exact nodes, above range
     Ps = vcat([1e2], 10.0 .^ (2.0:0.25:7.0), [1e3, 1e4, 1e5, 1e6, 1e7, 3e7])
+    # nested @testset puts "T=… P=…" into the failure summary (plain @test
+    # messages are dropped on 1.12); assertions stay byte-identical.
     for T in Ts, P in Ps
-        @test isequal(plog_rate(kin6, T, P),  _orr_rate(kin6, T, P))
-        @test isequal(plog_dkdT(kin6, T, P),  _orr_dkdT(kin6, T, P))
-        @test isequal(plog_dkdP(kin6, T, P),  _orr_dkdP(kin6, T, P))
+        @testset "T=$T P=$P" begin
+            @test isequal(plog_rate(kin6, T, P),  _orr_rate(kin6, T, P))
+            @test isequal(plog_dkdT(kin6, T, P),  _orr_dkdT(kin6, T, P))
+            @test isequal(plog_dkdP(kin6, T, P),  _orr_dkdP(kin6, T, P))
+        end
     end
     # degenerate single-channel PlogRate (programmatic-only; parser forbids it)
     kin1 = PlogRate([PlogPoint(5e4, 1e13, 0.25, 3e4)])
     for T in Ts, P in Ps
-        @test isequal(plog_rate(kin1, T, P), _orr_rate(kin1, T, P))
-        @test isequal(plog_dkdT(kin1, T, P), _orr_dkdT(kin1, T, P))
-        @test isequal(plog_dkdP(kin1, T, P), _orr_dkdP(kin1, T, P))
+        @testset "T=$T P=$P" begin
+            @test isequal(plog_rate(kin1, T, P), _orr_rate(kin1, T, P))
+            @test isequal(plog_dkdT(kin1, T, P), _orr_dkdT(kin1, T, P))
+            @test isequal(plog_dkdP(kin1, T, P), _orr_dkdP(kin1, T, P))
+        end
     end
 end
 
 @testset "PLOG runtime calls allocate nothing" begin
-    kin6 = PlogRate([PlogPoint(1e3, 1e12, -0.5, 2e4),
-                     PlogPoint(1e4, 3e15,  0.3, 5e4),
-                     PlogPoint(1e4, 7e14,  0.2, 4e4),
-                     PlogPoint(1e5, 2e13, -0.1, 1e5),
-                     PlogPoint(1e6, 5e11,  0.0, 6e4),
-                     PlogPoint(1e7, 8e10,  0.5, 3e4)])
+    kin6 = _PLOG_TEST_KIN6
     plog_rate(kin6, 1500.0, 101325.0)   # warm-up: compile outside the measurement
     plog_dkdT(kin6, 1500.0, 101325.0)
     plog_dkdP(kin6, 1500.0, 101325.0)
