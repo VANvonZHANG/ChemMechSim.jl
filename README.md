@@ -22,7 +22,7 @@ using ChemMechSim
 
 ## Performance — GRI-Mech 3.0 (53 species / 325 reactions)
 
-Measured from `examples/gri30_benchmark.jl` on a fresh Julia process.
+Measured from `examples/perf/bench_pipeline_stages.jl` on a fresh Julia process.
 
 | stage | time | type |
 |-------|------|------|
@@ -35,4 +35,4 @@ Notes:
 - **Steady-state `FBDF` integration is ~1.16 s.** The cold first-solve (≈44.9 s) is dominated by one-time RHS+Jacobian function compilation, not integration — it is paid once per Julia session and the compiled functions are reused on every subsequent solve.
 - **Dense Jacobian codegen (~56 s) and lower+mtkcompile (~35 s) are one-time per mechanism.** ¹ The first run also includes MTK lowering-machinery compilation; subsequent invocations in the same session are faster.
 - Jacobian is dense (≈87.8% / nnz=2560 at 54×54) — sparse exploitation does not pay off at this scale; `FBDF` (dense) is the production solver.
-- See `examples/gri30_benchmark.jl` to reproduce.
+- See `examples/perf/bench_pipeline_stages.jl` to reproduce.

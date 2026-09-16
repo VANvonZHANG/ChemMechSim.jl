@@ -1,5 +1,5 @@
 # Pipeline-cost decomposition across mechanism sizes (compile/warm principle).
-# Run: julia --project=. examples/perf/gri30_benchmark.jl
+# Run: julia --project=. examples/perf/bench_pipeline_stages.jl
 #
 # Demonstrates that the cold (first) solve is dominated by Julia JIT compilation of the
 # MTK-generated RHS + reaction-sharded Jacobian; the warm solve reuses that native code.
