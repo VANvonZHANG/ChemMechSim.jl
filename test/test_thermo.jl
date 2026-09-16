@@ -83,7 +83,7 @@ end
     using ChemMechSim: load_mechanism
 
     # Use a real reversible reaction from GRI30 (has NASA7 + ThermoReverse).
-    mech = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    mech = load_mechanism(joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml"))
     # find a ThermoReverse reaction with Δν != 0 (e.g. A <=> B + C)
     rxidx = findfirst(r -> r.reverse_policy isa ChemMechSim.ThermoReverse &&
                            (sum(values(r.products)) - sum(values(r.reactants))) != 0,
@@ -122,7 +122,7 @@ end
     using ChemMechSim: keq, keq_dT  # registered symbolic functions (Task 2 adds them)
     import ModelingToolkit: equations
 
-    mech = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    mech = load_mechanism(joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml"))
     rxidx = findfirst(r -> r.reverse_policy isa ChemMechSim.ThermoReverse, mech.reactions)
     @test rxidx !== nothing
     # Use :fixedT (T as a parameter) so the ONLY place Tmid_sp could appear is K_c.
@@ -146,7 +146,7 @@ end
     # (keq = dimensionless NASA7 part + inlined (P°/RT)^Δν) achieves this. This test confirms
     # GRI30 (with its mix of dnu=0 and dnu≠0 ThermoReverse reactions) lowers without a unit error.
     import ModelingToolkit: equations
-    mech = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    mech = load_mechanism(joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml"))
     phase = ChemMechSim.ChemPhaseSystem(mech; config=convenience_config(:adiabatic_constV))
     sys = ChemMechSim.extract_system(phase)
     @test length(equations(sys)) > 0                # lowering succeeded (check_units passed)
@@ -161,7 +161,7 @@ end
     using ChemMechSim: KcData, equilibrium_constant, keq, keq_dT
     import ChemMechSim: KEQ_TABLE, KEQ_NEXT_ID
 
-    mech = load_mechanism(joinpath(@__DIR__, "data", "gri30.yaml"))
+    mech = load_mechanism(joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml"))
     # Pick the first ThermoReverse reaction with dnu != 0 (covers both factors of the split)
     rxidx = findfirst(r -> r.reverse_policy isa ChemMechSim.ThermoReverse &&
                            (sum(values(r.products)) - sum(values(r.reactants))) != 0,

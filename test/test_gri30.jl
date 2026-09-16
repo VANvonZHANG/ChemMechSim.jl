@@ -63,7 +63,7 @@ end
 
 # —— Phase 5b Task 2: GRI30 scale characterization ————————————————————————————
 
-const _GRI30_YAML = joinpath(@__DIR__, "data", "gri30.yaml")
+const _GRI30_YAML = joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml")
 
 @testset "Phase 5b: GRI30 load + validate + structure" begin
     mech = load_mechanism(_GRI30_YAML)
