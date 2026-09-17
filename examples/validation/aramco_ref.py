@@ -14,6 +14,7 @@ gas.set_equivalence_ratio(1.0, "CH4", "O2:1,N2:3.76")   # stoichiometric CH4-air
 reactor = ct.IdealGasReactor(gas, energy="on")
 reactor.volume = 1.0
 sim = ct.ReactorNet([reactor])
+sim.rtol, sim.atol = 1e-8, 1e-12   # matched to ChemMechSim's FBDF tolerances
 ts, Ts = [0.0], [T0]
 t_end = 5.0e-3
 while sim.time < t_end:
