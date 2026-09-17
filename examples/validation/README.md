@@ -17,6 +17,9 @@ are written under `output/` and gitignored; `output/` is created on first run.
 Each `<mech>_ref.py` generates a Cantera const-V (and for H2-O2, const-P) ignition
 CSV; the matching `<mech>_ignition.jl` runs ChemMechSim on the same condition, reports
 the ignition-delay relative difference, and saves a CairoMakie comparison plot.
+The Cantera reference runs at the *same* tolerances as ChemMechSim (`rtol=1e-8`,
+`atol=1e-12`) rather than Cantera's stricter defaults, so the comparison isolates
+the model/implementation rather than the integrator tolerance.
 
     python3 examples/validation/h2o2_ref.py        # or gri30_ref.py / ffcm2_ref.py / aramco_ref.py
     julia --project=. examples/validation/h2o2_ignition.jl

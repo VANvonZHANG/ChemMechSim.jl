@@ -21,6 +21,7 @@ def run(yaml_path, out_csv, label):
     reactor = ct.IdealGasReactor(gas, energy="on")
     reactor.volume = 1.0
     sim = ct.ReactorNet([reactor])
+    sim.rtol, sim.atol = 1e-8, 1e-12   # matched to ChemMechSim's FBDF tolerances
 
     rows = []
     t_end = 5.0e-3
@@ -34,7 +35,7 @@ def run(yaml_path, out_csv, label):
     print(f"wrote {out_csv} ({len(rows)} rows, T_max={max(out[:,1]):.1f} K)")
 
 # GRI30 (Cantera built-in)
-run("test/data/gri30.yaml", f"{OUTPUT_DIR}/gri30_ref_species.csv", "GRI30")
+run("examples/mechanism/gri30.yaml", f"{OUTPUT_DIR}/gri30_ref_species.csv", "GRI30")
 # FFCM2 (project fixture)
 run("examples/mechanism/FFCM2.yaml", f"{OUTPUT_DIR}/ffcm2_ref_species.csv", "FFCM2")
 # Aramco 3.0 (project fixture)
