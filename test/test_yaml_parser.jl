@@ -180,6 +180,67 @@ end
     @test !any(r -> r.kinetics isa PlogRate, gri.reactions)
 end
 
+# —— KPP/MCM dialect (kpp-cantera-converter output): 4 parser gaps ——
+
+const _MCM_LIKE_YAML = joinpath(@__DIR__, "data", "mcm_like_minimal.yaml")
+const _NA = 6.02214076e23
+
+@testset "KPP/MCM dialect: activation-energy K + quantity molec" begin
+    ctx = ChemMechSim._parse_units(Dict("length"=>"cm", "quantity"=>"molec",
+                                       "activation-energy"=>"K"))
+    @test ctx.length_m == 0.01
+    @test ctx.ea_J_per_mol == 8.314            # Ea given in K → Ea_SI = Ea_K × R
+    @test ctx.amount_per_mol == _NA            # molecules per mole
+    # A_canon = A_decl × (1/length_m)^(3(1−order)) × amount_per_mol^(order−1)
+    @test ChemMechSim._a_factor(ctx, 1) ≈ 1.0
+    @test ChemMechSim._a_factor(ctx, 2) ≈ 1e-6 * _NA
+    @test ChemMechSim._a_factor(ctx, 3) ≈ 1e-12 * _NA^2
+    # quantity: mol must be bit-for-bit today's behaviour (GRI30/FFCM2/Aramco regression)
+    ctx_mol = ChemMechSim._parse_units(Dict("length"=>"cm", "quantity"=>"mol"))
+    @test ctx_mol.amount_per_mol == 1.0
+    @test ChemMechSim._a_factor(ctx_mol, 1) ≈ 1.0
+    @test ChemMechSim._a_factor(ctx_mol, 2) ≈ 1e-6
+    @test ChemMechSim._a_factor(ctx_mol, 3) ≈ 1e-12
+    # quantity omitted → assumed mol (existing call sites pass only length/Ea)
+    @test ChemMechSim._parse_units(Dict("length"=>"cm")).amount_per_mol == 1.0
+    @test ChemMechSim._parse_units(nothing).amount_per_mol == 1.0
+    # unknown quantity → loud error, never a silent wrong A
+    @test_throws ErrorException ChemMechSim._parse_units(Dict("quantity"=>"furlong"))
+end
+
+@testset "constant-cp thermo parses to nothing (no usable thermo data)" begin
+    th = ChemMechSim._parse_thermo(Dict("model"=>"constant-cp", "T0"=>298.15,
+                                        "h0"=>0, "s0"=>0, "cp0"=>0))
+    @test th === nothing
+end
+
+@testset "load_mechanism: KPP/MCM dialect fixture end-to-end" begin
+    mech = load_mechanism(_MCM_LIKE_YAML)
+    @test length(mech.species) == 8
+    @test mech.elements == String[]                    # phase declares no `elements`
+    @test all(sp -> sp.thermo === nothing, mech.species)       # constant-cp → nothing
+    @test all(sp -> sp.molecular_weight == 0.0, mech.species)  # composition: {}
+    @test length(mech.reactions) == 3
+
+    # three-body, Σν = 3 (O + O2, +1 for [M]); M stripped from the equation by the parser
+    r1 = mech.reactions[1]
+    @test r1.kinetics isa ThirdBodyArrhenius
+    @test r1.kinetics.base.A ≈ 1.5442e-27 * 1e-12 * _NA^2  rtol=1e-9
+    @test r1.kinetics.base.b ≈ -2.6  rtol=1e-9
+    @test r1.kinetics.base.Ea == 0.0
+
+    # elementary bimolecular, Σν = 2
+    r2 = mech.reactions[2]
+    @test r2.kinetics isa ElementaryArrhenius
+    @test r2.kinetics.A ≈ 1.4e-12 * 1e-6 * _NA  rtol=1e-9
+
+    # unimolecular: A unchanged (factor 1), Ea K → J/mol
+    r3 = mech.reactions[3]
+    @test r3.kinetics.A ≈ 1.0e-5  rtol=1e-9
+    @test r3.kinetics.Ea ≈ 100.0 * 8.314  rtol=1e-9
+    @test r3.reverse_policy isa Irreversible            # `=>` in the file
+end
+
 @testset "brusselator.yaml: empty-side source/sink terms (abstract species)" begin
     mech = load_mechanism(joinpath(@__DIR__, "data", "brusselator.yaml"))
     @test length(mech.species) == 2
