@@ -10,12 +10,16 @@
 #     which is evaluated at a FIXED zenith χ0 and frozen. This is the central approximation
 #     of this example: it discards the diurnal cycle, so night-only chemistry (NO3 / N2O5
 #     accumulation) does not appear. χ0 is a CLI argument, default 0 (overhead sun).
-#  2. `sigmoid-branching` -> two constants evaluated at T0. Temperature is fixed in this
-#     scenario, so this is exact at T0 — it is not a temperature law.
+#  2. `sigmoid-branching` -> one constant PER ENTRY, evaluated at T0 and PRESERVING THE SIGN
+#     OF `A`. Temperature is fixed in this scenario, so this is exact at T0 — it is not a
+#     temperature law. Sign preservation matters: the converter splits a sum into one entry per
+#     term, so a negative `A` is a deliberate signed correction, and entries sharing an equation
+#     are meant to be summed downstream. See `_flatten_sigmoid`.
 #
-# It also drops the literal `M` species. The converter declares `M` as a real species, and
-# `_meff` sums over ALL declared species, so leaving it in would double-count it against
-# N2/O2 in [M]_eff.
+# It also drops the literal `M` species. This is hygiene, not a correctness fix: the parser
+# strips `M` from reaction equations before the species lookup, and `u0` leaves `M` at 0 with no
+# reaction producing it, so its `[M]_eff` term is exactly zero either way. Dropping it just
+# avoids a phantom all-zero state.
 #
 # The output is a DERIVED artifact (examples/atmospheric/output/, gitignored). The YAML dict
 # round-trip drops the source file's ~16800 provenance comment lines; that is accepted — the
@@ -46,84 +50,61 @@ function _flatten_photolysis(rx, χ)
 end
 
 """
-The two `sigmoid-branching` channels of one reaction -> two elementary constants at `T0`.
+One `sigmoid-branching` entry -> an `elementary` constant at `T0`, evaluating the converter's
+own formula and PRESERVING THE SIGN OF `A`:
 
-    k_total = |A|·exp(B/T)          σ = 1/(1 + C·exp(D/T))
-    negative-A entry -> k_total·(1 − σ)      positive-A entry -> k_total·σ
+    F = 1 + C·exp(D/T)
+    k = A·exp(B/T)·(1/F)        normally
+    k = A·exp(B/T)·(1 − 1/F)    when is_complement
 
-The A-sign convention was verified against the source file's own `# Original Rate
-Expression` comments for MCM's CH3O2+HO2 pair:
-    CH3OOH = 3.8E-13*EXP(780./TEMP)*(1.-1./(1.+498.*EXP(-1160./TEMP)))
-    HCHO   = 3.8E-13*EXP(780./TEMP)*(1./(1.+498.*EXP(-1160./TEMP)))
+Sign preservation is the whole point, not an oversight. A negative `A` is a deliberate *signed
+correction term*: the converter splits a sum into one entry per term. MCM's CH3O2+HO2 arrives as
+THREE entries — a plain Arrhenius carrying `k_total`, plus two signed sigmoids — and
+ChemMechSim sums duplicate equations natively (`src/lowering/core.jl`), which is exactly how the
+several other signed-correction reactions in this file already work.
 
-Note the converter's own `SigmoidBranchingRate.eval` does NOT reproduce this: it branches on
-`is_complement`, which is `false` for both entries here, so it would return a NEGATIVE rate
-for the (1−σ) channel. We deliberately do not copy that evaluator.
+    <53>   CH3O2 + HO2 = CH3OOH : 3.8E-13*EXP(780./TEMP)*(1.-1./(1.+498.*EXP(-1160./TEMP)))
+    <3778> CH3O2 + HO2 = HCHO  : 3.8E-13*EXP(780./TEMP)*(1./(1.+498.*EXP(-1160./TEMP)))
 
-Asserts the pairing (opposite-sign A, identical B/C/D) so a malformed group errors loudly
-instead of silently mis-assigning a channel.
+⚠ An earlier version of this transform instead PAIRED the two sigmoids, treated `|A|` as
+`k_total`, and emitted σ / (1−σ) channels. That invented a base term which already existed as the
+plain sibling, running the reaction at 2.0× MCM's total rate and 2.1× CH3OOH. Do not
+reintroduce it — and note the test that "covered" it passed, because its fixture omitted the
+plain sibling and so encoded the same misreading.
 """
-function _flatten_sigmoid_pair(group, T0)
-    length(group) == 2 ||
-        error("_flatten_sigmoid_pair: expected exactly 2 channels, got $(length(group))")
-    rxs = sort(group; by = r -> Float64(r["A"]))
-    neg, pos = rxs[1], rxs[2]
-    aneg, apos = Float64(neg["A"]), Float64(pos["A"])
-    aneg < 0 < apos ||
-        error("_flatten_sigmoid_pair: expected one negative and one positive A, got " *
-              "$aneg / $apos")
-    for k in ("B", "C", "D")
-        Float64(neg[k]) == Float64(pos[k]) ||
-            error("_flatten_sigmoid_pair: $k mismatch ($(neg[k]) vs $(pos[k]))")
-    end
-
-    ktot = abs(apos) * exp(Float64(pos["B"]) / T0)
-    σ = 1.0 / (1.0 + Float64(pos["C"]) * exp(Float64(pos["D"]) / T0))
-    mk(r, k) = Dict{Any,Any}(
-        "equation" => r["equation"],
-        "order" => r["order"],
+function _flatten_sigmoid(rx, T0)
+    A = Float64(rx["A"])
+    F = 1.0 + Float64(rx["C"]) * exp(Float64(rx["D"]) / T0)
+    k = A * exp(Float64(rx["B"]) / T0) * (get(rx, "is_complement", false) ? (1.0 - 1.0 / F) : (1.0 / F))
+    out = Dict{Any,Any}(
+        "equation" => rx["equation"],
+        "order" => rx["order"],
         "rate-constant" => Dict{Any,Any}("type" => "arrhenius", "A" => k,
                                          "b" => 0.0, "Ea" => 0.0))
-    return [mk(neg, ktot * (1 - σ)), mk(pos, ktot * σ)]
+    haskey(rx, "duplicate") && (out["duplicate"] = rx["duplicate"])
+    return out
 end
 
-"Reactant side of an equation string — the sigmoid grouping key (the two channels of one
- reaction share reactants and differ only in products)."
-_sigmoid_key(rx) = (strip(split(String(rx["equation"]), "=>")[1]),
-                    Float64(rx["B"]), Float64(rx["C"]), Float64(rx["D"]))
-
-"Transform the whole mechanism dict in place-ish, returning the rewritten reaction list.
- Pure w.r.t. the input dict so it can be unit-tested without file I/O."
+"Transform every reaction of the mechanism dict. MUTATES the dict's reaction list and returns
+ the rewritten list alongside the per-type counts, so a silent no-op is visible."
 function _flatten_mechanism!(mech_dict, χ0, T0)
-    rxs = mech_dict["reactions"]
-
-    # Group sigmoid channels by (reactants, B, C, D) so each pair is flattened as a unit.
-    sig_groups = Dict{Any,Vector{Any}}()
-    for rx in rxs
-        get(rx, "type", nothing) == "sigmoid-branching" || continue
-        push!(get!(sig_groups, _sigmoid_key(rx), Any[]), rx)
-    end
-
     out = Any[]
     n_photo = 0
     n_sig = 0
-    for rx in rxs
+    for rx in mech_dict["reactions"]
         ty = get(rx, "type", nothing)
         if ty == "zenith-angle-photolysis"
             push!(out, _flatten_photolysis(rx, χ0)); n_photo += 1
         elseif ty == "sigmoid-branching"
-            n_sig += 1                       # replaced wholesale by the group pass below
+            # Per-entry, sign-preserving. Entries that share an equation are deliberately left as
+            # duplicates for ChemMechSim to sum — see _flatten_sigmoid.
+            push!(out, _flatten_sigmoid(rx, T0)); n_sig += 1
         else
             push!(out, rx)
         end
     end
-    n_groups = 0
-    for (_, g) in sig_groups
-        append!(out, _flatten_sigmoid_pair(g, T0)); n_groups += 1
-    end
-
     mech_dict["reactions"] = out
-    return (n_photolysis = n_photo, n_sigmoid_channels = n_sig, n_sigmoid_groups = n_groups)
+    return (n_photolysis = n_photo, n_sigmoid = n_sig, reactions = out)
 end
 
 "Drop the converter's literal `M` species from the phase list and the species list."
@@ -163,8 +144,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     println("  zenith-angle-photolysis -> elementary : ", stats.n_photolysis,
             "  (frozen at χ0 = ", round(rad2deg(χ0), digits = 3), "°)")
-    println("  sigmoid-branching channels flattened  : ", stats.n_sigmoid_channels,
-            " in ", stats.n_sigmoid_groups, " pair(s)  (at T0 = ", T0, " K)")
+    println("  sigmoid-branching entries flattened   : ", stats.n_sigmoid,
+            "  (per-entry, sign of A preserved; at T0 = ", T0, " K)")
     println("  literal `M` species dropped           : ", n_M)
 
     # A silent no-op is the failure mode that matters: assert nothing was left behind.
@@ -172,10 +153,23 @@ if abspath(PROGRAM_FILE) == @__FILE__
     left_s = count(r -> get(r, "type", nothing) == "sigmoid-branching", d["reactions"])
     (left_p == 0 && left_s == 0) ||
         error("flatten_photolysis: $left_p photolysis / $left_s sigmoid reactions remain")
-    stats.n_photolysis > 0 ||
-        error("flatten_photolysis: no photolysis reactions found — wrong input file?")
     any(sp -> sp["name"] == "M", d["species"]) &&
         error("flatten_photolysis: `M` still present after _drop_M!")
+
+    # Mechanism-shape invariants. The 24 MB source is gitignored and copied by hand, so a wrong
+    # or stale copy is the likeliest fresh-clone failure — and it would otherwise fail SILENTLY
+    # (the box would still run, and the OH>0 check would still pass). Change these numbers only
+    # when the source mechanism changes.
+    length(d["species"]) == 1842 ||
+        error("flatten_photolysis: expected 1842 species after dropping M, got ",
+              length(d["species"]), " — wrong or stale source file?")
+    stats.n_photolysis == 1041 ||
+        error("flatten_photolysis: expected 1041 photolysis reactions, got ", stats.n_photolysis)
+    stats.n_sigmoid == 2 ||
+        error("flatten_photolysis: expected 2 sigmoid-branching entries, got ", stats.n_sigmoid)
+    length(d["reactions"]) == 5600 ||
+        error("flatten_photolysis: expected 5600 reactions, got ", length(d["reactions"]),
+              " — transform dropped or duplicated some")
 
     mkpath(dirname(DST))
     YAML.write_file(DST, d)

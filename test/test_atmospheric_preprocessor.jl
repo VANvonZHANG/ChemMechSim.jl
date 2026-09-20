@@ -35,41 +35,64 @@ include(joinpath(@__DIR__, "..", "examples", "atmospheric", "tools", "flatten_ph
     @test out_45["rate-constant"]["A"] != out["rate-constant"]["A"]
 end
 
-@testset "sigmoid pairing: k_total split into σ and (1−σ) branches" begin
-    # The real MCM CH3O2+HO2 pair. Ground truth comes from the source file's own
-    # '# Original Rate Expression' comments:
-    #   CH3OOH = 3.8e-13·exp(780/T)·(1 − σ)
-    #   HCHO   = 3.8e-13·exp(780/T)·σ
-    # Negative A marks the (1−σ) branch, positive A the σ branch.
+@testset "sigmoid entries: per-entry evaluator preserving the sign of A" begin
+    # REGRESSION (found in review): the converter emits MCM's CH3O2+HO2 as THREE entries, not
+    # two. MCM's own .eqn is the ground truth:
+    #   <53>   CH3O2 + HO2 = CH3OOH : 3.8E-13*EXP(780./TEMP)*(1.-1./(1.+498.*EXP(-1160./TEMP)))
+    #   <3778> CH3O2 + HO2 = HCHO  : 3.8E-13*EXP(780./TEMP)*(1./(1.+498.*EXP(-1160./TEMP)))
+    # which the converter splits into a plain k_total term plus a SIGNED sigmoid correction:
+    #   plain arrhenius  A=+3.8e-13, Ea=-780        -> k_total
+    #   sigmoid          A=-3.8e-13, is_complement=F -> -k_total·σ
+    #   sigmoid          A=+3.8e-13, is_complement=F -> +k_total·σ
+    # ChemMechSim sums duplicate equations natively, so the correct transform is PER-ENTRY with
+    # A's sign preserved. An earlier version instead paired the two sigmoids and used |A| as
+    # k_total, which double-counted the reaction (2.0x the total sink, 2.1x CH3OOH). The old
+    # test could not see it because its fixture omitted the plain sibling — it encoded the same
+    # misreading as the implementation.
     T0 = 298.0
     a, b, c, d = 3.8e-13, 780.0, 498.0, -1160.0
     σ = 1.0 / (1.0 + c * exp(d / T0))
     ktot = a * exp(b / T0)
 
-    neg = Dict{Any,Any}("equation" => "CH3O2 + HO2 => CH3OOH", "order" => 2,
-                        "type" => "sigmoid-branching", "A" => -a, "B" => b,
-                        "C" => c, "D" => d, "is_complement" => false)
-    pos = Dict{Any,Any}("equation" => "CH3O2 + HO2 => HCHO", "order" => 2,
-                        "type" => "sigmoid-branching", "A" => a, "B" => b,
-                        "C" => c, "D" => d, "is_complement" => false)
+    plain = Dict{Any,Any}("equation" => "CH3O2 + HO2 => CH3OOH", "order" => 2,
+                          "duplicate" => true,
+                          "rate-constant" => Dict{Any,Any}("type" => "arrhenius",
+                                                           "A" => a, "b" => 0.0, "Ea" => -b))
+    sig_neg = Dict{Any,Any}("equation" => "CH3O2 + HO2 => CH3OOH", "order" => 2,
+                            "duplicate" => true, "type" => "sigmoid-branching",
+                            "A" => -a, "B" => b, "C" => c, "D" => d, "is_complement" => false)
+    sig_pos = Dict{Any,Any}("equation" => "CH3O2 + HO2 => HCHO", "order" => 2,
+                            "type" => "sigmoid-branching",
+                            "A" => a, "B" => b, "C" => c, "D" => d, "is_complement" => false)
 
-    g = _flatten_sigmoid_pair([neg, pos], T0)
-    @test length(g) == 2
-    by_eq = Dict(r["equation"] => r for r in g)
-    @test by_eq["CH3O2 + HO2 => CH3OOH"]["rate-constant"]["A"] ≈ ktot * (1 - σ)  rtol=1e-12
-    @test by_eq["CH3O2 + HO2 => HCHO"]["rate-constant"]["A"] ≈ ktot * σ          rtol=1e-12
-    # The two channels must reconstitute the total rate — this is the check that catches a
-    # mis-assigned branch (the converter's own evaluator would give a NEGATIVE rate here).
-    @test sum(r["rate-constant"]["A"] for r in g) ≈ ktot  rtol=1e-12
-    @test all(r -> r["rate-constant"]["b"] == 0.0 && r["rate-constant"]["Ea"] == 0.0, g)
+    out = _flatten_mechanism!(Dict{Any,Any}("reactions" => [plain, sig_neg, sig_pos],
+                                            "phases" => [Dict{Any,Any}("species" => ["M"])],
+                                            "species" => [Dict{Any,Any}("name" => "M")]),
+                             0.0, T0).reactions
 
-    # Malformed groups must ERROR rather than silently mis-assign a channel.
-    @test_throws ErrorException _flatten_sigmoid_pair([neg, neg], T0)      # same sign
-    bad_c = copy(pos); bad_c["C"] = 999.0
-    @test_throws ErrorException _flatten_sigmoid_pair([neg, bad_c], T0)    # C mismatch
-    bad_d = copy(pos); bad_d["D"] = -42.0
-    @test_throws ErrorException _flatten_sigmoid_pair([neg, bad_d], T0)    # D mismatch
-    bad_b = copy(pos); bad_b["B"] = 1.0
-    @test_throws ErrorException _flatten_sigmoid_pair([neg, bad_b], T0)    # B mismatch
-    @test_throws ErrorException _flatten_sigmoid_pair([neg], T0)           # not a pair
+    # Evaluate each entry's rate AT T0 before summing — the plain sibling is an Arrhenius with
+    # Ea = -780 K, so its rate is A·exp(+780/T0) = 5.206e-12, not its raw A = 3.8e-13. (Ea is in
+    # kelvin here, per the file's `activation-energy: K` header, so the law is A·T^b·exp(−Ea/T).)
+    rate_T0(r) = (rc = r["rate-constant"];
+                  Float64(rc["A"]) * T0^Float64(rc["b"]) * exp(-Float64(rc["Ea"]) / T0))
+
+    # Same-equation entries must SUM to MCM's own rate, and the two channels to k_total.
+    ch3ooh = sum(rate_T0(r) for r in out if r["equation"] == "CH3O2 + HO2 => CH3OOH")
+    hcho = sum(rate_T0(r) for r in out if r["equation"] == "CH3O2 + HO2 => HCHO")
+    @test ch3ooh ≈ ktot * (1 - σ)  rtol=1e-12
+    @test hcho ≈ ktot * σ          rtol=1e-12
+    @test ch3ooh + hcho ≈ ktot     rtol=1e-12       # total sink == MCM's total
+    @test ch3ooh ≈ 4.739565564253275e-12  rtol=1e-9 # and not 2x it (the shipped regression)
+end
+
+@testset "is_complement selects the other branch" begin
+    T0 = 298.0
+    a, b, c, d = 2.5e-12, 500.0, 300.0, -900.0
+    σ = 1.0 / (1.0 + c * exp(d / T0))
+    k = a * exp(b / T0)
+    mk(comp) = Dict{Any,Any}("equation" => "X => Y", "order" => 1,
+                             "type" => "sigmoid-branching", "A" => a, "B" => b,
+                             "C" => c, "D" => d, "is_complement" => comp)
+    @test Float64(_flatten_sigmoid(mk(false), T0)["rate-constant"]["A"]) ≈ k * σ     rtol=1e-12
+    @test Float64(_flatten_sigmoid(mk(true),  T0)["rate-constant"]["A"]) ≈ k * (1 - σ) rtol=1e-12
 end

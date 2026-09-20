@@ -65,9 +65,15 @@ are dimensionally correct; the checker just cannot prove it.
    is the direct cost of the preprocessor approach. Re-running with a different `χ₀` gives a
    different frozen-noon box, not a better one.
 
-2. **The 2 `sigmoid-branching` reactions are exact only at T₀ = 298 K.** They are flattened to
-   two constants. That is exact at the operating point, but they are not temperature laws — if
-   you change T, re-run the preprocessor.
+2. **The 2 `sigmoid-branching` entries are exact only at T₀ = 298 K.** Each is flattened to a
+   constant, evaluated at T₀. That is exact at the operating point, but it is not a temperature
+   law — if you change T, re-run the preprocessor.
+
+   Note these two entries are *not* a standalone pair. They are the signed correction and the
+   σ channel of `CH3O2 + HO2`; the third, plain-Arrhenius entry carrying `k_total` is passed
+   through untouched, and the three sum to MCM's own rate. (An earlier version of the
+   preprocessor paired the two sigmoids and invented a `k_total` term, running that reaction at
+   2× MCM's rate. See the warning in `_flatten_sigmoid`.)
 
 3. **Every species has `molecular_weight == 0`** — the converter emits `composition: {}` for all
    of them. Harmless in `state_basis=:concentration`, but it means mass-based or mixing-ratio
@@ -84,9 +90,14 @@ are dimensionally correct; the checker just cannot prove it.
    kept), but it is not a demonstration of the alkane/alkene chemistry. Initialise a VOC (e.g.
    `C2H6`, `C3H8`, `BUT1ENE`) to exercise that.
 
-   What the run *does* demonstrate, and is checked: O3 falls via NOx titration, NO appears from
-   NO2 photolysis, and OH/HO2 rise from zero — so the flattened photolysis really is driving the
-   radical chemistry rather than being a silent no-op.
+   What the run *does* demonstrate, and is checked: OH/HO2 rise from zero and NO appears from NO2
+   photolysis — so the flattened photolysis really is driving the radical chemistry rather than
+   being a silent no-op.
+
+   O3 also **falls** (1.245e-6 → 6.25e-7 mol/m³ over 3 days). That is *not* NOx titration: total
+   NOx is 1e-10 mole fraction ≈ 4.2e-9 mol/m³, some 150× smaller than the O3 decline. It is the
+   HOx cycle — O3 photolysis (`O3 => O1D` at 3.78e-5 s⁻¹, ~12% of which gives OH) plus the 1%
+   H2O, then OH + O3. Photolysis-driven loss, which is the point the example is making.
 
 ## Unrelated known trap: pass a *complete* `u0`
 

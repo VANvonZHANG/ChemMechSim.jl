@@ -90,9 +90,9 @@ t_solve = @elapsed sol = simulate(
 state_index = Dict(String(getname(u)) => i
                    for (i, u) in enumerate(ModelingToolkit.unknowns(sys)))
 
-# Read the trajectory straight out of sol.u. DE solution ragged indexing (`sol[1:end, i]`,
-# `sol[:, i]`) is easy to get subtly wrong: here it silently returned zeros for every species,
-# including ones whose initial value is non-zero.
+# Read the trajectory straight out of sol.u. The DE solution's `sol[i, j]` indexes
+# (component, timestep) — the opposite order from the intuitive reading — so `sol[1:end, k]`
+# is every species at time k, not the k-th species over time. Reading sol.u avoids the trap.
 series(name) = [u[state_index[name]] for u in sol.u]
 
 println("species        initial [mol/m^3]      final [mol/m^3]")
@@ -107,6 +107,7 @@ end
 # zeros and calling it success.
 oh = series("OH")
 maximum(oh) > 0.0 ||
-    error("mcm_box: OH stayed at zero — the photolysis transform silently no-opped. " *
-          "Re-run tools/flatten_photolysis.jl and check its reported counts.")
+    error("mcm_box: OH stayed at zero. Either the photolysis transform silently no-opped " *
+          "(re-run tools/flatten_photolysis.jl and check its reported counts), or the run is " *
+          "at a zenith where every J is zero — check the preprocessor's χ0 argument.")
 @printf("\nOH peak = %.3e mol/m^3  (radical source is active)\n", maximum(oh))
