@@ -4,6 +4,15 @@ using ModelingToolkit
 using ModelingToolkit: unknowns, getname
 using OrdinaryDiffEq
 
+"Count M_eff algebraic variables, whether MTK tore them to `observed` (current behaviour) or
+ left them as `unknowns`. Counting only `observed` would report a false 'no sharing' failure
+ if a future MTK version stopped tearing them."
+function _n_meff(sys)
+    n = count(u -> startswith(String(getname(u)), "M_eff_"), unknowns(sys))
+    n += count(o -> startswith(String(getname(o.lhs)), "M_eff_"), ModelingToolkit.observed(sys))
+    return n
+end
+
 @testset "lower_to_mtk: first-order A -> B" begin
     a = SpeciesData(id=1, name="A")
     b = SpeciesData(id=2, name="B")
@@ -196,9 +205,24 @@ end
                      kinetics=ThirdBodyArrhenius(ElementaryArrhenius(1.0, 0.0, 0.0), Dict(4 => 9.0))),
     ])
     sys = lower_to_mtk(mech; config=MechanismConfig(), checks=false)
+    @test _n_meff(sys) == 2                # 2 distinct α vectors, not 3 reactions
+end
 
-    # M_eff is torn to observed by mtkcompile (verified 2026-09-20), so count it there.
-    meff_names = [String(getname(o.lhs)) for o in ModelingToolkit.observed(sys)
-                  if startswith(String(getname(o.lhs)), "M_eff_")]
-    @test length(meff_names) == 2          # 2 distinct α vectors, not 3 reactions
+@testset "lower_to_mtk shares M_eff on the const-P path" begin
+    # The const-P lowering path threads its OWN memo (core.jl:167) and nothing else covers it:
+    # test_adiabatic.jl contains no third-body/falloff reactions at all, so it cannot detect a
+    # regression here — and this failure mode is SILENT (correct answers, just no sharing).
+    sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B"),
+          SpeciesData(id=3, name="C"), SpeciesData(id=4, name="M")]
+    eff = Dict(4 => 2.0)
+    mk(v) = ThirdBodyArrhenius(ElementaryArrhenius(v, 0.0, 0.0), eff)
+    mech = Mechanism(species=sp, reactions=[
+        ReactionData(reactants=Dict(1 => 1.0, 4 => 1.0), products=Dict(2 => 1.0), kinetics=mk(1.0)),
+        ReactionData(reactants=Dict(2 => 1.0, 4 => 1.0), products=Dict(3 => 1.0), kinetics=mk(1.0)),
+        ReactionData(reactants=Dict(3 => 1.0, 4 => 1.0), products=Dict(1 => 1.0),
+                     kinetics=ThirdBodyArrhenius(ElementaryArrhenius(1.0, 0.0, 0.0), Dict(4 => 9.0))),
+    ])
+    config = MechanismConfig(energy=:isothermal, constraint=:constant_pressure, eos=:ideal_gas)
+    sys = lower_to_mtk(mech; config=config, checks=false)
+    @test _n_meff(sys) == 2                # 2 distinct α vectors, not 3 reactions
 end

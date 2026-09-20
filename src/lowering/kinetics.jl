@@ -254,10 +254,19 @@ symbolic_rate(kin::AbstractKinetics, rx::ReactionData, ctx::RateCtx) =
  `M_eff = Σ α_i·c_i` depends on NOTHING but the composition and α, so the resolved α vector IS
  the identity of M_eff: reactions sharing it share one variable and emit its equation once.
  (Without this, MCM alkanes/alkenes emits 1269 M_eff variables where only 3 distinct α vectors
- exist — 2,338,767 summed terms instead of 5,529.) Emits M_eff_j as an algebraic variable
- (state+algebraic pattern, §7.1): the equation M_eff_j ~ Σα·c is registered in ctx.meff_eqs, and
- M_eff_j is returned for use in the rate. MTK tearing eliminates M_eff_j → observed at compile
- time, so MTK's dim-check processes one symbol per rate instead of an N-term expression."
+ exist — 2,338,767 summed terms instead of 5,529.) Emits a M_eff algebraic variable
+ (state+algebraic pattern, §7.1): the equation M_eff ~ Σα·c is registered in ctx.meff_eqs, and
+ the variable is returned for use in the rate. MTK tearing eliminates it → observed at compile
+ time, so MTK's dim-check processes one symbol per rate instead of an N-term expression
+ (inlining the sum into every rate instead hangs the dim-check — observed on Aramco's 581
+ species, which is why this indirection exists at all).
+
+ Naming: the symbol is `M_eff_<j>` where `j` is the reaction index of the FIRST reaction to use
+ that α vector, NOT of every reaction using it. So `M_eff_3` may be absent from a lowering while
+ `M_eff_4` exists — the name is a mint-time label, not a reaction index. Nothing maps these
+ names back to reactions (`ctx.j` is used only here). Set `ctx.meff_cache` to a fresh memo per
+ call to opt out of sharing — the reaction-sharded path does exactly that, because it builds one
+ reaction's rate at a time and asserts a single M_eff eq per call."
 function _meff(ctx::RateCtx, efficiencies::Dict{SpeciesID,Float64})
     # Resolve α over all species (unlisted → 1.0) and use it as the memo key. Normalizing -0.0
     # to 0.0 keeps the key canonical (isequal(-0.0, 0.0) is false, so they would hash apart).

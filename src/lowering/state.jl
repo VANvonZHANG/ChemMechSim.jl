@@ -1,8 +1,13 @@
 # Lowering context: explicit replacement for the former module-level Ref singletons
 # (the old P°/R/coeff-cache refs). One RateCtx per reaction (carries the
 # per-reaction naming index `j`, stoich `order`, species vars); one ThermoCtx shared
-# across a lower_to_mtk call (R/P°/coeff-cache, T). Threaded explicitly — thread-safe
-# (the old Refs were not). All fields are MTK symbolic objects (or plain Dict/Int).
+# across a lower_to_mtk call (R/P°/coeff-cache, T). Threaded explicitly, so there is no
+# module-level state (the old Refs had it).
+#
+# NOT thread-safe: the contexts deliberately carry SHARED MUTABLE state across a lowering —
+# `coeff_cache`, `meff_eqs` and `meff_cache`. The per-reaction construction loop must stay
+# single-threaded (it is a comprehension). All other fields are MTK symbolic objects or
+# plain Dict/Int.
 
 "Per-reaction lowering context for the symbolic rate path."
 struct RateCtx
