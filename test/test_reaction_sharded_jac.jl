@@ -525,7 +525,7 @@ end
         mech; config=convenience_config(:fixedT), checks=false, reaction_shard_size=0)
 end
 
-@testset "reaction-sharded Jacobian rejects unsupported configs in prototype scope" begin
+@testset "reaction-sharded Jacobian rejects unsupported configs" begin
     mech = Mechanism(
         species = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")],
         reactions = [
@@ -537,14 +537,80 @@ end
         ],
     )
 
+    # :adiabatic_constP lowers to a MOLES basis (path A, pure ODE) — still unsupported.
     err = try
-        ChemMechSim.build_reaction_sharded_jac(mech; config=MechanismConfig(), checks=false)
+        ChemMechSim.build_reaction_sharded_jac(
+            mech; config=convenience_config(:adiabatic_constP), checks=false)
         nothing
     catch e
         e
     end
     @test err isa ArgumentError
     @test occursin("unsupported config", sprint(showerror, err))
+end
+
+@testset "config guard admits :kinetic but still rejects const-P (moles basis)" begin
+    @test ChemMechSim._reaction_sharded_config_ok(MechanismConfig())              # :kinetic
+    @test ChemMechSim._reaction_sharded_config_ok(convenience_config(:fixedT))
+    @test ChemMechSim._reaction_sharded_config_ok(convenience_config(:adiabatic_constV))
+    # const-P's config still READS state_basis=:concentration (the struct default) even
+    # though its lowering is a moles-basis pure-ODE path — so it must be excluded by an
+    # explicit constraint check, not by state_basis.
+    @test !ChemMechSim._reaction_sharded_config_ok(convenience_config(:adiabatic_constP))
+end
+
+@testset "reaction-sharded Jacobian supports the :kinetic zero point" begin
+    # Regression (2026-09-20): the guard required constraint=:constant_volume && eos=:ideal_gas,
+    # so the :kinetic zero point (constraint=:none, eos=:off) was rejected and
+    # build_problem(...; jac=true)'s :auto silently fell back to :none — a no-op for every
+    # atmospheric box model. Neither field is read by the implementation (the sparsity
+    # template self-detects whether P is a state), so the guard was over-restrictive.
+    mech = Mechanism(
+        species = [
+            SpeciesData(id=1, name="A"),
+            SpeciesData(id=2, name="B"),
+            SpeciesData(id=3, name="M"),
+            SpeciesData(id=4, name="C"),
+        ],
+        reactions = [
+            # temperature-dependent elementary: forces T to exist as a parameter
+            ReactionData(reactants = Dict(1 => 1.0), products = Dict(2 => 1.0),
+                         kinetics = ElementaryArrhenius(2.0, 1.5, 3000.0)),
+            # third-body: exercises the M_eff algebraic-variable pattern
+            ReactionData(reactants = Dict(2 => 1.0), products = Dict(4 => 1.0),
+                         kinetics = ThirdBodyArrhenius(
+                             ElementaryArrhenius(3.0, 0.0, 0.0), Dict(3 => 2.0))),
+        ],
+    )
+    config = MechanismConfig()
+    phase = ChemPhaseSystem(mech; config=config, checks=false)
+    sys = extract_system(phase)
+    prob = build_problem(phase, Dict("A" => 2.0, "B" => 0.25, "M" => 3.0, "C" => 0.0),
+                         (0.0, 0.1))
+
+    jac_sharded!, J_proto = ChemMechSim.build_reaction_sharded_jac(
+        mech; config=config, checks=false)
+    J_sharded = copy(J_proto)
+    fill!(J_sharded.nzval, NaN)
+    jac_sharded!(J_sharded, prob.u0, prob.p, 0.0)
+
+    J_full = _full_sparse_jacobian(sys, prob.u0, prob.p, 0.0)
+
+    @test all(isfinite, nonzeros(J_sharded))
+    @test Matrix(J_sharded) ≈ Matrix(J_full)
+end
+
+@testset "build_problem with :kinetic resolves :auto to the sharded Jacobian" begin
+    mech = Mechanism(
+        species = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B")],
+        reactions = [ReactionData(reactants = Dict(1 => 1.0), products = Dict(2 => 1.0),
+                                  kinetics = ElementaryArrhenius(1.0, 0.0, 0.0))],
+    )
+    reactor = BatchReactor(mech; mode=:kinetic, checks=false)
+    prob = build_problem(reactor, Dict("A" => 1.0, "B" => 0.0), (0.0, 0.1); jac=true)
+
+    @test prob.f.jac !== nothing
+    @test prob.f.jac_prototype isa SparseMatrixCSC
 end
 
 @testset "build_problem exposes opt-in reaction_sharded Jacobian strategy" begin

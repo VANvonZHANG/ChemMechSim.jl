@@ -77,21 +77,31 @@ function _assert_reaction_sharded_supported(mech::Mechanism)
     return nothing
 end
 
-"Config guard: the sharded Jacobian supports concentration-basis, ideal-gas, constant-volume
- mechanisms in either :isothermal (fixedT — T is a parameter) or :adiabatic (T is a state)
- energy regimes."
+"Config guard: the sharded Jacobian supports concentration-basis mechanisms in either
+ :isothermal (T is a parameter) or :adiabatic (T is a state) energy regimes.
+
+ `constraint`/`eos` are NOT read by the implementation — `config` appears exactly once in
+ build_reaction_sharded_jac (the `is_adiabatic` flag), and the sparsity template detects for
+ itself whether `P` is a state. The guard therefore whitelists only the constraint values
+ whose lowering leaves the species states as plain concentrations:
+   :none             — the :kinetic zero point (bare ODE, no constraint layer)
+   :constant_volume  — :fixedT / :adiabatic_constV
+ `:constant_pressure` stays excluded: its lowering is a MOLES-basis pure-ODE path (path A),
+ which `state_basis` does not reflect — convenience_config(:adiabatic_constP) still carries
+ the struct default `state_basis=:concentration`."
 _reaction_sharded_config_ok(config::MechanismConfig) =
     config.state_basis === :concentration &&
-    config.constraint === :constant_volume &&
-    config.eos === :ideal_gas &&
+    config.constraint in (:none, :constant_volume) &&
     config.energy in (:isothermal, :adiabatic)
 
 function _assert_reaction_sharded_config(config::MechanismConfig)
     _reaction_sharded_config_ok(config) ||
         throw(ArgumentError(
-            "build_reaction_sharded_jac: unsupported config; supports concentration, ideal-gas, " *
-            "constant-volume :isothermal or :adiabatic. Got energy=$(config.energy) " *
-            "constraint=$(config.constraint) eos=$(config.eos) basis=$(config.state_basis)."))
+            "build_reaction_sharded_jac: unsupported config; supports concentration basis with " *
+            "constraint=:none (the :kinetic zero point) or :constant_volume (:fixedT / " *
+            ":adiabatic_constV), in the :isothermal or :adiabatic energy regime. " *
+            "Got energy=$(config.energy) constraint=$(config.constraint) " *
+            "eos=$(config.eos) basis=$(config.state_basis)."))
     return nothing
 end
 
@@ -222,12 +232,17 @@ function _species_id_to_state_symbol(mech::Mechanism, sys)
     return cvar
 end
 
-function _fixedT_parameter_symbol(sys)
+"T parameter symbol of an isothermal lowered system, or `nothing` when the mechanism has no
+ temperature dependence at all. `lower_to_mtk` deliberately omits T in that case
+ (`create_T = _needs_T(mech) || eos === :ideal_gas || is_adiabatic`), and passing `nothing`
+ is safe by construction: T exists only when `_needs_T(mech)` holds, and every rate law whose
+ `needs_T` is false avoids `ctx.T` entirely — e.g. `symbolic_kf(::ElementaryArrhenius, ctx)`
+ returns its A param directly when `b` and `Ea` are both zero. Reaching for T unconditionally
+ is what excluded eos=:off configs (the :kinetic zero point) from this path."
+function _optional_T_parameter_symbol(sys)
     param_syms = ModelingToolkit.parameters(sys)
     Tidx = findfirst(par -> String(ModelingToolkit.getname(par)) == "T", param_syms)
-    Tidx === nothing &&
-        throw(ArgumentError("build_reaction_sharded_jac: fixedT lowered system has no T parameter."))
-    return param_syms[Tidx]
+    return Tidx === nothing ? nothing : param_syms[Tidx]
 end
 
 function _reaction_sharded_direct_meff(ctx::RateCtx,
@@ -287,7 +302,7 @@ function _reaction_rate_expr_with_meff(rx::ReactionData, mech::Mechanism, sys,
     state_syms = ModelingToolkit.unknowns(sys)
     state_by_name = Dict(String(ModelingToolkit.getname(s)) => s for s in state_syms)
     P = get(state_by_name, "P", nothing)
-    T = haskey(state_by_name, "T") ? state_by_name["T"] : _fixedT_parameter_symbol(sys)
+    T = haskey(state_by_name, "T") ? state_by_name["T"] : _optional_T_parameter_symbol(sys)
     tcx = make_thermo_ctx(T)
     meff_eqs = Any[]
     ctx = RateCtx(mech, cvar, T, j, sum(values(rx.reactants)),
@@ -314,7 +329,7 @@ function _reaction_rate_expr(rx::ReactionData, mech::Mechanism, sys,
     state_syms = ModelingToolkit.unknowns(sys)
     state_by_name = Dict(String(ModelingToolkit.getname(s)) => s for s in state_syms)
     P = get(state_by_name, "P", nothing)
-    T = haskey(state_by_name, "T") ? state_by_name["T"] : _fixedT_parameter_symbol(sys)
+    T = haskey(state_by_name, "T") ? state_by_name["T"] : _optional_T_parameter_symbol(sys)
     tcx = make_thermo_ctx(T)
     meff_eqs = Any[]
     ctx = RateCtx(mech, cvar, T, j, sum(values(rx.reactants)),
