@@ -8,7 +8,7 @@ using ..ChemMechSim: SpeciesData, SpeciesID, ReactionData, ReactionMeta,
                      TroeFalloff, LindemannFalloff, TroeParams,
                      Irreversible, ThermoReverse,
                      NASA7, ThermoDatabase, Mechanism, molecular_weight,
-                     PlogPoint, PlogRate
+                     PlogPoint, PlogRate, N_AVOGADRO
 
 # —— Equation string parser ———————————————————————————————————
 
@@ -68,11 +68,19 @@ end
 # —— Unit conversion context (spec §5.6.3) ——————————————————————————
 
 struct _UnitCtx
-    length_m::Float64      # length unit in meters (cm→0.01, m→1.0)
-    ea_J_per_mol::Float64  # activation-energy factor to J/mol (cal/mol→4.184, J/mol→1.0)
+    length_m::Float64        # length unit in meters (cm→0.01, m→1.0)
+    ea_J_per_mol::Float64    # activation-energy factor to J/mol (cal/mol→4.184, J/mol→1.0, K→8.314)
+    amount_per_mol::Float64  # declared amount units per mole (mol→1.0, kmol→1e-3, molec→N_A)
 end
 
-"Parse the YAML `units:` block into a conversion context (defaults to SI)."
+# 2-arg convenience: callers that only care about length/Ea keep working, amount defaults to mol.
+_UnitCtx(length_m::Float64, ea_J_per_mol::Float64) = _UnitCtx(length_m, ea_J_per_mol, 1.0)
+
+"Parse the YAML `units:` block into a conversion context (defaults to SI).
+ `activation-energy: K` is the MCM/KPP convention — Ea is already divided by R, so
+ exp(-Ea/T) holds directly and the SI factor is R itself (Ea_SI = Ea_K · R).
+ `quantity: molec` (also spelled `molecule`) declares A in molecules, not moles — the
+ dominant convention in KPP-derived atmospheric mechanisms (MCM, GEOS-Chem fullchem)."
 function _parse_units(units_dict::Union{Dict,Nothing})
     units_dict === nothing && return _UnitCtx(1.0, 1.0)
     length_unit = get(units_dict, "length", "m")
@@ -82,13 +90,24 @@ function _parse_units(units_dict::Union{Dict,Nothing})
     ea_unit = get(units_dict, "activation-energy", "J/mol")
     ea_factor = ea_unit == "cal/mol" ? 4.184 :
                 ea_unit == "J/mol"   ? 1.0   :
+                ea_unit == "K"       ? 8.314 :
                 error("_parse_units: unsupported activation-energy unit \"$ea_unit\"")
-    return _UnitCtx(length_m, ea_factor)
+    amount_unit = get(units_dict, "quantity", "mol")
+    amount_per_mol = amount_unit == "mol"     ? 1.0        :
+                     amount_unit == "kmol"    ? 1.0e-3     :
+                     amount_unit == "molec"   ? N_AVOGADRO :
+                     amount_unit == "molecule" ? N_AVOGADRO :
+                     error("_parse_units: unsupported quantity unit \"$amount_unit\"")
+    return _UnitCtx(length_m, ea_factor, amount_per_mol)
 end
 
 "A-factor conversion factor: Cantera → canonical (m-mol-s).
- A_canon = A_cantera × (1/length_m)^(3·(1−order));  order = reactant stoichiometric sum."
-_a_factor(ctx::_UnitCtx, order::Real) = (1.0 / ctx.length_m)^(3 * (1 - order))
+ A_canon = A_cantera × (1/length_m)^(3·(1−order)) × amount_per_mol^(order−1);
+ order = reactant stoichiometric sum (incl. the +1 for a third body's [M]).
+ The amount factor is 1.0 for `quantity: mol`, so mol-declared mechanisms (GRI30, FFCM2,
+ AramcoMech3.0) are numerically unchanged; it is N_A for `quantity: molec`."
+_a_factor(ctx::_UnitCtx, order::Real) =
+    (1.0 / ctx.length_m)^(3 * (1 - order)) * ctx.amount_per_mol^(order - 1)
 
 "Convert a Cantera A-factor value to canonical m-mol-s units given reaction order."
 _convert_A(A::Real, ctx::_UnitCtx, order::Real) = A * _a_factor(ctx, order)
@@ -129,6 +148,11 @@ end
  low and high ranges (the midpoint is taken as the upper bound)."
 function _parse_thermo(thermo_dict)
     model = thermo_dict["model"]
+    # `constant-cp` carries no polynomial. In KPP/MCM converter output its data is uniformly
+    # zero (h0=s0=cp0=0), so there is nothing to represent — return `nothing`: the species
+    # still parses and joins the mechanism, and `:kinetic` + reverse_rate=:irreversible never
+    # consults thermo. Any other unknown model stays loud.
+    model == "constant-cp" && return nothing
     model == "NASA7" ||
         error("_parse_thermo: unsupported thermo model \"$model\" (only NASA7 in Phase 5a)")
     ranges = thermo_dict["temperature-ranges"]
@@ -276,7 +300,9 @@ function load_mechanism(path::AbstractString; phase::Union{Nothing,String}=nothi
     # name -> SpeciesID (1-based by declaration order in the phase)
     species_names = String.(phase_dict["species"])
     name_to_id = Dict{String,SpeciesID}(name => SpeciesID(i) for (i, name) in enumerate(species_names))
-    elements = String.(phase_dict["elements"])
+    # `elements` is optional in Cantera YAML — KPP/MCM converter output omits it.
+    # Nothing downstream needs it (species carry their own composition), so default empty.
+    elements = String.(get(phase_dict, "elements", String[]))
     species, thermo_db = _parse_species(dict["species"], name_to_id)
     reactions = ReactionData[]
     for rxn_dict in dict["reactions"]

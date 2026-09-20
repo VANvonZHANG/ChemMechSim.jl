@@ -1,0 +1,62 @@
+# Minimal fixture in the KPP/MCM dialect emitted by kpp-cantera-converter
+# (examples/mcm/*_converted.yaml). It exercises four Cantera-YAML features this
+# parser previously did not accept:
+#
+#   1. activation-energy: K   — MCM stores Ea already divided by R, so the
+#                               Arrhenius factor is exp(-Ea/T), not exp(-Ea/(R·T)).
+#   2. quantity: molec        — A-factors carry units of molecules, not moles,
+#                               so the A-conversion needs an N_A factor.
+#   3. thermo: constant-cp    — no NASA7 polynomial (and no usable data here).
+#   4. no `elements:` key     — the phase block omits it; Cantera treats it as optional.
+#
+# Also carries M as a declared species, as every converter output does.
+description: |-
+  Minimal MCM/KPP-dialect fixture.
+  Units: {'length': 'cm', 'time': 's', 'quantity': 'molec', 'activation-energy': 'K'}
+  Note: 'hv' is removed from reactants as it is not a mass species.
+units: {length: cm, time: s, quantity: molec, activation-energy: K}
+phases:
+  - name: gas
+    thermo: ideal-gas
+    kinetics: gas
+    species: [M, N2, O2, O3, O, O1D, NO, NO2]
+species:
+  - name: M
+    composition: {}
+    thermo: {model: constant-cp, T0: 298.15, h0: 0, s0: 0, cp0: 0}
+  - name: N2
+    composition: {}
+    thermo: {model: constant-cp, T0: 298.15, h0: 0, s0: 0, cp0: 0}
+  - name: O2
+    composition: {}
+    thermo: {model: constant-cp, T0: 298.15, h0: 0, s0: 0, cp0: 0}
+  - name: O3
+    composition: {}
+    thermo: {model: constant-cp, T0: 298.15, h0: 0, s0: 0, cp0: 0}
+  - name: O
+    composition: {}
+    thermo: {model: constant-cp, T0: 298.15, h0: 0, s0: 0, cp0: 0}
+  - name: O1D
+    composition: {}
+    thermo: {model: constant-cp, T0: 298.15, h0: 0, s0: 0, cp0: 0}
+  - name: NO
+    composition: {}
+    thermo: {model: constant-cp, T0: 298.15, h0: 0, s0: 0, cp0: 0}
+  - name: NO2
+    composition: {}
+    thermo: {model: constant-cp, T0: 298.15, h0: 0, s0: 0, cp0: 0}
+reactions:
+  # three-body, Σν = 3 (O + O2 + [M]) -> A_canon = A × 1e-12 × N_A²
+  - equation: O + O2 + M => O3 + O2 + M
+    order: 1
+    type: three-body
+    efficiencies: {N2: 1.0, O2: 1.0714285714285716}
+    rate-constant: {A: 1.5442e-27, b: -2.6, Ea: 0.0}
+  # elementary, Σν = 2 -> A_canon = A × 1e-6 × N_A
+  - equation: NO + O3 => NO2 + O2
+    order: 2
+    rate-constant: {type: arrhenius, A: 1.4e-12, b: 0.0, Ea: 0.0}
+  # unimolecular, Σν = 1 -> A unchanged; Ea = 100 K -> 100 × 8.314 J/mol
+  - equation: O3 => O1D
+    order: 1
+    rate-constant: {type: arrhenius, A: 1.0e-5, b: 0.0, Ea: 100.0}

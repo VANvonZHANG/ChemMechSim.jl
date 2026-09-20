@@ -17,6 +17,10 @@ const SpeciesRole = Symbol
 # types.jl is included before both thermo.jl and lowering.jl.
 const R_GAS = 8.314   # J/(mol·K)
 
+# Avogadro constant (2019 SI exact value). Needed by the YAML parser to convert
+# `quantity: molec` A-factors (KPP/MCM convention: cm-molec-s) to canonical mol.
+const N_AVOGADRO = 6.02214076e23   # 1/mol
+
 # Standard-state pressure for NASA-polynomial thermo (spec §4.2 / §5.6).
 # 1 bar = 1e5 Pa (modern Cantera/GRI30 ideal-gas convention; CHEMKIN historical = 1 atm = 101325).
 # Revisit at Phase 5 (Cantera validation) if ignition-delay comparison shows a systematic offset.
