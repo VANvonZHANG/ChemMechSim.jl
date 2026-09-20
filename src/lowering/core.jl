@@ -66,9 +66,13 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
               "provides no pressure. Use a config with eos=:ideal_gas: convenience_config(:fixedT), " *
               ":adiabatic_constV, or :adiabatic_constP. Got eos=$(config.eos).")
     meff_eqs = Any[]                     # M_eff algebraic eqs (shared across per-reaction RateCtx)
+    # Shared across EVERY reaction of this lowering so reactions with identical efficiencies
+    # reuse one M_eff variable and emit its equation once (see _meff).
+    meff_cache = Dict{Vector{Float64},Any}()
     rates = [lower_reaction(rx, mech, cvar, Tparam, config, j,
                 RateCtx(mech, cvar, Tparam, j,
-                        sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache, Pvar, meff_eqs))
+                        sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache, Pvar,
+                        meff_eqs, meff_cache))
              for (j, rx) in enumerate(mech.reactions)]
     eqs = [D(cvars[i]) ~ _species_rhs(mech.species[i].id, mech, rates)
            for i in eachindex(mech.species)]
@@ -160,9 +164,11 @@ function _lower_constP(mech::Mechanism, config::MechanismConfig, checks::Bool=tr
     Rparam = tcx.R
     Vvar   = _attach_unit(only(@variables V(t)), ChemUnits.vol)
     meff_eqs = Any[]                     # M_eff algebraic eqs (shared across per-reaction RateCtx)
+    meff_cache = Dict{Vector{Float64},Any}()   # shared across this lowering (see _meff)
     rates  = [lower_reaction(rx, mech, cvar, Tsym, config, j,
                  RateCtx(mech, cvar, Tsym, j,
-                         sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache, Pparam, meff_eqs))
+                         sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache, Pparam,
+                         meff_eqs, meff_cache))
               for (j, rx) in enumerate(mech.reactions)]
     eqs = Equation[D(nvars[i]) ~ Vvar * _species_rhs(mech.species[i].id, mech, rates)
               for i in eachindex(mech.species)]
