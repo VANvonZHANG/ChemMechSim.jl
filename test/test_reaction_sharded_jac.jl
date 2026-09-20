@@ -702,3 +702,31 @@ end
     @test As[nm2i["A"], nm2i["T"]] ≈ Af[nm2i["A"], nm2i["T"]] rtol=1e-8 atol=1e-8
     @test Matrix(J_sharded) ≈ Matrix(J_full) rtol=1e-8 atol=1e-8
 end
+
+@testset "sharded path still sees exactly one M_eff eq per reaction under sharing" begin
+    # _reaction_rate_expr builds a FRESH per-call memo (the 10-arg RateCtx fallback), so two
+    # reactions with identical efficiencies must NOT share a variable here — the sharded path
+    # differentiates w.r.t. M_eff per reaction and substitutes its own single equation.
+    sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B"),
+          SpeciesData(id=3, name="C"), SpeciesData(id=4, name="M")]
+    eff = Dict(4 => 2.0)
+    mkb(v) = ThirdBodyArrhenius(ElementaryArrhenius(v, 0.0, 0.0), eff)
+    mech = Mechanism(species=sp, reactions=[
+        ReactionData(reactants=Dict(1 => 1.0, 4 => 1.0), products=Dict(2 => 1.0), kinetics=mkb(2.0)),
+        ReactionData(reactants=Dict(2 => 1.0, 4 => 1.0), products=Dict(3 => 1.0), kinetics=mkb(3.0)),
+    ])
+    config = convenience_config(:fixedT)
+    phase = ChemPhaseSystem(mech; config=config, checks=false)
+    sys = extract_system(phase)
+    prob = build_problem(phase, Dict("A" => 2.0, "B" => 0.25, "C" => 0.0, "M" => 3.0), (0.0, 0.1))
+
+    jac_sharded!, J_proto = ChemMechSim.build_reaction_sharded_jac(
+        mech; config=config, checks=false)
+    J_sharded = copy(J_proto)
+    fill!(J_sharded.nzval, NaN)
+    jac_sharded!(J_sharded, prob.u0, prob.p, 0.0)
+    J_full = _full_sparse_jacobian(sys, prob.u0, prob.p, 0.0)
+
+    @test all(isfinite, nonzeros(J_sharded))       # no M_eff left unsubstituted
+    @test Matrix(J_sharded) ≈ Matrix(J_full)
+end
