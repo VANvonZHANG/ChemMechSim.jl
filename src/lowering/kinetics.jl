@@ -251,19 +251,31 @@ symbolic_rate(kin::AbstractKinetics, rx::ReactionData, ctx::RateCtx) =
     symbolic_kf(kin, ctx) * _mass_action(rx.reactants, ctx.cvar)
 
 "Effective third-body concentration [M]_eff = Σ_i α_i·[X_i] over all species (default α=1).
- Emits M_eff_j as an algebraic variable (state+algebraic pattern, §7.1): the equation
- M_eff_j ~ Σα·c is registered in ctx.meff_eqs, and M_eff_j (a single symbol) is returned
- for use in the rate. MTK tearing eliminates M_eff_j → observed at compile time. This avoids
- inlining the N_species-term sum into every rate, so MTK's dim-check processes one symbol
- per rate (fast) instead of an N-term expression (hangs for Aramco's 581 species)."
+ `M_eff = Σ α_i·c_i` depends on NOTHING but the composition and α, so the resolved α vector IS
+ the identity of M_eff: reactions sharing it share one variable and emit its equation once.
+ (Without this, MCM alkanes/alkenes emits 1269 M_eff variables where only 3 distinct α vectors
+ exist — 2,338,767 summed terms instead of 5,529.) Emits M_eff_j as an algebraic variable
+ (state+algebraic pattern, §7.1): the equation M_eff_j ~ Σα·c is registered in ctx.meff_eqs, and
+ M_eff_j is returned for use in the rate. MTK tearing eliminates M_eff_j → observed at compile
+ time, so MTK's dim-check processes one symbol per rate instead of an N-term expression."
 function _meff(ctx::RateCtx, efficiencies::Dict{SpeciesID,Float64})
+    # Resolve α over all species (unlisted → 1.0) and use it as the memo key. Normalizing -0.0
+    # to 0.0 keeps the key canonical (isequal(-0.0, 0.0) is false, so they would hash apart).
+    α = Vector{Float64}(undef, length(ctx.mech.species))
+    for (i, sp) in enumerate(ctx.mech.species)
+        a = get(efficiencies, sp.id, 1.0)
+        α[i] = a == 0.0 ? 0.0 : a
+    end
+    cached = get(ctx.meff_cache, α, nothing)
+    cached === nothing || return cached
+
     t = ModelingToolkit.t
     Mvar = _attach_unit(only(@variables ($(Symbol("M_eff_", ctx.j)))(t)), ChemUnits.conc)
     s = 0.0
-    for sp in ctx.mech.species
-        alpha = get(efficiencies, sp.id, 1.0)
-        s += alpha * ctx.cvar[sp.id]
+    for (i, sp) in enumerate(ctx.mech.species)
+        s += α[i] * ctx.cvar[sp.id]
     end
-    push!(ctx.meff_eqs, Mvar ~ s)           # register the algebraic equation
+    push!(ctx.meff_eqs, Mvar ~ s)          # register the algebraic equation (once per distinct α)
+    ctx.meff_cache[α] = Mvar
     return Mvar
 end

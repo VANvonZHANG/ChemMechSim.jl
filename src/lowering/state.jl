@@ -15,10 +15,20 @@ struct RateCtx
     P_std::Any                              # shared P° param
     coeff_cache::Dict{Int,Any}              # per-species NASA coeff cache (ThermoCtx shares this Dict)
     P::Any                                  # pressure symbol (Num) under eos=:ideal_gas configs; nothing otherwise
-    meff_eqs::Vector{Any}                   # M_eff algebraic equations (one per third-body/falloff reaction),
-                                            # collected by lower_to_mtk and appended to eqs; MTK tearing
-                                            # eliminates M_eff_j → observed (state+algebraic pattern, §7.1)
+    meff_eqs::Vector{Any}                   # M_eff algebraic equations, collected by lower_to_mtk
+                                            # and appended to eqs; MTK tearing eliminates M_eff_j
+                                            # → observed (state+algebraic pattern, §7.1)
+    meff_cache::Dict{Vector{Float64},Any}   # resolved α vector -> its M_eff symbol. Shared across
+                                            # all reactions of one lower_to_mtk call so reactions
+                                            # with identical efficiencies reuse ONE variable.
 end
+
+"Backward-compatible 10-arg constructor: a FRESH (unshared) memo, i.e. exactly one M_eff variable
+ per `_meff` call. That is the pre-sharing behaviour, and it is what the reaction-sharded path
+ relies on — it builds one reaction's rate at a time and asserts a single M_eff eq per call."
+RateCtx(mech, cvar, T, j, order, R, P_std, coeff_cache, P, meff_eqs) =
+    RateCtx(mech, cvar, T, j, order, R, P_std, coeff_cache, P, meff_eqs,
+            Dict{Vector{Float64},Any}())
 
 "Shared thermo/energy lowering context (R/P°/coeff-cache/T). Built once per lower_to_mtk."
 struct ThermoCtx

@@ -176,3 +176,29 @@ using ChemMechSim: PlogPoint, PlogRate, plog_rate, plog_dkdT, plog_dkdP
     @test abs(plog_dkdP(kin, 1500.0, 1e2)) < 1e-30        # below lowest P → 0
     @test abs(plog_dkdP(kin, 1500.0, 1e9)) < 1e-30        # above highest P → 0
 end
+
+@testset "_meff shares one M_eff variable per distinct efficiency vector" begin
+    sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B"), SpeciesData(id=3, name="M")]
+    mech = Mechanism(species=sp, reactions=ReactionData[])
+    cvar = Dict{Int,Any}(1 => 1.0, 2 => 2.0, 3 => 3.0)   # plain numbers: structure only
+    eqs = Any[]
+    cache = Dict{Vector{Float64},Any}()
+    mkctx(j) = ChemMechSim.RateCtx(mech, cvar, nothing, j, 1.0, nothing, nothing,
+                                   Dict{Int,Any}(), nothing, eqs, cache)
+
+    eff = Dict(3 => 2.0)                       # identical α vector
+    m1 = ChemMechSim._meff(mkctx(1), eff)
+    m2 = ChemMechSim._meff(mkctx(2), eff)
+    @test isequal(m1, m2)                      # same M_eff variable
+    @test length(eqs) == 1                     # equation emitted once, not twice
+
+    m3 = ChemMechSim._meff(mkctx(3), Dict(3 => 5.0))   # different α vector
+    @test !isequal(m3, m1)
+    @test length(eqs) == 2
+
+    # "no efficiencies" resolves to α ≡ 1.0 — its own shared key
+    m4 = ChemMechSim._meff(mkctx(4), Dict{Int,Float64}())
+    m5 = ChemMechSim._meff(mkctx(5), Dict{Int,Float64}())
+    @test isequal(m4, m5)
+    @test length(eqs) == 3
+end
