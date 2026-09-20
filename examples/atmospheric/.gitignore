@@ -1,0 +1,4 @@
+# The 24 MB source mechanism is COPIED here, not committed — see README.
+mcm_alkanes_alkenes_converted.yaml
+# Derived mechanisms + figures written by tools/flatten_photolysis.jl and mcm_box.jl
+output/
