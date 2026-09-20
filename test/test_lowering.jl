@@ -181,3 +181,24 @@ end
     @test "P" in [String(getname(u)) for u in unknowns(sys)]
     @test !("P" in [String(getname(o.lhs)) for o in observed(sys)])
 end
+
+@testset "lower_to_mtk shares M_eff across reactions with identical efficiencies" begin
+    # Three third-body reactions; the first two share an efficiency vector, the third differs.
+    # Before sharing: 3 M_eff variables. After: 2.
+    sp = [SpeciesData(id=1, name="A"), SpeciesData(id=2, name="B"),
+          SpeciesData(id=3, name="C"), SpeciesData(id=4, name="M")]
+    eff = Dict(4 => 2.0)
+    mk(v) = ThirdBodyArrhenius(ElementaryArrhenius(v, 0.0, 0.0), eff)
+    mech = Mechanism(species=sp, reactions=[
+        ReactionData(reactants=Dict(1 => 1.0, 4 => 1.0), products=Dict(2 => 1.0), kinetics=mk(1.0)),
+        ReactionData(reactants=Dict(2 => 1.0, 4 => 1.0), products=Dict(3 => 1.0), kinetics=mk(1.0)),
+        ReactionData(reactants=Dict(3 => 1.0, 4 => 1.0), products=Dict(1 => 1.0),
+                     kinetics=ThirdBodyArrhenius(ElementaryArrhenius(1.0, 0.0, 0.0), Dict(4 => 9.0))),
+    ])
+    sys = lower_to_mtk(mech; config=MechanismConfig(), checks=false)
+
+    # M_eff is torn to observed by mtkcompile (verified 2026-09-20), so count it there.
+    meff_names = [String(getname(o.lhs)) for o in ModelingToolkit.observed(sys)
+                  if startswith(String(getname(o.lhs)), "M_eff_")]
+    @test length(meff_names) == 2          # 2 distinct α vectors, not 3 reactions
+end
