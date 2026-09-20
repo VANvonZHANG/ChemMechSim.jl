@@ -41,15 +41,15 @@ and writes the derived mechanism to `output/` (gitignored, like the source).
 
 **Expected cost, so you don't think it hung** (measured on this machine):
 
-| stage | quiet machine | under load |
+| stage | quiet machine | busy machine |
 |---|---|---|
-| parse the derived mechanism | ~24 s | ~35 s |
-| lower it (`checks=false`) | ~56 s, peak ~3.5 GiB | ~92 s, ~3.7 GiB |
-| integrate 3 days | ~300 s | ~890 s |
+| parse the derived mechanism | ~24 s | ~100 s |
+| lower it (`checks=false`) | ~56 s, peak ~3.5 GiB | ~340 s, ~3.7 GiB |
+| integrate 3 days | ~300 s | ~1080 s |
 
 The two columns are the same code on the same machine — this box is shared, and another user
-running WRF benchmarks at load average ~100 roughly doubled every stage. Treat the numbers as
-an order of magnitude, not a benchmark.
+running WRF benchmarks at load average 70–100 inflates every stage by 3–6×. Treat these as an
+order of magnitude, not a benchmark.
 
 `checks=false` is **required**, not an optimisation: with `checks=true` MTK's unit validator
 cannot fold this mechanism's equations and lowering did not finish in 16 minutes. The equations
@@ -94,10 +94,11 @@ are dimensionally correct; the checker just cannot prove it.
    photolysis — so the flattened photolysis really is driving the radical chemistry rather than
    being a silent no-op.
 
-   O3 also **falls** (1.245e-6 → 6.25e-7 mol/m³ over 3 days). That is *not* NOx titration: total
-   NOx is 1e-10 mole fraction ≈ 4.2e-9 mol/m³, some 150× smaller than the O3 decline. It is the
-   HOx cycle — O3 photolysis (`O3 => O1D` at 3.78e-5 s⁻¹, ~12% of which gives OH) plus the 1%
-   H2O, then OH + O3. Photolysis-driven loss, which is the point the example is making.
+   O3 also **falls** (1.245e-6 → 6.188e-7 mol/m³ over 3 days; OH peaks at 2.26e-11). That is
+   *not* NOx titration: total NOx is 1e-10 mole fraction ≈ 4.2e-9 mol/m³, some 150× smaller than
+   the O3 decline. It is the HOx cycle — O3 photolysis (`O3 => O1D` at 3.78e-5 s⁻¹, ~12% of
+   which gives OH) plus the 1% H2O, then OH + O3. Photolysis-driven loss, which is the point the
+   example is making.
 
 ## Unrelated known trap: pass a *complete* `u0`
 
