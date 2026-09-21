@@ -118,7 +118,11 @@ open(joinpath(@__DIR__, "output", "run_meta.txt"), "w") do io
     println(io, "t_simulate_s=", round(t_solve, digits = 1))
     println(io, "jac=true")
     println(io, "span_days=", T_END / 86400)
-    println(io, "peak_gib=", round(Sys.maxrss() / 2^30, digits = 2))
+    # NOT the lowering peak: Sys.maxrss() is process-LIFETIME peak RSS, a high-water mark since
+    # process start, and this is written after the solve — so it is dominated by the solve and
+    # the Jacobian codegen. Same process printed ~3.5 GiB during lowering (the value in
+    # examples/atmospheric/README.md); this number is strictly larger and not comparable to it.
+    println(io, "peak_rss_gib=", round(Sys.maxrss() / 2^30, digits = 2))
 end
 
 # --- report --------------------------------------------------------------------------------
