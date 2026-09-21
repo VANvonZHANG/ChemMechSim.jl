@@ -110,6 +110,22 @@ open(OUT_CSV, "w") do io
 end
 println("wrote ", OUT_CSV, "  (", length(sol.t), " rows)")
 
+# The FULL final state, for tools/budget.jl. A rate law needs every reactant's concentration,
+# not just the 7 monitored species, so the budget cannot be computed from series.csv. This is
+# deliberately a separate file: the figures want series.csv narrow (7 species, one line each).
+const OUT_STATE = joinpath(@__DIR__, "output", "final_state.csv")
+length(state_index) == length(mech.species) ||
+    error("mcm_box: the state has $(length(state_index)) unknowns but the mechanism has " *
+          "$(length(mech.species)) species — final_state.csv would be incomplete")
+open(OUT_STATE, "w") do io
+    println(io, "species,concentration_mol_m3")
+    for sp in mech.species
+        name = String(sp.name)
+        println(io, name, ",", sol.u[end][state_index[name]])
+    end
+end
+println("wrote ", OUT_STATE, "  (", length(mech.species), " species)")
+
 open(joinpath(@__DIR__, "output", "run_meta.txt"), "w") do io
     println(io, "t_lower_s=", round(t_low, digits = 1))
     # NOT pure solve time: `simulate` runs build_problem (which with jac=true builds the
