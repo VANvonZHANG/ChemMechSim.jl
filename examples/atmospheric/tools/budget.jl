@@ -133,16 +133,62 @@ function reaction_rate(rx)
     return k * prod
 end
 
-# Species that define each budget. `o3_id` is resolved once — `findfirst` per reaction would be
-# 5600 linear scans of a 1842-vector.
+# Species that define each budget. Resolved once — `findfirst` per reaction would be 5600 linear
+# scans of a 1842-vector.
 const O3_SPECIES = "O3"
 const HOX_SPECIES = ("OH", "HO2")
-const o3_id = let i = findfirst(sp -> String(sp.name) == O3_SPECIES, mech.species)
-    i === nothing && error("budget: no $O3_SPECIES species in the mechanism")
+id_of(name) = let i = findfirst(sp -> String(sp.name) == name, mech.species)
+    i === nothing && error("budget: no $name species in the mechanism")
     mech.species[i].id
 end
+const o3_id = id_of(O3_SPECIES)
+const hox_ids = [id_of(n) for n in HOX_SPECIES]
 
-rows = Tuple{String,String,Float64}[]
+"Net stoichiometric change in a species group over one reaction: Σ (products − reactants)."
+net_change(products, reactants, ids) =
+    sum(get(products, sid, 0.0) - get(reactants, sid, 0.0) for sid in ids)
+
+"One side of a reaction as text, terms sorted by species name so the rendering is deterministic:
+ `2 HO2 + O2`. The parser strips the literal `M` from every equation, so a third-body reaction
+ shows without it — its third-body nature lives in the kinetics type, not in the equation text."
+function side_str(stoich)
+    parts = String[]
+    for sid in sort(collect(keys(stoich)), by = s -> String(mech.species[s].name))
+        nu = stoich[sid]
+        name = String(mech.species[sid].name)
+        push!(parts, nu == 1.0 ? name : string(nu % 1 == 0 ? Int(nu) : nu, " ", name))
+    end
+    return join(parts, " + ")
+end
+
+"Full equation text, e.g. `O3 => O1D`. This is the column that disambiguates reactions whose
+ reactant-only label collides: the two `O3` photolysis channels, and the duplicate `CO + OH`
+ entries that carry different rates because the converter splits a sum into one entry per term."
+equation_str(rx) = side_str(rx.reactants) * " => " * side_str(rx.products)
+
+# BUDGET TAGGING IS BY NET STOICHIOMETRY, not by "does this species appear on this side":
+#
+#     net = Σ_{s ∈ group} (products[s] − reactants[s])
+#       net > 0  →  the reaction is a SOURCE for that group
+#       net < 0  →  it is a SINK
+#       net = 0  →  it belongs in NEITHER list (counted below, never silently dropped)
+#
+# For O3 the two rules coincide — no reaction in this mechanism has O3 on both sides (verified) —
+# but net is what makes that structural rather than a property of the mechanism: a reaction that
+# both made and consumed O3 would otherwise be counted into both lists.
+#
+# For HOx the difference is the whole point. OH and HO2 are ONE family, so tagging by appearance
+# put every OH↔HO2 interconversion into BOTH lists at an identical rate (92 such pairs in the
+# first version of this script), ranking net-neutral chemistry such as
+# `HCHO + OH => HO2 + CO + H2O` above genuine sources. Net tagging makes the two lists disjoint
+# and makes `HOx_source` answer the question actually being asked: where does NEW HOx come from?
+#
+# The rate column is the HOx-MOLECULE flux, rate × |net|, not the reaction rate. `O1D + H2O => 2 OH`
+# therefore reports twice its reaction rate, because it makes two HOx. Each list consequently sums
+# to the total HOx production / destruction rate in mol/(m^3 s), and the two sums differ by the
+# box's net HOx tendency.
+
+rows = Tuple{String,String,String,Float64}[]     # reaction label, equation, kind, rate
 skipped = Dict{String,Int}()                     # kinetics type -> reactions not evaluated
 for rx in mech.reactions
     rate = reaction_rate(rx)
@@ -152,30 +198,39 @@ for rx in mech.reactions
         continue
     end
     iszero(rate) && continue
-    # LABEL CAVEAT: the reaction is named by its REACTANT SPECIES ONLY — no stoichiometry, no
-    # products — so distinct reactions can share a label (`2 HO2 => H2O2`, `2 HO2 + M => H2O2 + M`
-    # and `2 HO2 + H2O => H2O2 + H2O` all render as "HO2"). Kept as the brief specifies because
-    # Task 3 consumes the column; see .superpowers/sdd/task-2-report.md.
-    names = [String(mech.species[sid].name) for sid in keys(rx.reactants)]
-    # O3 is CONSUMED if it appears as a reactant; PRODUCED if it appears as a product.
-    o3_consumed = haskey(rx.reactants, o3_id)
-    o3_produced = haskey(rx.products,  o3_id)
-    o3_consumed && push!(rows, (join(names, " + "), "O3_loss", rate))
-    o3_produced && push!(rows, (join(names, " + "), "O3_production", rate))
-    any(n -> n in HOX_SPECIES, names) &&
-        push!(rows, (join(names, " + "), "HOx_sink", rate))
-    any(n -> n in HOX_SPECIES, [String(mech.species[sid].name) for sid in keys(rx.products)]) &&
-        push!(rows, (join(names, " + "), "HOx_source", rate))
+    # `reaction` keeps the brief's reactant-species-only form because Task 3 consumes that column;
+    # `equation` carries the disambiguating full text. Both are emitted on purpose.
+    label = join([String(mech.species[sid].name) for sid in keys(rx.reactants)], " + ")
+    eq = equation_str(rx)
+    net_o3 = net_change(rx.products, rx.reactants, (o3_id,))
+    if net_o3 > 0.0
+        push!(rows, (label, eq, "O3_production", rate * net_o3))
+    elseif net_o3 < 0.0
+        push!(rows, (label, eq, "O3_loss", rate * -net_o3))
+    end
+    net_hox = net_change(rx.products, rx.reactants, hox_ids)
+    if net_hox > 0.0
+        push!(rows, (label, eq, "HOx_source", rate * net_hox))
+    elseif net_hox < 0.0
+        push!(rows, (label, eq, "HOx_sink", rate * -net_hox))
+    end
 end
+
+# Reactions that involve OH/HO2 but shift net HOx by zero. They are now in neither HOx list; the
+# old appear-on-either-side rule put each of them in BOTH. Counted, not silently dropped.
+touches_hox(rx) = any(sid -> haskey(rx.reactants, sid) || haskey(rx.products, sid), hox_ids)
+n_hox_neutral = count(rx -> touches_hox(rx) &&
+                           net_change(rx.products, rx.reactants, hox_ids) == 0.0,
+                      mech.reactions)
 
 # Every reaction either landed in `skipped` or was evaluated, so the coverage count is derived
 # rather than accumulated — which also keeps it out of the top-level loop's soft scope.
 n_evaluated = length(mech.reactions) - sum(values(skipped); init = 0)
 
 open(OUT, "w") do io
-    println(io, "reaction,kind,rate_mol_m3_s")
-    for (rxn, kind, rate) in sort(rows, by = r -> -r[3])
-        println(io, replace(rxn, "," => ";"), ",", kind, ",", rate)
+    println(io, "reaction,equation,kind,rate_mol_m3_s")
+    for (rxn, eq, kind, rate) in sort(rows, by = r -> -r[4])
+        println(io, replace(rxn, "," => ";"), ",", replace(eq, "," => ";"), ",", kind, ",", rate)
     end
 end
 
@@ -192,13 +247,18 @@ else
     end
 end
 
+@printf("\nHOx net-neutral: %d reactions involve OH/HO2 but leave net HOx unchanged, so they are\n",
+        n_hox_neutral)
+println("  in NEITHER HOx list. Both HOx lists report the HOx-molecule flux, rate × |net|, not")
+println("  the reaction rate — so the two columns are directly comparable and summable.")
+
 # Print the dominant terms per budget so a human can sanity-check without opening the CSV.
 for kind in ("O3_production", "O3_loss", "HOx_source", "HOx_sink")
-    sub = sort([r for r in rows if r[2] == kind], by = r -> -r[3])
+    sub = sort([r for r in rows if r[3] == kind], by = r -> -r[4])
     isempty(sub) && (println("\n", kind, " — NO ROWS"); continue)
     @printf("\n%s — top 5 of %d (mol/m^3/s)\n", kind, length(sub))
-    for (rxn, _, rate) in sub[1:min(5, end)]
-        @printf("  %-46s %.4e\n", rxn, rate)
+    for (rxn, eq, _, rate) in sub[1:min(5, end)]
+        @printf("  %-24s %.4e   %s\n", rxn, rate, eq)
     end
 end
 
