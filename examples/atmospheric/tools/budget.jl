@@ -161,10 +161,23 @@ function side_str(stoich)
     return join(parts, " + ")
 end
 
-"Full equation text, e.g. `O3 => O1D`. This is the column that disambiguates reactions whose
- reactant-only label collides: the two `O3` photolysis channels, and the duplicate `CO + OH`
- entries that carry different rates because the converter splits a sum into one entry per term."
-equation_str(rx) = side_str(rx.reactants) * " => " * side_str(rx.products)
+"Kinetics classification, spelled the way the mechanism file spells it in its own `type:` field.
+ Reports `typeof(rx.kinetics)` — nothing is reconstructed."
+kinetics_tag(::ElementaryArrhenius) = "elementary"
+kinetics_tag(::ThirdBodyArrhenius)  = "three-body"
+kinetics_tag(::Union{TroeFalloff,LindemannFalloff}) = "falloff"
+kinetics_tag(kin::AbstractKinetics) = string(nameof(typeof(kin)))   # anything else names itself
+
+"Full equation text, e.g. `O3 => O1D [elementary]`. This is the column that disambiguates
+ reactions whose reactant-only label collides: the two `O3` photolysis channels, and the duplicate
+ entries the converter splits out of one summed rate.
+ The trailing tag is load-bearing, not decoration. The parser strips the literal `M` from every
+ equation, so `2 HO2 => H2O2` (elementary) and `2 HO2 + M => H2O2 + M` (three-body) otherwise
+ render identically while being physically different — the second is scaled by [M]_eff ≈ 41.7.
+ Tagging reports the parser's own classification; it does NOT reconstruct the `M`, because 136 of
+ this mechanism's three-body reactions never wrote one in their source equation."
+equation_str(rx) = side_str(rx.reactants) * " => " * side_str(rx.products) *
+                   " [" * kinetics_tag(rx.kinetics) * "]"
 
 # BUDGET TAGGING IS BY NET STOICHIOMETRY, not by "does this species appear on this side":
 #
