@@ -14,3 +14,6 @@ examples/demos/*.png
 # local Superpowers planning/state files
 .superpowers/
 docs/superpowers/
+
+# harness-created git worktrees (EnterWorktree)
+.claude/worktrees/
