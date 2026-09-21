@@ -61,6 +61,11 @@ for line in lines[2:end]
     # negative squared becomes a spurious POSITIVE contribution. Below tolerance there is no
     # physics left to preserve, so clamp to exactly 0.0 and count what was clamped.
     v < 0.0 && push!(negatives, v)
+    # Magnitude gate (review): clamp only tolerable residual. A genuinely unstable run would
+    # hand back negatives far above abstol; clamping those would emit a plausible-looking budget
+    # from garbage, so fail loudly instead.
+    v < -1e-9 &&
+        error("budget: $name = $v is far below abstol=1e-12 — the run diverged; not clamping")
     c[name] = max(v, 0.0)
 end
 @printf("concentrations: %d species read from %s\n", length(c), basename(STATE))
@@ -213,7 +218,10 @@ for rx in mech.reactions
     iszero(rate) && continue
     # `reaction` keeps the brief's reactant-species-only form because Task 3 consumes that column;
     # `equation` carries the disambiguating full text. Both are emitted on purpose.
-    label = join([String(mech.species[sid].name) for sid in keys(rx.reactants)], " + ")
+    # Sorted (not Dict order) so the label is deterministic across regenerations — a consumer
+    # string-matching this column must not see "CH4 + OH" flip to "OH + CH4". side_str sorts
+    # for the same reason; this is its reactants-only equivalent.
+    label = join(sort([String(mech.species[sid].name) for sid in keys(rx.reactants)]), " + ")
     eq = equation_str(rx)
     net_o3 = net_change(rx.products, rx.reactants, (o3_id,))
     if net_o3 > 0.0
