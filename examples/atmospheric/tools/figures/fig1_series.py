@@ -16,7 +16,6 @@ Run:  python3 examples/atmospheric/tools/figures/fig1_series.py
 """
 
 import sys
-import textwrap
 
 import numpy as np
 import pandas as pd
@@ -42,9 +41,19 @@ def positive(t, y):
     """Drop non-positive values so log axes skip exact zeros.
 
     OH, HO2, NO and NO3 start at exactly 0; their curves begin at the first
-    saved point after the radicals build up.
+    saved point after the radicals build up. Guarded: the mask must be a
+    leading run — an interior non-positive would silently bridge the polyline
+    across the gap (e.g. a solver residual dipping below zero mid-run).
     """
     m = np.asarray(y) > 0
+    interior = np.flatnonzero(~m)
+    if interior.size and m.any():
+        # non-positives must all precede the first positive sample
+        first_pos = int(np.flatnonzero(m)[0])
+        if interior.max() >= first_pos:
+            raise ValueError(
+                f"interior non-positive value at index {int(interior[interior >= first_pos][0])} "
+                "would be silently bridged on the log axis")
     return np.asarray(t)[m], np.asarray(y)[m]
 
 
