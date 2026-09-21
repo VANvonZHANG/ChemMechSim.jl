@@ -54,6 +54,24 @@ def fmt(c):
     return f"{c:.3g}"
 
 
+def t_lower_seconds():
+    """t_lower_s parsed from output/run_meta.txt.
+
+    The header quotes this number, so it must come from the artifact — a
+    future mcm_box.jl run rewrites run_meta.txt and the summary follows it.
+    A missing file or key is an error, never a silent hardcoded fallback."""
+    path = style.DATA / "run_meta.txt"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"missing {path}: re-run mcm_box.jl to regenerate the run "
+            "artifacts this summary quotes")
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.strip() == "t_lower_s":
+            return float(value)
+    raise ValueError(f"no t_lower_s= line in {path}")
+
+
 # --- Block 1: final state ------------------------------------------------------
 def final_state_rows():
     df = pd.read_csv(style.DATA / "series.csv")
@@ -91,7 +109,7 @@ def budget_blocks(top=3):
         netv = twin["rate_mol_m3_s"].sum()
         twin_note = (f"e.g. {twin['equation'].iloc[0]}: rows "
                      f"{' and '.join(f'{v:+.3g}' for v in twin['rate_mol_m3_s'])} "
-                     f"net to {netv:.3g}, {abs(pos / netv - 1) * 100:.0f}% below "
+                     f"net to {netv:.3g}, {abs(1 - netv / pos) * 100:.0f}% below "
                      "the positive row alone")
     return blocks, n_rows, dup_groups, twin_note
 
@@ -143,7 +161,8 @@ def build_md(fs_rows, t_end, blocks, n_rows, dup_groups, twin_note,
              "P = 102 858 Pa, photolysis frozen at χ₀ = 0 (perpetual day, no "
              "diurnal cycle), isothermal :kinetic mode, FBDF(autodiff=false), "
              f"reltol 1e-6 / abstol 1e-12. Reference run: {t_end:.0f}-day span "
-             "(`output/run_meta.txt`: lowering 154.9 s; its `t_simulate_s` is "
+             f"(`output/run_meta.txt`: lowering {t_lower_seconds():.1f} s; "
+             "its `t_simulate_s` is "
              "build+solve COMBINED, not pure solve — the split below is the "
              "authoritative one from `bench_jac.csv`).")
     L.append("")
@@ -234,7 +253,8 @@ def build_md(fs_rows, t_end, blocks, n_rows, dup_groups, twin_note,
                  f"{max(ratios):.1f}×) against a {build_ratio:.1f}× build cost.")
     L.append("")
     L.append(f"*Load caveat: timings are single-run wall-clock on a shared "
-             "machine running at co-tenant load 70–100; absolute times move "
+             "machine under co-tenant load (qualitative: co-tenants were "
+             "running throughout); absolute times move "
              "3–6× with that load. The transferable quantities are the per-span "
              f"solve ratios ({', '.join(f'{v:.1f}×' for v in ratios)}) and the "
              f"build ratio ({build_ratio:.1f}×), not the seconds.*")
@@ -283,8 +303,10 @@ def build_csv_rows(fs_rows, blocks, fits, t_cross, ber, ratios, build_ratio,
     if t_cross is not None:
         rows.append(["cost", "meta", "break_even_days", repr(t_cross), "days"])
     if ber is not None:
-        rows.append(["cost", "meta", "break_even_days_lo", repr(ber[0]), "days"])
-        rows.append(["cost", "meta", "break_even_days_hi", repr(ber[1]), "days"])
+        rows.append(["cost", "meta", "break_even_days_lo",
+                     repr(float(ber[0])), "days"])
+        rows.append(["cost", "meta", "break_even_days_hi",
+                     repr(float(ber[1])), "days"])
     return rows
 
 
