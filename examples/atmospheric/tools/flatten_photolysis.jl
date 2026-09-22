@@ -10,6 +10,8 @@
 #     which is evaluated at a FIXED zenith χ0 and frozen. This is the central approximation
 #     of this example: it discards the diurnal cycle, so night-only chemistry (NO3 / N2O5
 #     accumulation) does not appear. χ0 is a CLI argument, default 0 (overhead sun).
+#     The raw l/m/n are ALSO exported to output/photolysis_params.csv — the diurnal driver
+#     (mcm_box_diurnal.jl) uses that sidecar to drive J(t) instead of freezing it.
 #  2. `sigmoid-branching` -> one constant PER ENTRY, evaluated at T0 and PRESERVING THE SIGN
 #     OF `A`. Temperature is fixed in this scenario, so this is exact at T0 — it is not a
 #     temperature law. Sign preservation matters: the converter splits a sum into one entry per
@@ -85,16 +87,31 @@ function _flatten_sigmoid(rx, T0)
     return out
 end
 
-"Transform every reaction of the mechanism dict. MUTATES the dict's reaction list and returns
- the rewritten list alongside the per-type counts, so a silent no-op is visible."
+"""Transform every reaction of the mechanism dict. MUTATES the dict's reaction list and returns
+ the rewritten list alongside the per-type counts, so a silent no-op is visible.
+
+For every zenith entry a SIDECAR ROW (reaction_index, equation, l, m, n) is also collected.
+`reaction_index` is the 1-based position in the OUTPUT list — the transform is order-preserving
+and 1:1 (each input reaction becomes exactly one output reaction), so that index is what the
+diurnal driver joins against the mechanism's own reaction order. l/m/n are the raw KPP zenith
+parameters (for first-order photolysis, J is directly in s⁻¹)."""
 function _flatten_mechanism!(mech_dict, χ0, T0)
     out = Any[]
     n_photo = 0
     n_sig = 0
+    photo_rows = Tuple{Int,String,Float64,Float64,Float64}[]
     for rx in mech_dict["reactions"]
         ty = get(rx, "type", nothing)
         if ty == "zenith-angle-photolysis"
+            # The diurnal driver feeds J straight into a FIRST-ORDER rate constant (s⁻¹);
+            # a higher-order entry would need a unit conversion that nobody downstream does.
+            ord = get(rx, "order", nothing)
+            ord == 1 ||
+                error("flatten_photolysis: \"$(rx["equation"])\" has order $ord (expected 1) —",
+                      " the diurnal driver assumes first-order J")
             push!(out, _flatten_photolysis(rx, χ0)); n_photo += 1
+            push!(photo_rows, (length(out), String(rx["equation"]),
+                               Float64(rx["l"]), Float64(rx["m"]), Float64(rx["n"])))
         elseif ty == "sigmoid-branching"
             # Per-entry, sign-preserving. Entries that share an equation are deliberately left as
             # duplicates for ChemMechSim to sum — see _flatten_sigmoid.
@@ -104,7 +121,8 @@ function _flatten_mechanism!(mech_dict, χ0, T0)
         end
     end
     mech_dict["reactions"] = out
-    return (n_photolysis = n_photo, n_sigmoid = n_sig, reactions = out)
+    return (n_photolysis = n_photo, n_sigmoid = n_sig, reactions = out,
+            photo_rows = photo_rows)
 end
 
 "Drop the converter's literal `M` species from the phase list and the species list."
@@ -175,4 +193,17 @@ if abspath(PROGRAM_FILE) == @__FILE__
     YAML.write_file(DST, d)
     println("wrote ", DST, "  (", length(d["reactions"]), " reactions, ",
             length(d["species"]), " species)")
+
+    # The sidecar is the only place the raw l/m/n survive: the frozen YAML carries just J(χ0).
+    const SIDECAR = joinpath(HERE, "output", "photolysis_params.csv")
+    open(SIDECAR, "w") do io
+        println(io, "reaction_index,equation,l,m,n")
+        for (j, eq, l, m, n) in stats.photo_rows
+            # Default Float64 printing is shortest-round-trip; a fixed-digits format would not
+            # survive the driver's parse exactly. Commas inside equations cannot occur in MCM,
+            # but replace defensively (same convention as tools/budget.jl's labels).
+            println(io, j, ",", replace(eq, "," => ";"), ",", l, ",", m, ",", n)
+        end
+    end
+    println("wrote ", SIDECAR, "  (", length(stats.photo_rows), " rows)")
 end
