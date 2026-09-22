@@ -29,27 +29,56 @@ cp <kpp-cantera-converter>/examples/mcm/mcm_alkanes_alkenes_converted.yaml \
    examples/atmospheric/
 ```
 
-Then:
+Then — five steps in this order; everything lands in `examples/atmospheric/output/` (gitignored,
+like the source), and each step reads what the previous one wrote:
 
 ```bash
-julia --project=. examples/atmospheric/tools/flatten_photolysis.jl   # ~20 s
-julia --project=. examples/atmospheric/mcm_box.jl                    # ~6 min
+# 1. preprocessor: freeze photolysis at χ0 (default 0, overhead sun) -> derived mechanism (~20 s)
+julia --project=. examples/atmospheric/tools/flatten_photolysis.jl
+# 2. the box: 3 simulated days, jac=true -> series.csv, final_state.csv, run_meta.txt
+julia --project=. examples/atmospheric/mcm_box.jl
+# 3. O3 / HOx rate budgets at the final state -> budget.csv
+julia --project=. examples/atmospheric/tools/budget.jl
+# 4. Jacobian-strategy bench: one build per strategy, solves at 0.25 / 0.5 / 1 day -> bench_jac.csv
+julia --project=. examples/atmospheric/tools/bench_jac.jl
+# 5. figures + summary table (needs matplotlib / numpy / pandas, see tools/requirements-figures.txt)
+python3 examples/atmospheric/tools/figures/fig1_series.py
+python3 examples/atmospheric/tools/figures/fig2_efficiency.py
+python3 examples/atmospheric/tools/figures/table_summary.py
 ```
 
-`flatten_photolysis.jl` takes an optional solar zenith in degrees (default `0`, overhead sun)
-and writes the derived mechanism to `output/` (gitignored, like the source).
+After step 5, `output/` holds the derived mechanism (`mcm_alkanes_alkenes_frozen.yaml`), the
+two run exports (`series.csv` — the 7 monitored species at 1200 s cadence — and
+`final_state.csv` — all 1842 species, which the budget needs because a rate law wants every
+reactant, not just the monitored ones) plus `run_meta.txt`, the analysis CSVs (`budget.csv`,
+`bench_jac.csv`), both figures (`fig1_series.png`/`.pdf`, `fig2_efficiency.png`/`.pdf`) and
+the table (`summary_table.md` + `.csv`). `flatten_photolysis.jl` takes an optional solar
+zenith in degrees (default `0`, overhead sun); a different χ₀ gives a different frozen-noon
+box, not a better one.
 
-**Expected cost, so you don't think it hung** (measured on this machine):
+**Expected cost, so you don't think it hung.** The box runs `jac=true`: `build_problem`
+builds the **reaction-sharded analytic Jacobian** instead of letting FBDF finite-difference
+the RHS (~1842 RHS evaluations per Jacobian call at 1842 states), and the solver is
+`FBDF(autodiff = false)` — ForwardDiff must not also run once an analytic Jacobian is
+supplied. The cost is therefore a **build/solve split**, not one number:
 
-| stage | quiet machine | busy machine |
-|---|---|---|
-| parse the derived mechanism | ~24 s | ~100 s |
-| lower it (`checks=false`) | ~56 s, peak ~3.5 GiB | ~340 s, ~3.7 GiB |
-| integrate 3 days | ~300 s | ~1080 s |
+| stage | measured (order of magnitude) |
+|---|---|
+| parse the derived mechanism | ~24 s quiet, ~100 s busy |
+| lower it (`checks=false`) | ~56 s quiet (peak ~3.5 GiB), ~340 s busy (~3.7 GiB) |
+| `build_problem`, `jac=true` | ~45 s quiet, ~300 s busy — 4.3× the finite-difference build |
+| solve 3 days | ~40 s quiet, ~300 s busy |
 
-The two columns are the same code on the same machine — this box is shared, and another user
-running WRF benchmarks at load average 70–100 inflates every stage by 3–6×. Treat these as an
-order of magnitude, not a benchmark.
+**Absolute seconds move 3–6× with co-tenant load.** This box is shared, and another user
+running WRF benchmarks at load average 70–100 sits between the two columns, differently every
+run — treat every number above as an order of magnitude, not a benchmark, and never compare
+seconds across sessions. The load-robust, transferable quantities are the **ratios**
+(same-session, from `tools/bench_jac.jl`): the analytic Jacobian costs **4.3× more to build**
+and solves **4.4–12.2× faster per span**, which puts the total-cost break-even at **1.05–3.76
+simulated days — a range, not a number**, because solve time measured *non-monotonically* in
+span under this load (longer spans sometimes measured faster). This example's 3-day span sits
+inside that range; do not read a single break-even day or a single 3-day winner out of any one
+session.
 
 `checks=false` is **required**, not an optimisation: with `checks=true` MTK's unit validator
 cannot fold this mechanism's equations and lowering did not finish in 16 minutes. The equations
@@ -99,6 +128,37 @@ are dimensionally correct; the checker just cannot prove it.
    the O3 decline. It is the HOx cycle — O3 photolysis (`O3 => O1D` at 3.78e-5 s⁻¹, ~12% of
    which gives OH) plus the 1% H2O, then OH + O3. Photolysis-driven loss, which is the point the
    example is making.
+
+## What the figures show
+
+Everything below — figures and table alike — is a **frozen-photolysis (perpetual-day)
+result**: photolysis is frozen at χ₀ = 0, so there is no diurnal cycle (limit 1 above). A
+figure that gets separated from this README must not be mistaken for a diurnal run, which is
+why the same caveat is printed in each figure caption.
+
+**Figure 1, `fig1_series.png` — the box relaxes to a photochemical steady state.** O₃ falls
+from its initial 30 ppbv toward ~15 ppbv while the radical pool (OH, HO₂) builds from zero
+and levels off; nothing oscillates, because there is no day/night cycle to follow in this
+setup. NO₃ never accumulates — in a real atmosphere it builds overnight — and its suppression
+is drawn as an annotation rather than a curve, because it is the frozen-day limitation made
+visible, not a result of the run.
+
+**Figure 2, `fig2_efficiency.png` — the analytic Jacobian pays for itself within days.** The
+reaction-sharded Jacobian costs ~4.3× more to build but solves 4.4–12.2× faster at every
+measured span, so the total-cost break-even is shown as a range — 1.05–3.76 simulated days —
+not a number: solve time measured non-monotonically in span on this shared box, so the figure
+plots measured points, draws no fitted line, and quotes no single 3-day verdict. The absolute
+seconds on it are single-run wall-clock and move 3–6× with co-tenant load; the ratios are the
+transferable quantities.
+
+**`summary_table.md` — the run on one page, and why O₃ falls.** The final state of every
+monitored species; the dominant O₃/HOₓ budget reactions *netted by equation* (the converter
+splits one MCM rate expression into duplicate per-term rows, including signed negative twins,
+that must be summed before any entry is quoted); and the Jacobian build/solve split. Both
+budgets close — production vs loss agree to −0.60% for O₃ and −0.005% for HOₓ, the sharper
+test since source − sink *is* d[HOₓ]/dt — over 5600/5600 reactions covered. The budget
+describes a perpetual-noon box, not a diurnal average: the ranking of the photolysis channels
+is real, their absolute rates are noon rates.
 
 ## Unrelated known trap: pass a *complete* `u0`
 
