@@ -96,3 +96,33 @@ end
     @test Float64(_flatten_sigmoid(mk(false), T0)["rate-constant"]["A"]) ≈ k * σ     rtol=1e-12
     @test Float64(_flatten_sigmoid(mk(true),  T0)["rate-constant"]["A"]) ≈ k * (1 - σ) rtol=1e-12
 end
+
+@testset "photolysis sidecar rows: raw l/m/n with OUTPUT-list reaction_index" begin
+    T0 = 298.0
+    plain = Dict{Any,Any}("equation" => "A + B => C", "order" => 2,
+                          "rate-constant" => Dict{Any,Any}("type" => "arrhenius",
+                                                           "A" => 1.0e-11, "b" => 0.0,
+                                                           "Ea" => 0.0))
+    # Real MCM entry #39 (J_NO2): l=1.165e-2, m=0.244, n=0.267.
+    photo = Dict{Any,Any}("equation" => "NO2 => NO + O", "order" => 1,
+                          "type" => "zenith-angle-photolysis",
+                          "l" => 1.1650e-02, "m" => 2.4400e-01, "n" => 2.6700e-01)
+    sig = Dict{Any,Any}("equation" => "X => Y", "order" => 1, "type" => "sigmoid-branching",
+                        "A" => 1e-3, "B" => 0.0, "C" => 100.0, "D" => -1000.0)
+    st = _flatten_mechanism!(Dict{Any,Any}("reactions" => [plain, photo, sig]), 0.0, T0)
+
+    @test length(st.photo_rows) == 1                    # only zenith entries produce rows
+    @test length(st.reactions) == 3                     # 1:1, order-preserving
+    j, eq, l, m, n = only(st.photo_rows)
+    @test j == 2  # OUTPUT-list index (plain reaction occupies 1), not the index among photos
+    @test eq == "NO2 => NO + O"
+    @test (l, m, n) == (1.1650e-02, 2.4400e-01, 2.6700e-01)  # raw values, exact round-trip
+
+    # The diurnal driver assumes first-order J (s⁻¹); a higher-order entry must fail loudly
+    # rather than reach it with wrong units.
+    bad = Dict{Any,Any}("equation" => "A + B => C", "order" => 2,
+                        "type" => "zenith-angle-photolysis",
+                        "l" => 1.0, "m" => 1.0, "n" => 0.5)
+    @test_throws ErrorException _flatten_mechanism!(
+        Dict{Any,Any}("reactions" => [bad]), 0.0, T0)
+end
