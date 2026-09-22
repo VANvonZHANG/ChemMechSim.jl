@@ -66,19 +66,21 @@ supplied. The cost is therefore a **build/solve split**, not one number:
 |---|---|
 | parse the derived mechanism | ~24 s quiet, ~100 s busy |
 | lower it (`checks=false`) | ~56 s quiet (peak ~3.5 GiB), ~340 s busy (~3.7 GiB) |
-| `build_problem`, `jac=true` | ~45 s quiet, ~300 s busy — 4.3× the finite-difference build |
+| `build_problem`, `jac=true` | ~45 s quiet, ~300 s busy — ~4× the finite-difference build |
 | solve 3 days | ~40 s quiet, ~300 s busy |
 
 **Absolute seconds move 3–6× with co-tenant load.** This box is shared, and another user
 running WRF benchmarks at load average 70–100 sits between the two columns, differently every
 run — treat every number above as an order of magnitude, not a benchmark, and never compare
 seconds across sessions. The load-robust, transferable quantities are the **ratios**
-(same-session, from `tools/bench_jac.jl`): the analytic Jacobian costs **4.3× more to build**
-and solves **4.4–12.2× faster per span**, which puts the total-cost break-even at **1.05–3.76
-simulated days — a range, not a number**, because solve time measured *non-monotonically* in
-span under this load (longer spans sometimes measured faster). This example's 3-day span sits
-inside that range; do not read a single break-even day or a single 3-day winner out of any one
-session.
+(same-session, from `tools/bench_jac.jl`), and even the ratios' *values* move between
+sessions: across two measured sessions the build cost was **4.0–4.3×** and the per-span solve
+speedup **4.4–36×**. The total-cost break-even is always a **range, not a number**, because
+solve time measured *non-monotonically* in span under this load (longer spans sometimes
+measured faster) — observed **1.05–3.76 days** in one session and **0.8–1.0 days** in
+another. Those two sessions genuinely disagree on whether this example's 3-day span has a
+clear winner: inside the first range (no verdict), past the second (analytic wins outright).
+Trust the per-span solve speedup, hold no single break-even day or 3-day verdict.
 
 `checks=false` is **required**, not an optimisation: with `checks=true` MTK's unit validator
 cannot fold this mechanism's equations and lowering did not finish in 16 minutes. The equations
@@ -144,12 +146,13 @@ is drawn as an annotation rather than a curve, because it is the frozen-day limi
 visible, not a result of the run.
 
 **Figure 2, `fig2_efficiency.png` — the analytic Jacobian pays for itself within days.** The
-reaction-sharded Jacobian costs ~4.3× more to build but solves 4.4–12.2× faster at every
-measured span, so the total-cost break-even is shown as a range — 1.05–3.76 simulated days —
-not a number: solve time measured non-monotonically in span on this shared box, so the figure
-plots measured points, draws no fitted line, and quotes no single 3-day verdict. The absolute
-seconds on it are single-run wall-clock and move 3–6× with co-tenant load; the ratios are the
-transferable quantities.
+reaction-sharded Jacobian costs ~4–4.3× more to build (session-dependent) but solves
+4.4–36× faster at every measured span, so the total-cost break-even is shown as a range
+(e.g. 1.05–3.76 simulated days in one session, 0.8–1.0 in another) — not a number: solve
+time measured non-monotonically in span on this shared box, so the figure plots measured
+points, draws no fitted line, and quotes no single 3-day verdict. The absolute seconds on it
+are single-run wall-clock and move 3–6× with co-tenant load; the ratios are the transferable
+quantities.
 
 **`summary_table.md` — the run on one page, and why O₃ falls.** The final state of every
 monitored species; the dominant O₃/HOₓ budget reactions *netted by equation* (the converter
@@ -176,12 +179,11 @@ u0 = Dict(String(sp.name) => get(X_INIT, String(sp.name), 0.0) * c_air for sp in
 
 ## Upstream dependencies
 
-This example needs two fixes that are not on `main` yet:
+Both prerequisites landed on `main` in September 2026 (PRs #36 and #35, merged via rebase):
 
-- **`atmospheric-parser-and-jac`** (PR #36) — without it `load_mechanism` cannot read the
-  KPP/MCM YAML dialect at all.
-- **`meff-sharing`** (PR #35) — without it lowering this mechanism takes ~33 minutes instead of
-  under a minute, because the 1269 third-body/falloff reactions each get their own `M_eff`
-  algebraic variable instead of sharing one per distinct efficiency vector.
-
-The branch this example lives on has both merged in.
+- **PR #36** (`atmospheric-parser-and-jac`) — `load_mechanism` reading the KPP/MCM YAML
+  dialect (`activation-energy: K`, `quantity: molec`, `constant-cp` thermo), and `:kinetic`
+  gaining the reaction-sharded analytic Jacobian.
+- **PR #35** (`meff-sharing`) — reactions with identical third-body efficiencies sharing one
+  `M_eff` algebraic variable; without it, lowering this mechanism took ~33 minutes instead of
+  under a minute.

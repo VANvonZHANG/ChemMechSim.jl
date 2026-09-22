@@ -72,6 +72,41 @@ def t_lower_seconds():
     raise ValueError(f"no t_lower_s= line in {path}")
 
 
+def run_span_days():
+    """span_days parsed from output/run_meta.txt (same contract as t_lower_seconds)."""
+    path = style.DATA / "run_meta.txt"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"missing {path}: re-run mcm_box.jl to regenerate the run artifacts")
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.strip() == "span_days":
+            return float(value)
+    raise ValueError(f"no span_days= line in {path}")
+
+
+def span_vs_breakeven_clause(span, lo, hi):
+    """Computed, never hardcoded: where the example's span sits relative to the
+    measured break-even RANGE. A prior version hardcoded 'sits inside that
+    range', which became false the moment the bench moved (0.8-1.0 d puts a
+    3-day span past it — the opposite verdict).
+
+    Direction: break-even is the span beyond which the analytic Jacobian's
+    cheaper solves have repaid its costlier build — so a span ABOVE the range
+    means the analytic path wins outright, BELOW it the finite-difference path
+    is cheaper. (The first draft of this helper inverted those two labels and
+    contradicted the per-pair projections printed right below; caught on
+    regeneration review.)"""
+    if span > hi:
+        return (f"The example's {span:g}-day span is PAST the break-even, so the "
+                "analytic Jacobian wins outright at this span.")
+    if span < lo:
+        return (f"The example's {span:g}-day span is BELOW the break-even, so the "
+                "finite-difference path is cheaper at this span.")
+    return (f"The example's {span:g}-day span sits inside that range, so no "
+            "total-cost verdict at this span.")
+
+
 # --- Block 1: final state ------------------------------------------------------
 def final_state_rows():
     df = pd.read_csv(style.DATA / "series.csv")
@@ -231,7 +266,7 @@ def build_md(fs_rows, t_end, blocks, n_rows, dup_groups, twin_note,
                  "span under this box's co-tenant load (longer spans measured "
                  "faster), so each warm measured pair implies its own crossing "
                  f"({ber[0]:.2f} d from the 0.5-d pair, {ber[1]:.2f} d from the "
-                 "1.0-d pair). This example's 3-day span sits inside that range.")
+                 f"1.0-d pair). {span_vs_breakeven_clause(run_span_days(), ber[0], ber[1])}")
     else:
         L.append("**Break-even: not resolvable** from this run — the measured "
                  "pairs do not imply a consistent crossing.")
