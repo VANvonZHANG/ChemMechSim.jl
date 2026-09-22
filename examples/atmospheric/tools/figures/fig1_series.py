@@ -140,16 +140,21 @@ def build_figure(df):
     style.add_panel_label(ax_b, "b", x=-0.13, y=1.06)
 
     # NO3: annotated, not plotted (7 decades below OH on the same axis).
+    # y=0.78: the clear band between the OH and HO2 curves — at 0.52 the OH descent
+    # clipped the text block (pixel-verified: 21 co-occupied columns at distance 0).
+    # A white bbox guards against future curve-shape drift regardless.
     no3 = to_molec_cm3(df["NO3"].to_numpy())
     no3_max, no3_end = no3.max(), no3[-1]
     ax_b.text(
-        0.03, 0.52,
+        0.03, 0.78,
         "NO₃ not plotted: it peaks at\n"
         f"{no3_max:.1f} and ends at {no3_end:.2f} molec cm⁻³\n"
         "— effectively zero, because the box\n"
         "has no night. Radicals build from 0.",
         transform=ax_b.transAxes, fontsize=5.5,
         color=style.PALETTE["neutral_dark"], va="center", ha="left",
+        bbox={"facecolor": "white", "edgecolor": "none", "pad": 1.5,
+              "alpha": 0.85},
     )
 
     # Figure-level caption: the frozen-photolysis caveat must travel with
