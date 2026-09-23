@@ -9,8 +9,10 @@ Panel a: stable species (O3, NO, NO2, CH4) as mixing ratios, ppbv, log axis.
 Panel b: radicals (OH, HO2) as number densities, molec/cm^3, log axis.
 NO3 is deliberately NOT drawn as a line: on the shared molec/cm^3 axis it
 sits ~7 decades below OH, so plotting it would stretch the log axis over
-empty decades. It is reported as an explicit annotation instead (its
-suppression is the frozen-day limitation made visible).
+empty decades. It is reported as an explicit annotation instead. NOTE (from
+fig3's diurnal run): its smallness is mostly NOx starvation, not only the
+missing night — this scenario has a single 0.1-ppb NO2 pulse and no NOx
+source, so NO3 would stay ~4 molec/cm^3 even with nights.
 
 Run:  python3 examples/atmospheric/tools/figures/fig1_series.py
 """
@@ -149,8 +151,8 @@ def build_figure(df):
         0.03, 0.78,
         "NO₃ not plotted: it peaks at\n"
         f"{no3_max:.1f} and ends at {no3_end:.2f} molec cm⁻³\n"
-        "— effectively zero, because the box\n"
-        "has no night. Radicals build from 0.",
+        "— effectively zero: no night in this box, and\n"
+        "(fig3's diurnal run) NOx-starved regardless.",
         transform=ax_b.transAxes, fontsize=5.5,
         color=style.PALETTE["neutral_dark"], va="center", ha="left",
         bbox={"facecolor": "white", "edgecolor": "none", "pad": 1.5,
