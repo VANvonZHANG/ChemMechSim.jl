@@ -112,6 +112,14 @@ _a_factor(ctx::_UnitCtx, order::Real) =
 "Convert a Cantera A-factor value to canonical m-mol-s units given reaction order."
 _convert_A(A::Real, ctx::_UnitCtx, order::Real) = A * _a_factor(ctx, order)
 
+"Handler-facing: convert a raw YAML A-factor to canonical m-mol-s units given reaction
+ order. For use inside rate_type_handlers callbacks, where the ctx is passed opaquely."
+convert_afactor(A::Real, ctx, order::Real) = _convert_A(A, ctx, order)
+
+"Handler-facing: activation energy from the file's declared unit to J/mol
+ (K→8.314, cal/mol→4.184, J/mol→1.0)."
+ea_to_J_per_mol(Ea::Real, ctx) = Ea * ctx.ea_J_per_mol
+
 "Parse a Cantera pressure quantity (e.g. \"0.001 atm\", \"986.9 atm\", or a bare number)
  to Pa. atm ×101325, bar ×1e5, Pa ×1. Default Pa if no unit suffix."
 function _parse_pressure(p, ::_UnitCtx)
@@ -224,60 +232,83 @@ function _arrhenius_from_rc(rc, ctx::_UnitCtx, order::Real)
     return ElementaryArrhenius(A, b, Ea)
 end
 
-"Parse one reaction dict into ReactionData. Returns nothing (skipped + warning) for
- unsupported types (Chebyshev/etc.)."
-function _parse_reaction(rxn_dict, name_to_id::Dict{String,SpeciesID}, ctx::_UnitCtx)
+# —— rate-type parsers (uniform registry contract) ————————————————————————————
+# Each parser: (rxn_dict, reactants, name_to_id, ctx) -> AbstractKinetics.
+# The reaction loop dispatches the YAML `type` string through a Dict merged from
+# DEFAULT_RATE_PARSERS and the caller's rate_type_handlers — user entries override
+# built-ins. Nothing here knows about any specific non-Cantera dialect.
+
+function _parse_elementary_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
+    order = sum(values(reactants))
+    return _arrhenius_from_rc(rxn_dict["rate-constant"], ctx, order)
+end
+
+function _parse_three_body_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
+    order = sum(values(reactants)) + 1                  # +1 for [M]
+    base = _arrhenius_from_rc(rxn_dict["rate-constant"], ctx, order)
+    eff  = _parse_efficiencies(get(rxn_dict, "efficiencies", nothing), name_to_id)
+    return ThirdBodyArrhenius(base, eff)
+end
+
+function _parse_falloff_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
+    base_order = sum(values(reactants))                 # excludes (+M)
+    high_rate = _arrhenius_from_rc(rxn_dict["high-P-rate-constant"], ctx, base_order)
+    low_rate  = _arrhenius_from_rc(rxn_dict["low-P-rate-constant"],  ctx, base_order + 1)
+    eff = _parse_efficiencies(get(rxn_dict, "efficiencies", nothing), name_to_id)
+    if haskey(rxn_dict, "Troe")
+        t = rxn_dict["Troe"]
+        # Cantera {A,T3,T1,T2} -> TroeParams(α=A, T1, T2, T3) — field-aligned, NO reorder (spec T1;
+        # lowering.jl _troe_F formula Fcent=(1-α)exp(-T/T3)+α·exp(-T/T1)+exp(-T2/T) confirmed).
+        # T2 is optional in Cantera (omitted in e.g. AramcoMech3.0 for some reactions); when
+        # absent, exp(-T2/T) → 0, so we use a huge T2 (1e30) to underflow that term to zero.
+        T2 = Float64(get(t, "T2", 1e30))
+        tp = TroeParams(Float64(t["A"]), Float64(t["T1"]), T2, Float64(t["T3"]))
+        return TroeFalloff(low_rate, high_rate, eff, tp)
+    else
+        return LindemannFalloff(low_rate, high_rate, eff)
+    end
+end
+
+function _parse_plog_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
+    order = sum(values(reactants))
+    pts = PlogPoint[]
+    for rc in rxn_dict["rate-constants"]
+        P_Pa = _parse_pressure(rc["P"], ctx)
+        A    = _convert_A(Float64(rc["A"]), ctx, order)
+        b    = Float64(rc["b"])
+        Ea   = Float64(rc["Ea"]) * ctx.ea_J_per_mol
+        push!(pts, PlogPoint(P_Pa, A, b, Ea))
+    end
+    sort!(pts, by = p -> p.P)                        # defensive: ensure ascending
+    eq = String(rxn_dict["equation"])
+    length(pts) >= 2 ||
+        error("load_mechanism: PLOG reaction needs ≥2 pressure points; got $(length(pts)) in \"$eq\".")
+    length(unique(round.(p.P, sigdigits=12) for p in pts)) >= 2 ||
+        error("load_mechanism: PLOG reaction needs ≥2 distinct pressures; all same in \"$eq\".")
+    return PlogRate(pts)
+end
+
+"The built-in Cantera reaction types, keyed by their YAML `type` string."
+const DEFAULT_RATE_PARSERS = Dict{String,Function}(
+    "elementary"                   => _parse_elementary_rc,
+    "three-body"                   => _parse_three_body_rc,
+    "falloff"                      => _parse_falloff_rc,
+    "pressure-dependent-Arrhenius" => _parse_plog_rc,
+)
+
+"Parse one reaction dict into ReactionData, dispatching the YAML `type` string through
+ `parsers`. Returns `nothing` for a type with no parser — the caller counts and
+ aggregates the skip into one warning."
+function _build_reaction(rxn_dict, parsers::Dict{String,Function},
+                         name_to_id::Dict{String,SpeciesID}, ctx::_UnitCtx)
     eq = String(rxn_dict["equation"])
     parsed = _parse_equation(eq)
     reactants = _names_to_ids(parsed.reactants, name_to_id)
     products  = _names_to_ids(parsed.products,  name_to_id)
     rtype = get(rxn_dict, "type", "elementary")
-
-    if rtype == "elementary"
-        order = sum(values(reactants))
-        kin = _arrhenius_from_rc(rxn_dict["rate-constant"], ctx, order)
-    elseif rtype == "three-body"
-        order = sum(values(reactants)) + 1                  # +1 for [M]
-        base = _arrhenius_from_rc(rxn_dict["rate-constant"], ctx, order)
-        eff  = _parse_efficiencies(get(rxn_dict, "efficiencies", nothing), name_to_id)
-        kin = ThirdBodyArrhenius(base, eff)
-    elseif rtype == "falloff"
-        base_order = sum(values(reactants))                 # excludes (+M)
-        high_rate = _arrhenius_from_rc(rxn_dict["high-P-rate-constant"], ctx, base_order)
-        low_rate  = _arrhenius_from_rc(rxn_dict["low-P-rate-constant"],  ctx, base_order + 1)
-        eff = _parse_efficiencies(get(rxn_dict, "efficiencies", nothing), name_to_id)
-        if haskey(rxn_dict, "Troe")
-            t = rxn_dict["Troe"]
-            # Cantera {A,T3,T1,T2} -> TroeParams(α=A, T1, T2, T3) — field-aligned, NO reorder (spec T1;
-            # lowering.jl _troe_F formula Fcent=(1-α)exp(-T/T3)+α·exp(-T/T1)+exp(-T2/T) confirmed).
-            # T2 is optional in Cantera (omitted in e.g. AramcoMech3.0 for some reactions); when
-            # absent, exp(-T2/T) → 0, so we use a huge T2 (1e30) to underflow that term to zero.
-            T2 = Float64(get(t, "T2", 1e30))
-            tp = TroeParams(Float64(t["A"]), Float64(t["T1"]), T2, Float64(t["T3"]))
-            kin = TroeFalloff(low_rate, high_rate, eff, tp)
-        else
-            kin = LindemannFalloff(low_rate, high_rate, eff)
-        end
-    elseif rtype == "pressure-dependent-Arrhenius"
-        order = sum(values(reactants))
-        pts = PlogPoint[]
-        for rc in rxn_dict["rate-constants"]
-            P_Pa = _parse_pressure(rc["P"], ctx)
-            A    = _convert_A(Float64(rc["A"]), ctx, order)
-            b    = Float64(rc["b"])
-            Ea   = Float64(rc["Ea"]) * ctx.ea_J_per_mol
-            push!(pts, PlogPoint(P_Pa, A, b, Ea))
-        end
-        sort!(pts, by = p -> p.P)                        # defensive: ensure ascending
-        length(pts) >= 2 ||
-            error("load_mechanism: PLOG reaction needs ≥2 pressure points; got $(length(pts)) in \"$eq\".")
-        length(unique(round.(p.P, sigdigits=12) for p in pts)) >= 2 ||
-            error("load_mechanism: PLOG reaction needs ≥2 distinct pressures; all same in \"$eq\".")
-        kin = PlogRate(pts)
-    else
-        @warn "load_mechanism: skipping unsupported $rtype reaction: $eq"
-        return nothing
-    end
+    parser = get(parsers, rtype, nothing)
+    parser === nothing && return nothing
+    kin = parser(rxn_dict, reactants, name_to_id, ctx)
 
     # reversibility: <=> → ThermoReverse (default); => → Irreversible
     reverse_policy = parsed.reversible ? ThermoReverse() : Irreversible()
@@ -289,11 +320,16 @@ end
 
 # —— Entry point ———————————————————————————————————————————————————
 
-"Load a Cantera YAML mechanism file into a Mechanism (spec §5.1, Phase 5a).
- Covers: elementary / three-body / falloff(Troe/Lindemann) / PLOG
- (pressure-dependent-Arrhenius). Chebyshev/etc. are skipped with a warning.
- Selects the first ideal-gas phase (or the named one via `phase`)."
-function load_mechanism(path::AbstractString; phase::Union{Nothing,String}=nothing)::Mechanism
+"""Load a Cantera-YAML mechanism.
+
+`rate_type_handlers` maps YAML reaction `type` strings to parser functions with the
+signature `(rxn_dict, reactants, name_to_id, ctx) -> AbstractKinetics`; entries here
+OVERRIDE the built-in parsers for the same type. Use `convert_afactor` / `ea_to_J_per_mol`
+on `ctx` for unit conversions. Reactions whose type has no parser are skipped, with one
+aggregated warning at the end."""
+function load_mechanism(path::AbstractString;
+                        phase::Union{Nothing,String}=nothing,
+                        rate_type_handlers::Dict{String,Function}=Dict{String,Function}())::Mechanism
     dict = YAML.load_file(path)
     ctx = _parse_units(get(dict, "units", nothing))
     phase_dict = _select_phase(dict["phases"], phase)
@@ -304,10 +340,24 @@ function load_mechanism(path::AbstractString; phase::Union{Nothing,String}=nothi
     # Nothing downstream needs it (species carry their own composition), so default empty.
     elements = String.(get(phase_dict, "elements", String[]))
     species, thermo_db = _parse_species(dict["species"], name_to_id)
+    # User handlers override built-ins (merge order matters).
+    parsers = merge(DEFAULT_RATE_PARSERS, rate_type_handlers)
     reactions = ReactionData[]
+    skipped = Dict{String,Int}()
     for rxn_dict in dict["reactions"]
-        r = _parse_reaction(rxn_dict, name_to_id, ctx)
-        r === nothing || push!(reactions, r)
+        r = _build_reaction(rxn_dict, parsers, name_to_id, ctx)
+        if r === nothing
+            rtype = get(rxn_dict, "type", "elementary")
+            skipped[rtype] = get(skipped, rtype, 0) + 1
+        else
+            push!(reactions, r)
+        end
+    end
+    if !isempty(skipped)
+        total = sum(values(skipped))
+        detail = join(["$(k) ×$(v)" for (k, v) in sort(collect(skipped))], ", ")
+        @warn "load_mechanism: skipped $total reactions with unsupported rate types: $detail. " *
+              "Pass rate_type_handlers=Dict(\"<type>\" => (rxn, reactants, name_to_id, ctx) -> kin) to handle them."
     end
     return Mechanism(; species=species, reactions=reactions, thermo=thermo_db, elements=elements)
 end
