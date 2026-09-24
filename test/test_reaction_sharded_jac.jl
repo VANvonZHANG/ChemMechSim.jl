@@ -1,4 +1,5 @@
 using Test
+using DynamicQuantities
 using ChemMechSim
 using ChemMechSim: PlogPoint, PlogRate
 using ModelingToolkit
@@ -795,4 +796,56 @@ end
 
     @test all(isfinite, nonzeros(J_sharded))       # no M_eff left unsubstituted
     @test Matrix(J_sharded) ≈ Matrix(J_full)
+end
+
+# —— custom paramspec laws are reaction-shard supported (2026-09-24) ————————————
+# A kinetics type that declares the generic paramspec/body/needs_T protocol lowers
+# through the same symbolic_kf the sharded Jacobian uses, so it is SUPPORTED — the
+# kinetics check is a capability test, not a closed type list. Without this, a
+# mechanism loaded through the rate-type registry silently loses the analytic
+# Jacobian (jac=true degrades to :none), and an explicit request degrades SILENTLY.
+struct _ShardedToyLaw <: AbstractKinetics
+    A::Float64
+end
+ChemMechSim.paramspec(kin::_ShardedToyLaw) = (afactor(:A, "", 0.0),)
+ChemMechSim.body(kin::_ShardedToyLaw)      = (A, T) -> A
+ChemMechSim.needs_T(kin::_ShardedToyLaw)   = false
+
+@testset "reaction-sharded jac: custom paramspec laws + degradation warning" begin
+    spA = SpeciesData(id=1, name="A"); spB = SpeciesData(id=2, name="B")
+    mk_mech(kin) = Mechanism(species=[spA, spB],
+                             reactions=[ReactionData(reactants=Dict(1 => 1.0),
+                                                     products=Dict(2 => 1.0),
+                                                     kinetics=kin,
+                                                     reverse_policy=Irreversible())])
+    # 1. a paramspec-declaring law is supported and the analytic jac is ATTACHED
+    @test ChemMechSim._reaction_sharded_supported_kinetics(_ShardedToyLaw(1.0))
+    phase = ChemMechSim.ChemPhaseSystem(mk_mech(_ShardedToyLaw(2.0)); config=MechanismConfig())
+    prob = build_problem(phase, Dict("A" => 1.0, "B" => 0.0), (0.0, 1.0); jac=true)
+    @test prob.f.jac !== nothing
+
+    # 2. a law that lowers via an explicit symbolic_rate OVERRIDE but declares no
+    #    paramspec is sharded-UNSUPPORTED (the catch-all would MethodError on paramspec,
+    #    so the hasmethod gate must exclude it) — and an explicit jac=true that degrades
+    #    to :none must WARN, naming the type (the 2026-09-20 silent-degradation lesson).
+    struct _OverrideOnlyLaw <: AbstractKinetics
+        A::Float64
+    end
+    function ChemMechSim.symbolic_rate(kin::_OverrideOnlyLaw, rx::ReactionData,
+                                        ctx::ChemMechSim.RateCtx)
+        k = ChemMechSim.rate_param(Symbol("k_", ctx.j, "_A"), kin.A, u"s^-1")  # order-1 unit
+        return k * ChemMechSim._mass_action(rx.reactants, ctx.cvar)
+    end
+    ChemMechSim.needs_T(kin::_OverrideOnlyLaw) = false
+
+    @test !ChemMechSim._reaction_sharded_supported_kinetics(ChebyshevRate())   # placeholder: neither path
+    @test !ChemMechSim._reaction_sharded_supported_kinetics(_OverrideOnlyLaw(1.0))
+    phase_bad = ChemMechSim.ChemPhaseSystem(mk_mech(_OverrideOnlyLaw(1.0)); config=MechanismConfig())
+    logs, prob_bad = Test.collect_test_logs() do
+        build_problem(phase_bad, Dict("A" => 1.0, "B" => 0.0), (0.0, 1.0); jac=true)
+    end
+    @test prob_bad.f.jac === nothing
+    warns = [l for l in logs if l.level == Base.CoreLogging.Warn]
+    @test length(warns) == 1
+    @test occursin("_OverrideOnlyLaw", warns[1].message) && occursin(":none", warns[1].message)
 end
