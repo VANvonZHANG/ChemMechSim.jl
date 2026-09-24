@@ -73,8 +73,18 @@ function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
     # Expr-surgery broke across Symbolics versions); :auto no longer needs the cse_chunk_size
     # /write_chunk_size kwargs, but they remain in the signature for call-site compatibility.
     if strategy === :auto
-        strategy = _reaction_sharded_supports_mechconfig(phase.mech, phase.config) ?
-                   :reaction_sharded : :none
+        supported = _reaction_sharded_supports_mechconfig(phase.mech, phase.config)
+        if !supported && (jac || jac_chunked)
+            # An EXPLICIT analytic-Jacobian request must not degrade silently (the
+            # 2026-09-20 lesson): name the blocking kinetics types and the outcome.
+            bad = unique(typeof(rx.kinetics) for rx in phase.mech.reactions
+                         if !_reaction_sharded_supports(rx))
+            @warn "build_problem: jac=true requested, but the reaction-sharded Jacobian does " *
+                  "not support these kinetics types: $(join(bad, ", ")) — falling back to " *
+                  ":none (the solver's ForwardDiff). Pass jac_strategy=:none to request the " *
+                  "fallback explicitly."
+        end
+        strategy = supported ? :reaction_sharded : :none
     end
     if strategy === :reaction_sharded
         prob_baseline = ODEProblem(sys, pairs, tspan)

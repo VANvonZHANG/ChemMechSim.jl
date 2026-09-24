@@ -51,9 +51,15 @@ function _reaction_dependency_state_indices(rx::ReactionData, mech::Mechanism, s
     return cols
 end
 
+"The kinetics capability test: the BUILT-IN types with explicit symbolic_kf methods, plus
+ ANY law declaring the generic paramspec protocol — such a law lowers through the same
+ symbolic_kf the sharded path calls (see the fallback method below), so rate-type-registry
+ dialects must not silently lose the analytic Jacobian. Chebyshev/SRI declare neither and
+ stay unsupported."
 _reaction_sharded_supported_kinetics(kin) =
     kin isa ElementaryArrhenius || kin isa ThirdBodyArrhenius || kin isa PlogRate ||
-    kin isa LindemannFalloff || kin isa TroeFalloff
+    kin isa LindemannFalloff || kin isa TroeFalloff ||
+    hasmethod(paramspec, Tuple{typeof(kin)})
 
 "Reverse policies the reaction-sharded Jacobian can route through the lowering `_net_rate`.
  ExplicitReverse reuses the policy's own rate law; ThermoReverse reuses the opaque keq node."
@@ -276,6 +282,12 @@ end
  [M]_eff term). The M_eff_j(t) variables it creates via _meff are inlined into the rate
  expression by _reaction_rate_expr (no formula duplication here, no M_eff free variable)."
 _reaction_sharded_symbolic_kf(kin::AbstractFalloff, ctx::RateCtx) = symbolic_kf(kin, ctx)
+
+"Custom laws declaring the generic paramspec protocol: straight through to the generic
+ symbolic_kf (they never couple via [M]_eff, so they need no special path). Only reachable
+ when the capability test above let them in; a law that reached here WITHOUT paramspec
+ would error loudly inside symbolic_kf, never silently."
+_reaction_sharded_symbolic_kf(kin::AbstractKinetics, ctx::RateCtx) = symbolic_kf(kin, ctx)
 
 "True for rate laws whose forward rate couples every species via [M_eff] (third-body, falloff).
  These are the reactions that do not scale under per-species symbolic differentiation — Path M
