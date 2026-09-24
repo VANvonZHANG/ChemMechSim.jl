@@ -258,3 +258,80 @@ end
     r3 = mech.reactions[3]                       # X => Y with A = 3.0
     @test r3.kinetics.A == 3.0
 end
+
+# —— rate-type registry (2026-09-24 direct-load spec §1) ——————————————————————————
+# load_mechanism dispatches type strings through DEFAULT_RATE_PARSERS; the
+# rate_type_handlers kwarg merges user entries OVER the defaults (override allowed).
+# Unknown types are skipped with ONE aggregated warning that names the kwarg.
+
+struct _RegToy <: AbstractKinetics
+    k0::Float64
+end
+ChemMechSim.paramspec(kin::_RegToy) = (afactor(:k0, "", 0.0),)   # → parameter k_{j}_A
+ChemMechSim.body(kin::_RegToy)      = (k0, T) -> k0
+ChemMechSim.needs_T(kin::_RegToy)   = false
+
+_regtoy_yaml(reactions_block) = """
+phases:
+  - name: gas
+    thermo: ideal-gas
+    species: [A, B]
+    reactions: all
+species:
+  - name: A
+    composition: {Ar: 1}
+    thermo: {model: constant-cp, h0: 0, s0: 0, cp0: 0}
+  - name: B
+    composition: {Ar: 1}
+    thermo: {model: constant-cp, h0: 0, s0: 0, cp0: 0}
+reactions:
+$reactions_block
+"""
+
+@testset "rate-type registry" begin
+    # 1. custom type via kwarg: parsed (not skipped), correct instance, numeric rate works
+    path = tempname() * ".yaml"
+    write(path, _regtoy_yaml("  - {equation: \"A => B\", type: reg-toy, k0: 0.5}\n"))
+    mech = load_mechanism(path; rate_type_handlers = Dict{String,Function}(
+        "reg-toy" => (rxn, reactants, name_to_id, ctx) -> _RegToy(Float64(rxn["k0"]))))
+    @test length(mech.reactions) == 1
+    @test mech.reactions[1].kinetics isa _RegToy
+    @test rate_constant(mech.reactions[1].kinetics, 300.0) == 0.5
+
+    # 2. a user entry can OVERRIDE a built-in type ("elementary"); without it, the built-in runs
+    path_el = tempname() * ".yaml"
+    write(path_el, _regtoy_yaml(
+        "  - {equation: \"A => B\", rate-constant: {A: 1.0e-12, b: 0.0, Ea: 0.0}}\n"))
+    mech2 = load_mechanism(path_el; rate_type_handlers = Dict{String,Function}(
+        "elementary" => (rxn, reactants, name_to_id, ctx) -> _RegToy(42.0)))
+    @test mech2.reactions[1].kinetics isa _RegToy
+    mech2b = load_mechanism(path_el)
+    @test mech2b.reactions[1].kinetics isa ElementaryArrhenius
+
+    # 3. unknown types are skipped with ONE aggregated warning naming the kwarg
+    path2 = tempname() * ".yaml"
+    write(path2, _regtoy_yaml(
+        "  - {equation: \"A => B\", type: custom-x, k0: 1.0}\n" *
+        "  - {equation: \"B => A\", type: custom-y, k0: 1.0}\n" *
+        "  - {equation: \"A => B\", type: custom-x, k0: 1.0}\n"))
+    logs, mech3 = Test.collect_test_logs() do
+        load_mechanism(path2)
+    end
+    @test length(mech3.reactions) == 0                       # all three dropped
+    warns = [l for l in logs if l.level == Base.CoreLogging.Warn]
+    @test length(warns) == 1                                 # ONE warning, not three
+    @test occursin("custom-x ×2", warns[1].message)
+    @test occursin("custom-y ×1", warns[1].message)
+    @test occursin("rate_type_handlers", warns[1].message)
+
+    # 4. the four built-ins are registered
+    @test sort(collect(keys(ChemMechSim.DEFAULT_RATE_PARSERS))) ==
+          ["elementary", "falloff", "pressure-dependent-Arrhenius", "three-body"]
+
+    # 5. handler-facing unit helpers match the parse-time conversions
+    ctx = ChemMechSim._parse_units(Dict("length" => "cm", "quantity" => "molec",
+                                        "activation-energy" => "K"))
+    @test convert_afactor(3.8e-13, ctx, 2) ≈ 3.8e-13 * 1e-6 * 6.02214076e23   # cm³/molec/s → m³/mol/s
+    @test convert_afactor(0.0089, ctx, 1) ≈ 0.0089                            # order 1: s⁻¹ unchanged
+    @test ea_to_J_per_mol(600.0, ctx) == 600.0 * 8.314                        # K → J/mol
+end
