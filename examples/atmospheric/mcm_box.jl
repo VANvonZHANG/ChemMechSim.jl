@@ -1,165 +1,280 @@
-# Atmospheric box model: MCM alkanes/alkenes, isothermal, fixed pressure, 3 days.
+# Atmospheric box model: MCM alkanes/alkenes, isothermal at 298 K, fixed pressure.
 #
-#   julia --project=. examples/atmospheric/mcm_box.jl
+#   julia --project=. examples/atmospheric/mcm_box.jl <frozen|diurnal> [span_days]
 #
-# Run tools/flatten_photolysis.jl first — it produces the mechanism this reads.
+# One driver, two photolysis modes (span_days defaults to 8 for both):
+#   frozen  — photolysis parameters at their defaults = J at overhead sun (perpetual day)
+#   diurnal — the same parameters driven by the zenith clock (Cantera-method port):
+#             J = l·cz^m·exp(−n/cz), piecewise-constant per 60-s step, solver NOT restarted
 #
-# Mode is :kinetic (the MechanismConfig() zero point), which is the right — and the only
-# correct — choice for an atmospheric box model:
+# Reads the 24 MB SOURCE mechanism directly — no preprocessor, no derived mechanism, no
+# sidecar. The two MCM rate types the parser does not know are handled example-side via
+# load_mechanism's rate_type_handlers registry (tools/mcm_rate_types.jl).
+#
+# Mode is :kinetic (the MechanismConfig() zero point) — the only correct choice for an
+# atmospheric box model:
 #   * T is given by the scenario (298 K), never solved from an energy balance;
 #   * P is given (102858 Pa) and the state basis is concentration, so no EOS is needed;
-#   * MCM emits only forward rates (every reaction is `=>`) and its thermo data is uniformly
-#     zero, so a reverse rate could not be formed anyway.
-# The other convenience modes (:fixedT, :adiabatic_constV, :adiabatic_constP) would each
-# inject an energy equation and/or an EOS that this problem does not have.
+#   * MCM emits only forward rates (`=>`) and its thermo data is uniformly zero, so a
+#     reverse rate could not be formed anyway.
+# The convenience modes (:fixedT, :adiabatic_constV, :adiabatic_constP) would each inject
+# an energy equation and/or an EOS that this problem does not have.
 #
-# Scenario values are copied verbatim from the converter's own
-# mcm_alkanes_alkenes_repro_config.yaml so this run is comparable to its Cantera reference.
-#
-# Caveat this example cannot escape: photolysis is FROZEN (see the README). The diurnal
-# cycle is absent, so this is a perpetual-day box — night-only chemistry (NO3 / N2O5
-# accumulation) will not appear, and the species listed below settle to a steady daytime
-# state rather than cycling.
+# Scenario values are copied verbatim from the converter's mcm_alkanes_alkenes_repro_config
+# so this run stays comparable to its Cantera reference.
 
 using ChemMechSim
 using ModelingToolkit
-using ModelingToolkit: getname, parameters
+using ModelingToolkit: getname, parameters, setp
 using OrdinaryDiffEq
 using Printf
 
-const MECH  = joinpath(@__DIR__, "output", "mcm_alkanes_alkenes_frozen.yaml")
-const T0    = 298.0          # K
-const P0    = 102858.0       # Pa
-const T_END = 259200.0       # s = 3 days
-const R_GAS = 8.314          # J/(mol·K)
+include(joinpath(@__DIR__, "tools", "mcm_rate_types.jl"))
+include(joinpath(@__DIR__, "tools", "diurnal_env.jl"))   # zenith clock + J law (pure functions)
 
-# Mole fractions, from the reference config.
-const X_INIT = Dict("N2" => 0.78, "O2" => 0.21, "H2O" => 0.01,
-                    "O3" => 3.0e-8, "NO2" => 1.0e-10, "CH4" => 1.8e-6)
+# ———————————————————— script body (skipped when included by anything else) ————————
+if abspath(PROGRAM_FILE) == @__FILE__
+    usage = "usage: julia --project=. examples/atmospheric/mcm_box.jl <frozen|diurnal> [span_days]"
+    isempty(ARGS) && error(usage)
+    const MODE = ARGS[1]
+    MODE in ("frozen", "diurnal") || error(usage)
+    const DAYS = length(ARGS) >= 2 ? parse(Float64, ARGS[2]) : 8.0
+    const T_END = DAYS * 86400.0
 
-# The reference config's monitor list.
-const MONITOR = ["O3", "NO", "NO2", "NO3", "OH", "HO2", "CH4"]
+    const SRC     = joinpath(@__DIR__, "mcm_alkanes_alkenes_converted.yaml")
+    const T0      = 298.0          # K
+    const P0      = 102858.0       # Pa
+    const R_GAS   = 8.314          # J/(mol·K)
+    const DT_STEP = 60.0           # s — the converter's simulator step (diurnal mode)
 
-isfile(MECH) ||
-    error("mcm_box: derived mechanism not found at\n  $MECH\n" *
-          "Run the preprocessor first:\n" *
-          "  julia --project=. examples/atmospheric/tools/flatten_photolysis.jl")
+    # Mole fractions and monitor list, from the reference config.
+    const X_INIT = Dict("N2" => 0.78, "O2" => 0.21, "H2O" => 0.01,
+                        "O3" => 3.0e-8, "NO2" => 1.0e-10, "CH4" => 1.8e-6)
+    const MONITOR = ["O3", "NO", "NO2", "NO3", "OH", "HO2", "CH4"]
 
-# --- initial conditions -------------------------------------------------------------------
-# X_INIT is mole fractions; the state basis is concentration [mol/m^3], so c = X·P/(R·T).
-# EVERY species is listed explicitly — the 1836 not in X_INIT get exactly 0.0. Passing a
-# partial u0 and relying on MTK to default the rest is NOT safe here: observed doing so, the
-# unlisted species came back with arbitrary non-zero values (e.g. TBUTCO3 = 0.827) and the
-# integration blew up with NaN on the first solve.
-const C_AIR = P0 / (R_GAS * T0)                       # total concentration, mol/m^3
-@printf("T = %.1f K, P = %.0f Pa, c_air = %.3f mol/m^3\n", T0, P0, C_AIR)
+    isfile(SRC) || error("mcm_box: source mechanism not found at\n  $SRC\n" *
+                         "It is not committed (24 MB). Copy it from the converter:\n" *
+                         "  cp <kpp-cantera-converter>/examples/mcm/mcm_alkanes_alkenes_converted.yaml \\\n" *
+                         "     examples/atmospheric/\nSee examples/atmospheric/README.md.")
 
-# --- mechanism ----------------------------------------------------------------------------
-println("loading ", basename(MECH), " ...")
-t_parse = @elapsed mech = load_mechanism(MECH)
-@printf("  %d species, %d reactions  (%.1f s)\n",
-        length(mech.species), length(mech.reactions), t_parse)
+    # --- load + shape invariants ------------------------------------------------------------
+    # Type-based counts (the source is hand-copied and 24 MB, so a wrong or stale copy is
+    # the likeliest fresh-clone failure — and it would otherwise fail SILENTLY: the box
+    # would still run and the OH>0 check below would still pass). 1843 = 1842 + the
+    # phantom `M` (the parser strips `M` from equations; the species list keeps it).
+    println("loading ", basename(SRC), " (direct, rate_type_handlers) ...")
+    t_parse = @elapsed mech = load_mechanism(SRC; rate_type_handlers = mcm_rate_handlers())
+    @printf("  %d species, %d reactions  (%.1f s)\n",
+            length(mech.species), length(mech.reactions), t_parse)
+    length(mech.species)   == 1843 || error("mcm_box: expected 1843 species, got ",
+                                            length(mech.species), " — wrong or stale source file?")
+    length(mech.reactions) == 5600 || error("mcm_box: expected 5600 reactions, got ",
+                                            length(mech.reactions))
+    count(r -> r.kinetics isa ZenithPhotolysis, mech.reactions) == 1041 ||
+        error("mcm_box: expected 1041 ZenithPhotolysis reactions")
+    count(r -> r.kinetics isa SigmoidBranching, mech.reactions) == 2 ||
+        error("mcm_box: expected 2 SigmoidBranching reactions")
 
-# checks=false is REQUIRED here, not an optimisation: with checks=true, MTK's unit validator
-# cannot fold this mechanism's equations and lowering did not finish in 16 minutes. The
-# equations are dimensionally correct; the check just cannot prove it.
-t_low = @elapsed r = BatchReactor(mech; mode=:kinetic, checks=false, name=:mcm_box)
-@printf("  lowered in %.1f s  (peak %.2f GiB)\n", t_low, Sys.maxrss() / 2^30)
-println("  ", r)
+    # --- lower -------------------------------------------------------------------------------
+    # checks=false is REQUIRED here, not an optimisation: with checks=true, MTK's unit
+    # validator cannot fold this mechanism's equations and lowering did not finish in
+    # 16 minutes. The equations are dimensionally correct; the check cannot prove it.
+    t_low = @elapsed r = BatchReactor(mech; mode = :kinetic, checks = false,
+                                      name = Symbol("mcm_box_", MODE))
+    @printf("  lowered in %.1f s  (peak %.2f GiB)\n", t_low, Sys.maxrss() / 2^30)
+    sys = extract_system(r)
+    ps = parameters(sys)
+    state_index = Dict(String(getname(u)) => i
+                       for (i, u) in enumerate(ModelingToolkit.unknowns(sys)))
+    length(state_index) == length(mech.species) ||
+        error("mcm_box: the state has $(length(state_index)) unknowns but the mechanism has " *
+              "$(length(mech.species)) species — exports would be incomplete")
 
-# Built after the mechanism is loaded, so it can name every species.
-u0 = Dict(String(sp.name) => get(X_INIT, String(sp.name), 0.0) * C_AIR
-          for sp in mech.species)
+    # --- initial conditions --------------------------------------------------------------------
+    # X_INIT is mole fractions; the state basis is concentration [mol/m^3], so
+    # c = X·P/(R·T). EVERY species is listed explicitly — the 1836 not in X_INIT get
+    # exactly 0.0. Passing a partial u0 is NOT safe here: observed doing so, the unlisted
+    # species came back with arbitrary non-zero values and the integration blew up with
+    # NaN on the first solve.
+    const C_AIR = P0 / (R_GAS * T0)
+    @printf("T = %.1f K, P = %.0f Pa, c_air = %.3f mol/m^3\n", T0, P0, C_AIR)
+    u0 = Dict(String(sp.name) => get(X_INIT, String(sp.name), 0.0) * C_AIR
+              for sp in mech.species)
+    Tparam = ps[findfirst(p -> String(getname(p)) == "T", ps)]
 
-# --- solve ---------------------------------------------------------------------------------
-sys = extract_system(r)
-Tparam = parameters(sys)[findfirst(p -> String(getname(p)) == "T", parameters(sys))]
+    # --- photolysis parameter mapping + ORDER/VALUE GUARD (both modes) ------------------------
+    # Resolve each k_{j}_A BY NAME (the sharded-Jacobian lesson: never assume parameter
+    # ordering — commit 8277716 fixed a 20-50-orders-of-magnitude bug from exactly that).
+    # j is the 1-based enumerate index over mech.reactions, which is the lowering's k_{j}
+    # index by construction. The value guard closes the loop end-to-end: the default IS
+    # J(cz=1) = l·exp(−n) (set by the handler), so if names, ordering or values drift,
+    # this errors BEFORE the solve rather than producing a plausible-but-wrong run.
+    pindex = Dict(String(getname(p)) => i for (i, p) in enumerate(ps))
+    photos = [(j = j, kin = rx.kinetics) for (j, rx) in enumerate(mech.reactions)
+              if rx.kinetics isa ZenithPhotolysis]
+    photo_syms = Any[]
+    for ph in photos
+        name = "k_$(ph.j)_A"
+        haskey(pindex, name) || error("mcm_box: no parameter $name — the parameter/reaction ",
+                                      "index contract broke for reaction ", ph.j)
+        sym = ps[pindex[name]]
+        isapprox(ModelingToolkit.getdefault(sym), ph.kin.A; rtol = 1e-12) ||
+            error("mcm_box: $name defaults to ", ModelingToolkit.getdefault(sym),
+                  " but reaction $(ph.j)'s J(cz=1) is ", ph.kin.A,
+                  " — parameter mapping is wrong; not solving")
+        push!(photo_syms, sym)
+    end
+    length(unique(photo_syms)) == length(photo_syms) ||
+        error("mcm_box: duplicate k_{j}_A mapping across ", length(photo_syms),
+              " photolysis reactions")
+    @printf("  all %d photolysis parameters verified (default = J at cz = 1)\n", length(photos))
 
-println("solving ", T_END / 86400, " days ...")
-t_solve = @elapsed sol = simulate(
-    r, (0.0, T_END);
-    u0 = u0, params = [Tparam => T0],
-    # jac=true uses the reaction-sharded analytic Jacobian instead of the finite-difference one
-    # FBDF would otherwise form (~1842 RHS evaluations per Jacobian at 1842 states). Measured on
-    # this mechanism: build_problem 42.5 s -> 300.3 s, but solve 145.3 s -> 31.1 s per 0.5
-    # simulated days. Break-even is ~1.13 days, so a 3-day run is ~1.9x faster overall.
-    # autodiff=false stays: an analytic Jacobian is supplied, so ForwardDiff must not also run.
-    jac = true,
-    solver = FBDF(autodiff = false),
-    reltol = 1e-6, abstol = 1e-12, saveat = 1200.0)
-@printf("  solved in %.1f s, retcode = %s\n\n", t_solve, sol.retcode)
+    # Setters built from the BARE SYSTEM (SymbolicIndexingInterface.setp): the sharded-jac
+    # path wraps the problem in a hand-built ODEProblem that carries no symbolic index,
+    # but a ParameterIndex from `sys` applies to any target whose parameter buffer shares
+    # the layout — the problem AND its integrators alike.
+    KSETTERS = [setp(sys, sym) for sym in photo_syms]
 
-# Maps a species name to its row in the state vector; used by the export and the report below.
-state_index = Dict(String(getname(u)) => i
-                   for (i, u) in enumerate(ModelingToolkit.unknowns(sys)))
+    # J_NO2 = the NO2 photolysis row (the reference J for exports and cross-checks).
+    id_no2 = only(sp.id for sp in mech.species if sp.name == "NO2")
+    j_jno2 = only(ph.j for ph in photos if haskey(mech.reactions[ph.j].reactants, id_no2))
+    jno2 = mech.reactions[j_jno2].kinetics
 
-# --- export for the Python figures ---------------------------------------------------------
-# Long format would be tidier, but wide matches how the figures are drawn (one line per species
-# against time), and there are only 7 monitored species.
-const OUT_CSV = joinpath(@__DIR__, "output", "series.csv")
-mkpath(dirname(OUT_CSV))
-open(OUT_CSV, "w") do io
-    println(io, join(vcat("time_s", MONITOR), ","))
-    for (k, t) in enumerate(sol.t)
-        row = [t]
-        for name in MONITOR
-            push!(row, sol.u[k][state_index[name]])
+    # --- build + solve ---------------------------------------------------------------------------
+    # jac=true builds the reaction-sharded analytic Jacobian instead of the finite-
+    # difference one FBDF would otherwise form (~1842 RHS evaluations per Jacobian call).
+    # autodiff=false stays: an analytic Jacobian is supplied, so ForwardDiff must not run.
+    println("building problem (jac=true) ...")
+    t_build = @elapsed prob = build_problem(r, u0, (0.0, T_END);
+                                            params = [Tparam => T0], jac = true)
+    @printf("  built in %.1f s\n", t_build)
+
+    local sol, t_solve
+    if MODE == "diurnal"
+        # Initial J's at t = 0 (MIDNIGHT: cz = cos(89.5°)). Pre-solve setter writes on the
+        # problem DO reach the solve (mini-verified) — and the mod-grid callback below
+        # does NOT fire at t = 0 (discrete callbacks fire at tstops; only a literally-true
+        # condition is evaluated during initialization), so without this block the first
+        # 60 s would run at the NOON defaults.
+        cz0 = cos_zenith(0.0)
+        for i in eachindex(photos)
+            KSETTERS[i](prob, photolysis_J(photos[i].kin.l, photos[i].kin.m,
+                                           photos[i].kin.n, cz0))
         end
-        println(io, join(row, ","))
+
+        # Condition `iszero(mod(t, DT_STEP))`: discrete callbacks with a literally-TRUE
+        # condition fire after EVERY step AND during initialization (mini-verified: 143
+        # fires on a 2-s toy problem); the mod test restricts firing to exactly the 60-s
+        # grid. save_positions=(false,false): a parameter change is not a state event.
+        const N_PHOTO = length(photos)
+        apply_photolysis!(integ) = begin
+            cz = cos_zenith(integ.t)
+            @inbounds for i in 1:N_PHOTO
+                kin = photos[i].kin
+                KSETTERS[i](integ, photolysis_J(kin.l, kin.m, kin.n, cz))
+            end
+            return nothing
+        end
+        cb = DiscreteCallback((u, t, integ) -> iszero(mod(t, DT_STEP)), apply_photolysis!;
+                              save_positions = (false, false))
+        tstops = DT_STEP:DT_STEP:T_END
+
+        # TOLERANCE POLICY — the trade-off actually taken, not the ideal one. Night-time
+        # trace species sit BELOW the flat abstol (OH's night trough ~7e-17 mol/m^3,
+        # NO3's peak ~7e-18, both vs abstol 1e-12): the solver may return anything up to
+        # ~1e-12 for them, so their night values (and all of NO3) are NOT resolved and
+        # fig3 floors them at the tolerance line as bounds. Resolving them needs a
+        # per-state abstol ~1e-20..1e-22 — measured: 1e-22 ran >94 min of solve without
+        # finishing and was abandoned. reltol is loosened to 1e-4 (the frozen mode uses
+        # 1e-6); the majors still match a 1e-6 run to 4-5 significant digits — but do NOT
+        # quote fine percentages off this run without re-running tighter.
+        @printf("solving %.1f days, diurnal (dt_step = %.0f s, reltol 1e-4, abstol 1e-12) ...\n",
+                DAYS, DT_STEP)
+        t_solve = @elapsed sol = solve(prob, FBDF(autodiff = false);
+                                       reltol = 1e-4, abstol = 1e-12, saveat = 1200.0,
+                                       callback = cb, tstops = tstops)
+    else
+        @printf("solving %.1f days, frozen (perpetual noon, reltol 1e-6, abstol 1e-12) ...\n",
+                DAYS)
+        t_solve = @elapsed sol = solve(prob, FBDF(autodiff = false);
+                                       reltol = 1e-6, abstol = 1e-12, saveat = 1200.0)
+    end
+    @printf("  solved in %.1f s, retcode = %s\n", t_solve, sol.retcode)
+
+    # --- exports: output/<mode>/, uniform schema so the figures read one way ------------------
+    OUTDIR = joinpath(@__DIR__, "output", MODE)
+    mkpath(OUTDIR)
+    OUT_CSV = joinpath(OUTDIR, "series.csv")
+    open(OUT_CSV, "w") do io
+        println(io, join(vcat("time_s", "cz", "J_NO2", MONITOR), ","))
+        for (k, t) in enumerate(sol.t)
+            # 1200 s is a whole multiple of the 60-s tick, so the formula evaluated AT a
+            # save time IS the applied piecewise value. Frozen: cz = 1 — the perpetual
+            # noon the parameters default to — and J_NO2 = that default.
+            cz = MODE == "diurnal" ? cos_zenith(t) : 1.0
+            row = Any[t, cz, photolysis_J(jno2.l, jno2.m, jno2.n, cz)]
+            for name in MONITOR
+                push!(row, sol.u[k][state_index[name]])
+            end
+            println(io, join(row, ","))
+        end
+    end
+    println("wrote ", OUT_CSV, "  (", length(sol.t), " rows)")
+
+    OUT_STATE = joinpath(OUTDIR, "final_state.csv")
+    open(OUT_STATE, "w") do io
+        println(io, "species,concentration_mol_m3")
+        for sp in mech.species
+            println(io, String(sp.name), ",", sol.u[end][state_index[String(sp.name)]])
+        end
+    end
+    println("wrote ", OUT_STATE, "  (", length(mech.species), " species)")
+
+    open(joinpath(OUTDIR, "run_meta.txt"), "w") do io
+        println(io, "mode=", MODE)
+        MODE == "diurnal" && println(io, "dt_step_s=", DT_STEP)
+        println(io, "reltol=", MODE == "diurnal" ? "1e-4" : "1e-6")
+        println(io, "abstol=1e-12")     # trace species below this are UNRESOLVED (diurnal)
+        println(io, "span_days=", DAYS)
+        println(io, "t_lower_s=", round(t_low, digits = 1))
+        # build+solve COMBINED (diurnal's solve includes the callback ticks) — NOT
+        # comparable to bench_jac.csv's split measurements.
+        println(io, "t_simulate_s=", round(t_build + t_solve, digits = 1))
+        println(io, "jac=true")
+        # Process-LIFETIME peak (Sys.maxrss high-water mark), dominated by lowering+codegen.
+        println(io, "peak_rss_gib=", round(Sys.maxrss() / 2^30, digits = 2))
+    end
+
+    # --- report + chemistry checks ------------------------------------------------------------
+    # Read the trajectory straight out of sol.u. The DE solution's `sol[i, j]` indexes
+    # (component, timestep) — the opposite order from the intuitive reading — so reading
+    # sol.u avoids the trap.
+    series(name) = [u[state_index[name]] for u in sol.u]
+    println("\nspecies        initial [mol/m^3]      final [mol/m^3]")
+    for name in MONITOR
+        v = series(name)
+        @printf("  %-8s %18.6e %18.6e\n", name, v[1], v[end])
+    end
+
+    # The 1041 photolysis reactions are the radical source. Without them the box would
+    # sit at its initial zeros forever — assert the chemistry actually ran.
+    oh = series("OH")
+    maximum(oh) > 0.0 ||
+        error("mcm_box ($MODE): OH stayed at zero. Frozen: the photolysis defaults are " *
+              "noon values — check the shape guards above. Diurnal: the callback is not " *
+              "wired (check apply_photolysis! and the parameter guard).")
+    @printf("\nOH peak = %.3e mol/m^3  (radical source is active)\n", maximum(oh))
+
+    if MODE == "diurnal"
+        # Soft report: NO3 at this tolerance is an upper bound, and this scenario is
+        # NOx-starved (a single 0.1-ppb NO2 pulse, HNO3 terminal) — no night accumulation
+        # is expected. Night test is GEOMETRIC, never a cz threshold: the clock's 89.5°
+        # clamp pins cz at 0.0087 all night, so any threshold lies.
+        no3 = series("NO3")
+        no3_at = sol.t[argmax(no3)]
+        tod = no3_at % 86400.0
+        @printf("NO3 peak = %.3e mol/m^3 (%.2f molec/cm^3) at t = %.2f d [%s]\n",
+                maximum(no3), maximum(no3) * 6.02214076e23 / 1e6, no3_at / 86400,
+                (tod <= 21600.0 || tod >= 64800.0) ? "night ✓" : "DAY — unexpected")
     end
 end
-println("wrote ", OUT_CSV, "  (", length(sol.t), " rows)")
-
-# The FULL final state, for tools/budget.jl. A rate law needs every reactant's concentration,
-# not just the 7 monitored species, so the budget cannot be computed from series.csv. This is
-# deliberately a separate file: the figures want series.csv narrow (7 species, one line each).
-const OUT_STATE = joinpath(@__DIR__, "output", "final_state.csv")
-length(state_index) == length(mech.species) ||
-    error("mcm_box: the state has $(length(state_index)) unknowns but the mechanism has " *
-          "$(length(mech.species)) species — final_state.csv would be incomplete")
-open(OUT_STATE, "w") do io
-    println(io, "species,concentration_mol_m3")
-    for sp in mech.species
-        name = String(sp.name)
-        println(io, name, ",", sol.u[end][state_index[name]])
-    end
-end
-println("wrote ", OUT_STATE, "  (", length(mech.species), " species)")
-
-open(joinpath(@__DIR__, "output", "run_meta.txt"), "w") do io
-    println(io, "t_lower_s=", round(t_low, digits = 1))
-    # NOT pure solve time: `simulate` runs build_problem (which with jac=true builds the
-    # reaction-sharded Jacobian, ~300 s on this mechanism) and then solve. tools/bench_jac.jl
-    # measures the two separately — use that for anything comparing strategies.
-    println(io, "t_simulate_s=", round(t_solve, digits = 1))
-    println(io, "jac=true")
-    println(io, "span_days=", T_END / 86400)
-    # NOT the lowering peak: Sys.maxrss() is process-LIFETIME peak RSS, a high-water mark since
-    # process start, and this is written after the solve — so it is dominated by the solve and
-    # the Jacobian codegen. Same process printed ~3.5 GiB during lowering (the value in
-    # examples/atmospheric/README.md); this number is strictly larger and not comparable to it.
-    println(io, "peak_rss_gib=", round(Sys.maxrss() / 2^30, digits = 2))
-end
-
-# --- report --------------------------------------------------------------------------------
-# Read the trajectory straight out of sol.u. The DE solution's `sol[i, j]` indexes
-# (component, timestep) — the opposite order from the intuitive reading — so `sol[1:end, k]`
-# is every species at time k, not the k-th species over time. Reading sol.u avoids the trap.
-series(name) = [u[state_index[name]] for u in sol.u]
-
-println("species        initial [mol/m^3]      final [mol/m^3]")
-for name in MONITOR
-    haskey(state_index, name) || continue
-    v = series(name)
-    @printf("  %-8s %18.6e %18.6e\n", name, v[1], v[end])
-end
-
-# The 1041 photolysis reactions are the radical source. Without them the box would sit at its
-# initial zeros forever — so assert the chemistry actually ran rather than printing a table of
-# zeros and calling it success.
-oh = series("OH")
-maximum(oh) > 0.0 ||
-    error("mcm_box: OH stayed at zero. Either the photolysis transform silently no-opped " *
-          "(re-run tools/flatten_photolysis.jl and check its reported counts), or the run is " *
-          "at a zenith where every J is zero — check the preprocessor's χ0 argument.")
-@printf("\nOH peak = %.3e mol/m^3  (radical source is active)\n", maximum(oh))
