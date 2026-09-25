@@ -141,12 +141,26 @@ if abspath(PROGRAM_FILE) == @__FILE__
     jno2 = mech.reactions[j_jno2].kinetics
 
     # --- build + solve ---------------------------------------------------------------------------
-    # jac=true builds the reaction-sharded analytic Jacobian instead of the finite-
-    # difference one FBDF would otherwise form (~1842 RHS evaluations per Jacobian call).
-    # autodiff=false stays: an analytic Jacobian is supplied, so ForwardDiff must not run.
-    println("building problem (jac=true) ...")
+    # Jacobian strategy is MODE-DEPENDENT, a measured same-session crossover (2026-09-24):
+    # at the frozen mode's reltol 1e-6 the reaction-sharded analytic Jacobian wins big
+    # (8-day solve 819 s FD -> 61 s analytic, 13.5x), but at the diurnal mode's reltol
+    # 1e-4 with its 11520 forced 60-s ticks the analytic path LOSES ~5x on the same box
+    # (solve 63 s FD vs 315 s analytic; the loose tolerance needs few Newton iterations,
+    # so the cheap-to-form FD Jacobian amortizes better). Same-session ratios only —
+    # never compare absolute seconds across sessions.
+    # Optional third CLI arg ("jac=true" / "jac=false") overrides the default — a probe
+    # hook for paired same-load A/B measurements (seconds on this shared box move 3-6x
+    # BETWEEN runs; only back-to-back pairs are comparable).
+    const USE_JAC = if length(ARGS) >= 3
+        arg = ARGS[3]
+        arg in ("jac=true", "jac=false") || error(usage * "\n  optional 3rd arg: jac=true|jac=false")
+        arg == "jac=true"
+    else
+        MODE == "frozen"
+    end
+    @printf("building problem (jac=%s) ...\n", USE_JAC)
     t_build = @elapsed prob = build_problem(r, u0, (0.0, T_END);
-                                            params = [Tparam => T0], jac = true)
+                                            params = [Tparam => T0], jac = USE_JAC)
     @printf("  built in %.1f s\n", t_build)
 
     local sol, t_solve
@@ -240,7 +254,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         # build+solve COMBINED (diurnal's solve includes the callback ticks) — NOT
         # comparable to bench_jac.csv's split measurements.
         println(io, "t_simulate_s=", round(t_build + t_solve, digits = 1))
-        println(io, "jac=true")
+        println(io, "jac=", USE_JAC)
         # Process-LIFETIME peak (Sys.maxrss high-water mark), dominated by lowering+codegen.
         println(io, "peak_rss_gib=", round(Sys.maxrss() / 2^30, digits = 2))
     end

@@ -10,13 +10,16 @@
 using ChemMechSim, ModelingToolkit, OrdinaryDiffEq
 using ModelingToolkit: getname, parameters
 
+include(joinpath(@__DIR__, "mcm_rate_types.jl"))
+
 const HERE = dirname(@__DIR__)                   # tools/ -> examples/atmospheric/
 const T0, P0, R = 298.0, 102858.0, 8.314
 C_AIR = P0 / (R * T0)
 const X_INIT = Dict("N2"=>0.78,"O2"=>0.21,"H2O"=>0.01,"O3"=>3.0e-8,"NO2"=>1.0e-10,"CH4"=>1.8e-6)
 const SPANS = (0.25, 0.5, 1.0)                   # simulated days
 
-mech = load_mechanism(joinpath(HERE, "output", "mcm_alkanes_alkenes_frozen.yaml"))
+mech = load_mechanism(joinpath(HERE, "mcm_alkanes_alkenes_converted.yaml");
+                   rate_type_handlers = mcm_rate_handlers())
 u0 = Dict(String(sp.name) => get(X_INIT, String(sp.name), 0.0) * C_AIR for sp in mech.species)
 r = BatchReactor(mech; mode=:kinetic, checks=false)
 sys = extract_system(r)

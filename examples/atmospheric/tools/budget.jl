@@ -24,18 +24,19 @@
 using ChemMechSim
 using Printf
 
+include(joinpath(@__DIR__, "mcm_rate_types.jl"))
+
 const HERE = dirname(@__DIR__)                   # tools/ -> examples/atmospheric/
-const MECH = joinpath(HERE, "output", "mcm_alkanes_alkenes_frozen.yaml")
-const STATE = joinpath(HERE, "output", "final_state.csv")
+const SRC = joinpath(HERE, "mcm_alkanes_alkenes_converted.yaml")
+const STATE = joinpath(HERE, "output", "frozen", "final_state.csv")
 const OUT = joinpath(HERE, "output", "budget.csv")
 
 const T0 = 298.0
 const R_GAS = 8.314                              # J/(mol·K) — see the units note above
 
-isfile(STATE) || error("budget: run mcm_box.jl first — $STATE not found")
-isfile(MECH)  || error("budget: run tools/flatten_photolysis.jl first — $MECH not found")
+isfile(STATE) || error("budget: run `mcm_box.jl frozen` first — $STATE not found")
 
-mech = load_mechanism(MECH)
+mech = load_mechanism(SRC; rate_type_handlers = mcm_rate_handlers())
 
 # Final-state concentrations, keyed by species name. The COLUMN POSITIONS come from the file's
 # own header, so reordering the columns upstream cannot silently mis-index them.
@@ -104,6 +105,13 @@ effective_k(kin::ElementaryArrhenius) = arrhenius_k(kin)
 
 effective_k(kin::ThirdBodyArrhenius) = arrhenius_k(kin.base) * meff(kin.efficiencies)
 
+# The two example-side MCM types (tools/mcm_rate_types.jl): both evaluate through the
+# framework's own generic paramspec path (`rate_constant`), so the budget cannot drift
+# from the integrator. ZenithPhotolysis k = the J parameter (the frozen run's default =
+# J at overhead sun); SigmoidBranching = the exact closed form at T0.
+effective_k(kin::ZenithPhotolysis)  = rate_constant(kin, T0)
+effective_k(kin::SigmoidBranching)  = rate_constant(kin, T0)
+
 "Troe: k = kinf·(Pr/(1+Pr))·F with Pr = k0·[M]_eff/kinf. F comes from ChemMechSim's own
  `_troe_F_body` (src/data/kinetics.jl), which that file documents as the numeric-entry-point
  form of the formula the symbolic lowering uses — so the budget cannot drift from the
@@ -171,6 +179,8 @@ end
 kinetics_tag(::ElementaryArrhenius) = "elementary"
 kinetics_tag(::ThirdBodyArrhenius)  = "three-body"
 kinetics_tag(::Union{TroeFalloff,LindemannFalloff}) = "falloff"
+kinetics_tag(::ZenithPhotolysis)    = "zenith-angle-photolysis"   # the file's own `type:` strings
+kinetics_tag(::SigmoidBranching)    = "sigmoid-branching"
 kinetics_tag(kin::AbstractKinetics) = string(nameof(typeof(kin)))   # anything else names itself
 
 "Full equation text, e.g. `O3 => O1D [elementary]`. This is the column that disambiguates
