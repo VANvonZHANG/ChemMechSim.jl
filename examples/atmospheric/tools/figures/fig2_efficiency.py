@@ -326,7 +326,7 @@ def build_figure(bench):
 
 def main():
     style.apply_style()
-    bench = load_bench(style.DATA / "bench_jac.csv")
+    bench = load_bench(style.DATA.parent / "bench_jac.csv")  # analysis CSVs live at output/ top level
     fig, _, _, meta = build_figure(bench)
     style.save(fig, "fig2_efficiency")
 

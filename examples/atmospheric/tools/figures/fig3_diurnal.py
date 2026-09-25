@@ -45,8 +45,8 @@ except ImportError:
     import style
     import fig1_series as f1
 
-DIURNAL = style.DATA / "diurnal"      # this figure's run (output/diurnal/)
-FROZEN = style.DATA                   # fig1's run, for the O3 overlay
+DIURNAL = style.DATA.parent / "diurnal"   # this figure's run (output/diurnal/)
+FROZEN = style.DATA                       # fig1's run, for the O3 overlay (output/frozen/)
 
 SPANS_DAYS = 8.0                      # must match run_meta span_days; asserted below
 NIGHT_EDGES = (21600.0, 64800.0)      # 06:00 / 18:00 in seconds-of-day
@@ -65,8 +65,8 @@ def load_run():
         key, sep, value = line.partition("=")
         if sep:
             meta[key.strip()] = value.strip()
-    if meta.get("diurnal") != "true":
-        raise ValueError(f"{DIURNAL}/run_meta.txt says diurnal != true — wrong run?")
+    if meta.get("mode") != "diurnal":
+        raise ValueError(f"{DIURNAL}/run_meta.txt says mode != diurnal — wrong run?")
     if meta.get("abstol") != "1e-12":
         raise ValueError(f"run_meta abstol={meta.get('abstol')!r} — this figure's resolution "
                          "floor and its below-resolution annotations assume 1e-12")
@@ -141,7 +141,7 @@ def build_figure(df):
         fzo3 = f1.to_ppbv(fz["O3"].to_numpy())
         ax.plot(fz["time_s"].to_numpy() / 86400.0, fzo3,
                 color=style.PALETTE["blue_main"], lw=1.0, ls=(0, (4, 2)), alpha=0.55)
-        ax.text(1.5, fzo3[-1] - 2.2, "frozen-photolysis O₃\n(fig1 run, 3 d)", fontsize=5.5,
+        ax.text(4.0, fzo3[-1] - 2.2, "frozen-photolysis O₃\n(fig1 run, 8 d)", fontsize=5.5,
                 color=style.PALETTE["blue_main"], ha="center", va="top")
         ylo = min(ylo, fzo3.min())
     ax.set_ylim(ylo - 1.5, o3v.max() + 1.5)

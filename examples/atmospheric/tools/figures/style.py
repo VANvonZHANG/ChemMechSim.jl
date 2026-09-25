@@ -17,8 +17,8 @@ import matplotlib.pyplot as plt  # noqa: E402  (must follow matplotlib.use)
 # .../examples/atmospheric/tools/figures/style.py -> .../examples/atmospheric/
 FIGURES_DIR = Path(__file__).resolve().parent
 EXAMPLE_DIR = FIGURES_DIR.parent.parent
-DATA = EXAMPLE_DIR / "output"  # consumed: series.csv, budget.csv, run_meta.txt
-OUT = EXAMPLE_DIR / "output"   # produced: fig1_series.{png,pdf}, ...
+DATA = EXAMPLE_DIR / "output" / "frozen"  # fig1/fig2/table inputs (diurnal run: output/diurnal/)
+OUT = EXAMPLE_DIR / "output"              # produced: fig1_series.{png,pdf}, ...
 
 # --- Palette -----------------------------------------------------------------
 # One restrained palette per figure: neutral family for scaffolding, one
