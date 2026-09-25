@@ -12,7 +12,7 @@ Run any example from the repo root (`ChemMechSim.jl/`) with:
 | [`validation/`](validation/) | Real-mechanism accuracy validation vs Cantera — Julia ignition scripts + the Python reference/figure workflow. |
 | [`perf/`](perf/) | Performance benchmarks and large-mechanism coverage probes. |
 | [`mechanism/`](mechanism/) | Mechanism fixtures (GRI30, H2-O2, FFCM2, Aramco 3.0). |
-| [`atmospheric/`](atmospheric/) | Atmospheric box model — MCM alkanes/alkenes (1842 species), `:kinetic` mode, frozen-photolysis preprocessor + 3-day integration. **Read its README's limits section before drawing conclusions.** |
+| [`atmospheric/`](atmospheric/) | Atmospheric box model — MCM alkanes/alkenes (1843 species), `:kinetic` mode, direct source load via example-side rate types; frozen + diurnal 8-day runs. **Read its README's limits section before drawing conclusions.** |
 
 ## demos/ — learning path
 
