@@ -164,7 +164,7 @@ def build_figure(df):
     caption = (
         "Photolysis rates are frozen at χ₀ = 0: the box is a perpetual day and no diurnal\n"
         "cycle is represented. OH and HO₂ build from zero initial values; NO₃ stays below\n"
-        "3 molec cm⁻³ (0.04 at t = 3 d) because nighttime NO₃ accumulation never occurs."
+        "3 molec cm⁻³ (2.4×10⁻³ at t = 8 d) because nighttime NO₃ accumulation never occurs."
     )
     fig.text(0.01, 0.005, caption, fontsize=5.5,
              color=style.PALETTE["neutral_dark"], va="bottom", ha="left")
@@ -180,7 +180,7 @@ def main():
     style.save(fig, "fig1_series")
 
     # --- Physics QA: print the end states the figure is eyeballed against -----
-    print("\nQA (start = first row, end = t = 3 d):")
+    print("\nQA (start = first row, end = t = 8 d):")
     for col in ("O3", "NO", "NO2", "CH4"):
         v = to_ppbv(df[col].to_numpy())
         print(f"  {col:>3}: {v[0]:10.3f} -> {v[-1]:10.3f} ppbv")

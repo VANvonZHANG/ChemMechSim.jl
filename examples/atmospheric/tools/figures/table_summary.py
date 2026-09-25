@@ -125,7 +125,7 @@ def final_state_rows():
 # --- Block 2: budget, netted by equation --------------------------------------
 def budget_blocks(top=3):
     """Top-`top` equations per kind after summing duplicate rows of the equation."""
-    df = pd.read_csv(style.DATA / "budget.csv")
+    df = pd.read_csv(style.DATA.parent / "budget.csv")  # analysis CSVs live at output/ top level
     n_rows = len(df)
     net = (df.groupby(["kind", "equation"], as_index=False)["rate_mol_m3_s"]
              .sum())
@@ -158,7 +158,7 @@ solve_at = f2.solve_at
 
 
 def cost_block():
-    bench = pd.read_csv(style.DATA / "bench_jac.csv", comment="#")
+    bench = pd.read_csv(style.DATA.parent / "bench_jac.csv", comment="#")
     bench["strategy"] = bench["strategy"].astype(str).str.strip()
     fits = {n: fit_strategy(bench, n) for n in ("finite-difference",
                                                 "reaction-sharded")}
@@ -176,7 +176,7 @@ def cost_block():
     proj3 = {"finite-difference": [], "reaction-sharded": []}
     for s in np.intersect1d(f2.warm_spans(fd), f2.warm_spans(sh)):
         for name, f in fits.items():
-            proj3[name].append(f["build"] + (f2.solve_at(f, s) / s) * 3.0)
+            proj3[name].append(f["build"] + (f2.solve_at(f, s) / s) * run_span_days())
     speedup_solve = solve_at(fd, 0.5) / solve_at(sh, 0.5)
     speedup_total3 = (total3["finite-difference"] / total3["reaction-sharded"]
                       if total3["finite-difference"] and total3["reaction-sharded"]
@@ -272,18 +272,18 @@ def build_md(fs_rows, t_end, blocks, n_rows, dup_groups, twin_note,
                  "pairs do not imply a consistent crossing.")
     if fitted and speedup_total3:
         direction = "faster" if speedup_total3 >= 1.0 else "slower"
-        L.append(f"At the reference 3-day span the analytic Jacobian is "
+        L.append(f"At the reference {run_span_days():g}-day span the analytic Jacobian is "
                  f"{(speedup_total3 if speedup_total3 >= 1.0 else 1 / speedup_total3):.1f}× "
                  f"{direction} overall "
                  f"({total3['finite-difference']:.0f} s vs "
                  f"{total3['reaction-sharded']:.0f} s including builds).")
     elif proj3["finite-difference"]:
-        L.append(f"Per-pair projections to the 3-day span disagree (finite "
+        L.append(f"Per-pair projections to the {run_span_days():g}-day span disagree (finite "
                  f"difference {min(proj3['finite-difference']):.0f}–"
                  f"{max(proj3['finite-difference']):.0f} s vs analytic "
                  f"{min(proj3['reaction-sharded']):.0f}–"
                  f"{max(proj3['reaction-sharded']):.0f} s), so no single "
-                 "total-cost verdict at 3 days is quoted; the analytic solve "
+                 f"total-cost verdict at {run_span_days():g} days is quoted; the analytic solve "
                  f"advantage holds at every measured span ({min(ratios):.1f}–"
                  f"{max(ratios):.1f}×) against a {build_ratio:.1f}× build cost.")
     L.append("")
