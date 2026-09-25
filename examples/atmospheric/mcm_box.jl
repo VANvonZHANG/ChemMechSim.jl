@@ -27,6 +27,7 @@ using ChemMechSim
 using ModelingToolkit
 using ModelingToolkit: getname, parameters, setp
 using OrdinaryDiffEq
+using LinearSolve
 using Printf
 
 include(joinpath(@__DIR__, "tools", "mcm_rate_types.jl"))
@@ -208,9 +209,15 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                        reltol = 1e-4, abstol = 1e-12, saveat = 1200.0,
                                        callback = cb, tstops = tstops)
     else
-        @printf("solving %.1f days, frozen (perpetual noon, reltol 1e-6, abstol 1e-12) ...\n",
+        # Dense LU for the Newton matrix: this Jacobian is 76% dense (2.58M nnz of 3.4M
+        # possible), and FBDF's DEFAULT sparse linsolve path pays a per-linear-solve
+        # dropzeros COPY of W — measured 69 GiB/day of pure allocation. Dense LU measured
+        # 3.81 s/day warm at 2.70 GiB (26x less); Sparspak allocates least (0.92 GiB) but
+        # sparse fill-in at this density loses to BLAS 9x (37 s/day). Paired probe 2026-09-25.
+        @printf("solving %.1f days, frozen (perpetual noon, reltol 1e-6, abstol 1e-12, dense LU) ...\n",
                 DAYS)
-        t_solve = @elapsed sol = solve(prob, FBDF(autodiff = false);
+        t_solve = @elapsed sol = solve(prob, FBDF(autodiff = false,
+                                                  linsolve = LinearSolve.LUFactorization());
                                        reltol = 1e-6, abstol = 1e-12, saveat = 1200.0)
     end
     @printf("  solved in %.1f s, retcode = %s\n", t_solve, sol.retcode)

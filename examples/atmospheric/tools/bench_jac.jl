@@ -7,7 +7,7 @@
 #
 # The build cost is a single number per strategy and does not depend on the span.
 
-using ChemMechSim, ModelingToolkit, OrdinaryDiffEq
+using ChemMechSim, ModelingToolkit, OrdinaryDiffEq, LinearSolve
 using ModelingToolkit: getname, parameters
 
 include(joinpath(@__DIR__, "mcm_rate_types.jl"))
@@ -45,7 +45,12 @@ open(joinpath(HERE, "output", "bench_jac.csv"), "w") do io
                 p2 = build_problem(r, u0, (0.0, days * 86400.0);
                                    params = [Tp => T0], jac = true)
             end
-            t_solve = @elapsed sol = solve(p2, FBDF(autodiff = false);
+            # Dense LU on BOTH arms (linear-solve class held constant): the sharded arm's
+            # 76%-dense Jacobian under the DEFAULT sparse linsolve pays a per-solve
+            # dropzeros copy — 69 GiB/day measured — so the comparison must not silently
+            # mix solver classes. (Paired probe 2026-09-25.)
+            t_solve = @elapsed sol = solve(p2, FBDF(autodiff = false,
+                                                    linsolve = LinearSolve.LUFactorization());
                                            reltol = 1e-6, abstol = 1e-12, saveat = 1200.0)
             println(io, label, ",", days, ",", round(t_build, digits = 1), ",",
                     round(t_solve, digits = 1), ",", sol.retcode)

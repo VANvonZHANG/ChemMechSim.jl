@@ -79,15 +79,19 @@ analytic 343+442 s vs FD 38+81 s; the loose tolerance needs so few Newton iterat
 that the cheap-to-form FD Jacobian amortizes better). So the driver builds frozen with
 `jac=true` and diurnal with `jac=false` (an optional third CLI arg `jac=true|jac=false`
 overrides, for paired probing). The solver is `FBDF(autodiff = false)` — ForwardDiff
-must not also run once an analytic Jacobian is supplied.
+must not also run once an analytic Jacobian is supplied — and the analytic arm pins
+`linsolve = LUFactorization()` (dense LU): this Jacobian is 76% dense, and FBDF's DEFAULT
+sparse linsolve pays a per-linear-solve `dropzeros` COPY of the Newton matrix — measured
+69 GiB/day of pure allocation — which dense LU cuts to 2.70 GiB while also running
+fastest (Sparspak allocates least but loses 9× to BLAS at this density).
 
 | stage | measured (order of magnitude) |
 |---|---|
 | parse the source (direct, incl. both MCM types) | ~22 s |
 | lower it (`checks=false`) | ~52 s (~3.5–5.6 GiB) |
-| `build_problem` frozen (`jac=true`, analytic) | ~280 s |
+| `build_problem` frozen (`jac=true`, analytic) | ~268 s |
 | `build_problem` diurnal (`jac=false`, FD) | ~38 s |
-| solve 8 days, frozen (`reltol 1e-6`, analytic) | ~61 s |
+| solve 8 days, frozen (`reltol 1e-6`, analytic + dense LU) | ~56 s |
 | solve 8 days, diurnal (`reltol 1e-4`, 11520 ticks, FD) | ~81 s |
 
 **Absolute seconds move 3–6× with co-tenant load.** This box is shared, and another user
