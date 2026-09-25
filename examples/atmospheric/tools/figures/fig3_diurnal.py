@@ -9,7 +9,7 @@ starts from a single 0.1-ppb NO2 pulse with no NOx source, NO2 -> HNO3 is termin
 slaves to the collapsing NO2 (500x over 8 days) rather than to the light cycle — the frozen
 box's NO3 ~= 0 was NOx starvation in disguise, not only the missing night. This figure is the
 Cantera-method port made visible: J = l*cos(chi)^m*exp(-n/cos(chi)), chi the converter's
-triangular clock, J piecewise-constant per 60-s step (see mcm_box_diurnal.jl).
+triangular clock, J piecewise-constant per 60-s step (the diurnal mode of mcm_box.jl).
 
 Panel a: the driving environment — cos(zenith), with nights shaded (same bands on every
          panel). Night shading is GEOMETRIC (time-of-day outside 06:00-18:00), not derived
@@ -17,7 +17,7 @@ Panel a: the driving environment — cos(zenith), with nights shaded (same bands
          cos(89.5 deg) = 0.0087 even at midnight, so a threshold would smear the edges.
 Panel b: O3 ALONE on a LINEAR ppbv axis (30 -> 19 ppbv: -37% is invisible on the shared
          log axis of the earlier draft). Daily sawtooth + the FROZEN run's dashed overlay
-         (fig1's run, 3 days): perpetual noon eats O3 visibly faster than 12 h/day does.
+         (fig1's run, 8 days): perpetual noon eats O3 visibly faster than 12 h/day does.
 Panel c: CH4 ALONE on a LINEAR ppbv axis with a tight range: the decline is only -0.78%
          over 8 days (k(CH4+OH) = 6.3e-15 gives a multi-year lifetime at this box's 24-h
          mean OH), so it is meaningless on any shared axis — but on its own axis the

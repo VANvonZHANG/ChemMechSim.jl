@@ -1,6 +1,6 @@
 # The diurnal photolysis environment, ported VERBATIM from the converter repo
 # (kpp-cantera-converter_geoschem). Pure functions only — this file is `include`d by
-# mcm_box_diurnal.jl, by throwaway probes, and by test/test_atmospheric_diurnal.jl, so it must
+# the diurnal mode of mcm_box.jl, by throwaway probes, and by test/test_atmospheric_diurnal.jl,
 # not depend on ChemMechSim or run anything at include time.
 #
 # Upstream roles: the converter's Cantera driver keeps a module-level ENV_STATE['zenith'] that
@@ -19,5 +19,5 @@ zenith_rad(t) = min(deg2rad(89.5), abs(2π * mod(t, 86400.0) / 86400.0 - π))
 cos_zenith(t) = max(0.0, cos(zenith_rad(t)))
 
 "J = l·cz^m·exp(−n/cz) [s⁻¹ for first-order photolysis], 0 for cz ≤ 1e-10 — generic.py:102-104,
- never NaN/Inf. Same formula the preprocessor froze at χ0 (tools/flatten_photolysis.jl)."
+ never NaN/Inf. The frozen mode evaluates this law once at cz = 1 (the ZenithPhotolysis\nA-factor default, tools/mcm_rate_types.jl); the diurnal mode drives it per 60-s tick."
 photolysis_J(l, m, n, cz) = cz <= 1e-10 ? 0.0 : l * cz^m * exp(-n / cz)
