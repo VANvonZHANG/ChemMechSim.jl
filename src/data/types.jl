@@ -3,6 +3,13 @@
 # Stable integer index referencing a species inside a Mechanism.
 # Reactants/products/efficiencies reference species by this id (not by nested
 # SpeciesData objects), avoiding duplication.
+"""
+    SpeciesID
+
+Alias of `Int`: the stable integer index referencing a species inside a `Mechanism`.
+Reactant/product stoichiometry and third-body efficiency maps key by this id rather
+than nesting `SpeciesData` objects.
+"""
 const SpeciesID = Int
 
 # Role of a species within a simulation. Valid values:
@@ -10,11 +17,23 @@ const SpeciesID = Int
 #   :algebraic_qssa  — quasi-steady-state algebraic variable (reserved; Phase 7)
 #   :constant_pool   — held at a fixed concentration
 #   :bath_gas        — third-body bath gas
+"""
+    SpeciesRole
+
+Alias of `Symbol` describing a species' role in a simulation: `:dynamic` (evolved by
+the ODE, default), `:algebraic_qssa` (quasi-steady-state, reserved), `:constant_pool`
+(held at fixed concentration), or `:bath_gas` (third-body bath).
+"""
 const SpeciesRole = Symbol
 
 # Molar gas constant (spec §5.6.2: R = 8.314 J/(mol·K)).
 # Lives in the data layer so src/data/thermo.jl can use it WITHOUT `using` MTK;
 # types.jl is included before both thermo.jl and lowering.jl.
+"""
+    R_GAS
+
+Molar gas constant R = 8.314 J/(mol·K), used throughout the data and lowering layers.
+"""
 const R_GAS = 8.314   # J/(mol·K)
 
 # Avogadro constant (2019 SI exact value). Needed by the YAML parser to convert
@@ -24,4 +43,10 @@ const N_AVOGADRO = 6.02214076e23   # 1/mol
 # Standard-state pressure for NASA-polynomial thermo (spec §4.2 / §5.6).
 # 1 bar = 1e5 Pa (modern Cantera/GRI30 ideal-gas convention; CHEMKIN historical = 1 atm = 101325).
 # Revisit at Phase 5 (Cantera validation) if ignition-delay comparison shows a systematic offset.
+"""
+    P_STD
+
+Standard-state pressure, 1 bar = 1.0e5 Pa (the modern Cantera/GRI30 ideal-gas
+convention). NASA-polynomial thermo and PLOG rates normalize pressure by it.
+"""
 const P_STD = 1.0e5   # Pa

@@ -1,5 +1,12 @@
 # Standard atomic masses (kg/mol, §5.6 strict-SI quantity=mol).
 # Covers elements common in gas-phase combustion mechanisms; extend as needed.
+"""
+    ATOMIC_MASSES
+
+`Dict{String,Float64}` of standard atomic masses in kg/mol, covering elements common
+in gas-phase combustion mechanisms. Consumed by `molecular_weight`; extend as needed
+for other chemistries.
+"""
 const ATOMIC_MASSES = Dict{String,Float64}(
     "H"  => 0.001008,
     "O"  => 0.015999,
