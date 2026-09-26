@@ -77,7 +77,8 @@ function KcData(rx, mech)
 end
 
 "Equilibrium constant K_c(T) = exp(-Δg°/RT)·(P°/(R·T))^Δν (spec §3.4 #4). MTK-free, generic
- over Real. Numerically identical to lowering's _equilibrium_constant (R_GAS=8.314, P_STD=101325)."
+ over Real. Numerically identical to lowering's _equilibrium_constant (R_GAS = 8.314 J/(mol·K),
+ P_STD = 1.0e5 Pa, the package-global defaults)."
 function equilibrium_constant(kcd::KcData, T; R::Real=R_GAS, P_STD::Real=P_STD)
     g = 0.0
     for (th, nu) in kcd.prod;  g += nu * g_over_RT(th, T); end
