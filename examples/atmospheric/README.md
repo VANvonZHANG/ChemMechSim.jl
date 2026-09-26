@@ -48,9 +48,8 @@ julia --project=. examples/atmospheric/mcm_box.jl diurnal
 julia --project=. examples/atmospheric/tools/budget.jl
 julia --project=. examples/atmospheric/tools/bench_jac.jl
 # 3. figures + summary table (matplotlib/numpy/pandas, see tools/requirements-figures.txt)
-python3 examples/atmospheric/tools/figures/fig1_series.py
-python3 examples/atmospheric/tools/figures/fig3_diurnal.py
-python3 examples/atmospheric/tools/figures/fig2_efficiency.py
+python3 examples/atmospheric/tools/figures/fig_series.py   # -> series_frozen.png + series_diurnal.png
+python3 examples/atmospheric/tools/figures/perf.py         # -> perf.png
 python3 examples/atmospheric/tools/figures/table_summary.py
 ```
 
@@ -66,8 +65,8 @@ drives it from the clock. `series.csv` uses one schema for both modes
 After step 3, `output/` holds `frozen/` and `diurnal/` (each `series.csv` — the 7 monitored
 species at 1200-s cadence — `final_state.csv` — all 1843 species, which the budget needs
 because a rate law wants every reactant, not just the monitored ones — and `run_meta.txt`),
-the analysis CSVs (`budget.csv`, `bench_jac.csv`), the three figures and
-`summary_table.{md,csv}`.
+the analysis CSVs (`budget.csv`, `bench_jac.csv`), the figures
+(`series_frozen`/`series_diurnal` from one script, `perf`) and `summary_table.{md,csv}`.
 
 **Expected cost, so you don't think it hung.** The Jacobian strategy is MODE-DEPENDENT
 (measured as back-to-back pairs on this box, 2026-09-24): at the frozen mode's tight
@@ -174,33 +173,40 @@ fine percentages off this run without re-running tighter.
 
 ## What the figures show
 
-**Figure 1, `fig1_series.png` — the frozen box relaxes toward a photochemical steady state.**
-O₃ falls from its initial 30 ppbv to ~4.7 ppbv over 8 days of perpetual noon while the radical
-pool (OH, HO₂) builds from zero and levels off; nothing oscillates, because there is no
-day/night cycle to follow in this mode. NO₃ never accumulates and is drawn as an annotation
-rather than a curve — though fig3's diurnal run later showed the deeper cause: this scenario
-is NOx-starved (a single 0.1-ppb NO₂ pulse, no source, HNO₃ terminal), so NO₃ would stay
-≲4 molec cm⁻³ even with nights. The frozen day suppressed the *cycle*, not the NO₃.
+`series_frozen.png` and `series_diurnal.png` come from ONE script (`tools/figures/
+fig_series.py`) sharing a single six-panel builder — same panels, same axes, only the
+forcing differs — so the two runs compare panel by panel. The runs are never overlaid in
+one figure; the figures carry almost no text (axes, panel letters, species end-labels,
+one forcing label, the one-word "abstol" tag on the resolution floor) — every number the
+old on-figure grey blocks carried is printed by the script's QA pass instead.
 
-**Figure 2, `fig2_efficiency.png` — the analytic Jacobian pays for itself within days.** The
+**`series_frozen.png` — the frozen box relaxes toward a photochemical steady state.** The
+forcing panel is flat cos χ = 1 ("perpetual noon"); O₃ falls monotonically 30 → 4.7 ppbv
+over 8 days, CH₄ −1.7 % (steady loss at the perpetual-noon OH level), NO₂ exhausts, the
+radical pool builds from zero to a steady level — nothing oscillates, because there is no
+day/night cycle in this mode. NO₃ stays **below solver resolution** (dashed abstol line =
+upper bound) — and the diurnal run shows the deeper cause: this scenario is NOx-starved
+(a single 0.1-ppb NO₂ pulse, no source, HNO₃ terminal), so nights alone would not
+accumulate it either.
+
+**`series_diurnal.png` — the same box with photolysis driven by the zenith clock.** The
+cos-χ forcing with nights shaded (night floor = the 89.5° clamp, cos 89.5° = 0.0087);
+O₃ 30 → 18.9 ppbv with a daily sawtooth — compare `series_frozen.png`'s O₃ panel:
+perpetual noon eats O₃ to 4.7 ppbv, twice the rate of 12 h/day; CH₄ −0.78 %/8 d as
+daylight-only staircase steps (loss ∝ [OH]), closing against the OH trajectory to ~1 %
+(implied ⟨OH⟩ 1.79×10⁶ vs direct 1.77×10⁶ molec cm⁻³); NO₂'s NOx-exhaustion decay with
+NO's daylight-only pulses; the OH/HO₂ sun-synchronous pulses (day max ~10⁷, night at the
+resolution floor); and NO₃, **below solver resolution** at this tolerance — the honest
+conclusion is NOx starvation, not the missing night, and night-time radical troughs need a
+~1e-22 per-state tolerance (see the tolerance policy above).
+
+**`perf.png` — the analytic Jacobian pays for itself within days.** The
 reaction-sharded Jacobian costs several times more to build but solves faster at every
 measured span, so the total-cost break-even is shown as a range — not a number: solve
 time measured non-monotonically in span on this shared box, so the figure plots measured
 points, draws no fitted line, and quotes no single span verdict. The absolute seconds on it
 are single-run wall-clock and move 3–6× with co-tenant load; the ratios are the transferable
 quantities.
-
-**Figure 3, `fig3_diurnal.png` — the same box with photolysis driven by the zenith clock
-(8 days).** Six panels: the cos-χ forcing with nights shaded; O₃ alone on a linear axis with
-the frozen run overlaid as a dashed line (8 d vs 8 d — perpetual noon eats O₃ visibly faster
-than 12 h/day does); CH₄ alone on a tight linear axis, where the −0.78 %/8 d decline appears
-as daylight-only staircase steps (loss ∝ [OH]) and closes against the OH trajectory to 1.1% —
-⟨OH⟩ implied 1.79×10⁶ vs 1.77×10⁶ direct; NO₂'s NOx-exhaustion decay with NO's daylight-only
-pulses; the OH/HO₂ sun-synchronous pulses (day max ~10⁷ vs night at the resolution floor);
-and NO₃, which is **below solver resolution** at this tolerance — drawn at the abstol line as
-an upper bound. The honest NO₃ conclusion: this scenario's NOx starvation, not the missing
-night, is what keeps it small; and night-time radical troughs cannot be resolved without a
-~1e-22 per-state tolerance (see the tolerance policy above).
 
 **`summary_table.md` — the run on one page, and why O₃ falls.** The final state of every
 monitored species; the dominant O₃/HOₓ budget reactions *netted by equation* (the converter
