@@ -302,11 +302,37 @@ _troe_F_body(α, T1, T2, T3, Pr, T) =
 
 # —— param-role types (MTK-free markers; materialize/numeric_value dispatch on them) ——
 # Roles describe how a struct field becomes a rate parameter: its unit role + naming.
+"""
+    ParamRole
+
+Marker supertype describing how a kinetics-struct field materializes into a rate
+parameter during lowering — its unit role and naming. Concrete roles: `AFactor`
+(A-factor, carries the T^b exponent for unit derivation), `KTemp` (activation
+energy → θ = Ea/R [K]), `KValue` (plain temperature value [K]), `Plain`
+(dimensionless; no parameter is created). Build the `(field, role, tag)` triples
+of a `paramspec` table with the `afactor` / `ktemp` / `kvalue` / `plain` helpers.
+"""
 abstract type ParamRole end
 "struct AFactor carries the T^b exponent `b` for A-factor unit derivation ([A] = conc^(1-order)·s⁻¹/K^b)."
 struct AFactor <: ParamRole; b::Float64; end
+"""
+    KTemp()
+
+ParamRole for an activation-energy field: materialized as θ = Ea/R [K].
+"""
 struct KTemp    <: ParamRole; end   # activation energy → θ = Ea/R, unit K
+"""
+    KValue()
+
+ParamRole for a plain temperature-valued field (e.g. Troe T1/T2/T3), unit [K].
+"""
 struct KValue   <: ParamRole; end   # plain temperature value (Troe T1/T2/T3), unit K
+"""
+    Plain()
+
+ParamRole for a dimensionless field: passed through as a plain value; no
+parameter is created.
+"""
 struct Plain    <: ParamRole; end   # dimensionless plain value (exponent b, scale f), no param
 
 # numeric evaluation rules (MTK-free; live in data so generic rate_constant is pure Julia)
