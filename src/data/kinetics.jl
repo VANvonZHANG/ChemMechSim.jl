@@ -9,6 +9,12 @@
 
 # —— Falloff center-broadening parameter packs ——
 
+"""
+    TroeParams(α, T1, T2, T3)
+
+Troe center-broadening parameters: blending function Fcent is built from `α` (dimensionless)
+and the three temperatures `T1`, `T2`, `T3` [K]. Carried by `TroeFalloff`.
+"""
 struct TroeParams
     α::Float64
     T1::Float64
@@ -16,6 +22,12 @@ struct TroeParams
     T3::Float64
 end
 
+"""
+    SRIParams(a, b, c)
+
+SRI center-broadening parameters (dimensionless `a`, `b` and temperature `c` [K]).
+Carried by `SRIFalloff`.
+"""
 struct SRIParams
     a::Float64
     b::Float64
@@ -28,6 +40,16 @@ end
 abstract type AbstractKinetics end
 
 # Basic elementary reaction: Arrhenius k(T) = A·T^b·exp(-Ea/RT)
+"""
+    ElementaryArrhenius(A, b, Ea)
+
+Modified Arrhenius rate law k(T) = A·T^b·exp(-Ea/RT): `A` in SI-derived units consistent
+with mol/m³ concentrations (conc^(1-order)·s⁻¹ — see `convert_afactor` for unit
+conversion), dimensionless exponent `b`, and activation energy `Ea` in J/mol.
+
+# Example
+ElementaryArrhenius(0.5, 0.0, 0.0)   # k = 0.5 s⁻¹
+"""
 struct ElementaryArrhenius <: AbstractKinetics
     A::Float64
     b::Float64
@@ -35,14 +57,37 @@ struct ElementaryArrhenius <: AbstractKinetics
 end
 
 # Third-body enhanced: H + O2 + M → HO2 + M ; [M]_eff = Σ α_i [X_i]
+"""
+    ThirdBodyArrhenius(base, efficiencies)
+
+Third-body-enhanced reaction (e.g. H + O2 + M → HO2 + M): an `ElementaryArrhenius`
+`base` times the effective bath concentration [M]_eff = Σ αᵢ·[Xᵢ], with
+`efficiencies::Dict{SpeciesID,Float64}` giving the αᵢ enhancement factors (species
+absent from the map default to 1.0).
+"""
 struct ThirdBodyArrhenius <: AbstractKinetics
     base::ElementaryArrhenius
     efficiencies::Dict{SpeciesID,Float64}
 end
 
 # Falloff: low/high-pressure limits + center broadening
+"""
+    AbstractFalloff
+
+Common supertype of the pressure-falloff rate laws: `TroeFalloff`, `SRIFalloff`,
+`LindemannFalloff`. Each blends a low- and high-pressure Arrhenius limit over the
+reduced pressure Pr = [M]_eff / k₀-derived scale, with optional center broadening.
+"""
 abstract type AbstractFalloff <: AbstractKinetics end
 
+"""
+    TroeFalloff(low_rate, high_rate, efficiencies, troe)
+
+Pressure-dependent falloff with Troe center broadening: `low_rate`/`high_rate` are the
+`ElementaryArrhenius` limits, `efficiencies` the third-body enhancement map (as in
+`ThirdBodyArrhenius`), and `troe::TroeParams` the broadening parameters. Lowered
+symbolically via `symbolic_kf`; numeric evaluation via `rate_constant`.
+"""
 struct TroeFalloff <: AbstractFalloff
     low_rate::ElementaryArrhenius
     high_rate::ElementaryArrhenius
@@ -50,6 +95,11 @@ struct TroeFalloff <: AbstractFalloff
     troe::TroeParams
 end
 
+"""
+    SRIFalloff(low_rate, high_rate, efficiencies, sri)
+
+As `TroeFalloff` but with SRI center broadening (`sri::SRIParams`).
+"""
 struct SRIFalloff <: AbstractFalloff
     low_rate::ElementaryArrhenius
     high_rate::ElementaryArrhenius
@@ -57,6 +107,12 @@ struct SRIFalloff <: AbstractFalloff
     sri::SRIParams
 end
 
+"""
+    LindemannFalloff(low_rate, high_rate, efficiencies)
+
+Plain Lindemann-Hinshelwood falloff — low/high `ElementaryArrhenius` limits plus the
+third-body `efficiencies` map, with no center broadening.
+"""
 struct LindemannFalloff <: AbstractFalloff   # no extra center-broadening params
     low_rate::ElementaryArrhenius
     high_rate::ElementaryArrhenius
@@ -195,6 +251,12 @@ function plog_dkdP(kin::PlogRate, T::Real, P::Real)
     return seg_k * log(k_hi / k_lo) * (1 / P) / (lp_hi - lp_lo)
 end
 
+"""
+    ChebyshevRate
+
+Placeholder type for the CHEMKIN Chebyshev-polynomial rate law. Declared in the
+hierarchy for forward-compatibility, but not currently parsed or lowered.
+"""
 struct ChebyshevRate <: AbstractKinetics end
 
 # —— generic formula bodies (pure arithmetic; MTK-free; Real and symbolic Num both work) ——
