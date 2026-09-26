@@ -33,15 +33,31 @@ function _normalize_jac_strategy(jac::Bool, jac_chunked::Bool, jac_strategy::Sym
     return jac_strategy
 end
 
-"Build an ODEProblem from a ChemPhaseSystem. `u0` is a Dict(speciesname => value);
- `params` is an optional Vector of Pair(parameter => value) (e.g. `[T => 500.0]`).
- When P is a differential state (const-V P-ODE, Task 4 + Task 3) and `u0` omits `\"P\"`, P0 is
- auto-filled as (Σ species c0)·R·T0 — the EOS initial pressure consistent with the supplied
- composition/T. T0 is resolved from `u0[\"T\"]` when present (the :adiabatic_constV case, where
- T is a state); otherwise the T PARAMETER's default value is used (the :fixedT case, where T is
- a parameter and the caller typically sets it via `params=` rather than `u0=`). Callers who
- override the T parameter via `params=` (e.g. `[T => 500.0]`) should pass `u0[\"P\"]` explicitly
- for a precise P0 — the auto-fill falls back to the T-param default, not the overridden value."
+"""Build an `ODEProblem` from a `ChemPhaseSystem` (a `BatchReactor` too).
+
+    build_problem(phase, u0, tspan; params=Pair[], jac=false, jac_chunked=false,
+                  jac_strategy=:auto, chunk_size=200, cse_chunk_size=chunk_size,
+                  write_chunk_size=500)
+
+`u0` is a `Dict(speciesname => value)` mapping species names to concentrations
+[mol/m³], plus `"T"` for the initial temperature [K] in adiabatic modes; `params`
+is an optional vector of `Pair(parameter => value)` (e.g. `[T => 500.0]`).
+`jac=true` enables the analytic Jacobian: `jac_strategy` is `:auto` (default —
+routes to `:reaction_sharded` when the mechanism and config support it, else
+`:none` with a warning), `:reaction_sharded`, or `:none` (the solver ForwardDiff
+Jacobian). `jac_chunked` is a deprecated alias of `jac`; the chunk-size kwargs
+are retained for call-site compatibility. When P is a differential state
+(const-V P-ODE) and `u0` omits `"P"`, P0 is auto-filled as
+(Σ species c0)·R·T0 — the EOS initial pressure consistent with the supplied
+composition/T. T0 comes from `u0["T"]` when present (the `:adiabatic_constV`
+case, where T is a state); otherwise from the T PARAMETER default (the
+`:fixedT` case). Callers overriding T via `params=` should pass `u0["P"]`
+explicitly for a precise P0 — the auto-fill falls back to the T-param default,
+not the overridden value.
+
+# Example
+prob = build_problem(reactor, u0, (0.0, 5e-3); jac=true)
+"""
 function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
                         params=Pair[], jac::Bool=false, jac_chunked::Bool=false,
                         jac_strategy::Symbol=:auto,
