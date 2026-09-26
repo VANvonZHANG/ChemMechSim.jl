@@ -40,6 +40,16 @@ end
 abstract type AbstractKinetics end
 
 # Basic elementary reaction: Arrhenius k(T) = A·T^b·exp(-Ea/RT)
+"""
+    ElementaryArrhenius(A, b, Ea)
+
+Modified Arrhenius rate law k(T) = A·T^b·exp(-Ea/RT): `A` in SI-derived units consistent
+with mol/m³ concentrations (conc^(1-order)·s⁻¹ — see `convert_afactor` for unit
+conversion), dimensionless exponent `b`, and activation energy `Ea` in J/mol.
+
+# Example
+ElementaryArrhenius(0.5, 0.0, 0.0)   # k = 0.5 s⁻¹
+"""
 struct ElementaryArrhenius <: AbstractKinetics
     A::Float64
     b::Float64
@@ -47,6 +57,14 @@ struct ElementaryArrhenius <: AbstractKinetics
 end
 
 # Third-body enhanced: H + O2 + M → HO2 + M ; [M]_eff = Σ α_i [X_i]
+"""
+    ThirdBodyArrhenius(base, efficiencies)
+
+Third-body-enhanced reaction (e.g. H + O2 + M → HO2 + M): an `ElementaryArrhenius`
+`base` times the effective bath concentration [M]_eff = Σ αᵢ·[Xᵢ], with
+`efficiencies::Dict{SpeciesID,Float64}` giving the αᵢ enhancement factors (species
+absent from the map default to 1.0).
+"""
 struct ThirdBodyArrhenius <: AbstractKinetics
     base::ElementaryArrhenius
     efficiencies::Dict{SpeciesID,Float64}
@@ -233,6 +251,12 @@ function plog_dkdP(kin::PlogRate, T::Real, P::Real)
     return seg_k * log(k_hi / k_lo) * (1 / P) / (lp_hi - lp_lo)
 end
 
+"""
+    ChebyshevRate
+
+Placeholder type for the CHEMKIN Chebyshev-polynomial rate law. Declared in the
+hierarchy for forward-compatibility, but not currently parsed or lowered.
+"""
 struct ChebyshevRate <: AbstractKinetics end
 
 # —— generic formula bodies (pure arithmetic; MTK-free; Real and symbolic Num both work) ——
