@@ -9,9 +9,20 @@ struct ValidationReport
 end
 ValidationReport() = ValidationReport(String[], String[], String[])
 
-"Run scientific-reliability checks on a Mechanism. Returns a ValidationReport.
- `config` (optional): when supplied with energy=:adiabatic, verifies every species has NASA7
- thermo (spec §5.3.4 progressive data requirement). `T_range`: NASA temperature-range coverage check."
+"""Run scientific-reliability checks on a `Mechanism`; returns a `ValidationReport`.
+
+    validate(mech; config=nothing, T_range=nothing) -> ValidationReport
+
+Checks: element conservation, molecular weights vs elemental composition, NASA7
+temperature-range coverage (`T_range=(Tlo, Thi)` restricts the coverage check),
+third-body efficiencies, duplicate reactions, reverse-rate consistency, and —
+when `config` is supplied with `energy=:adiabatic` — that every species carries
+NASA7 thermo data. `rep.errors` must be fixed; `rep.warnings` deserve a look.
+
+# Example
+rep = validate(mech; T_range=(300.0, 2500.0))
+isempty(rep.errors) || @warn "mechanism issues" rep.errors
+"""
 function validate(mech::Mechanism;
                   config::Union{MechanismConfig,Nothing}=nothing,
                   T_range::Union{Tuple{Float64,Float64},Nothing}=nothing)

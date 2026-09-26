@@ -302,11 +302,37 @@ _troe_F_body(α, T1, T2, T3, Pr, T) =
 
 # —— param-role types (MTK-free markers; materialize/numeric_value dispatch on them) ——
 # Roles describe how a struct field becomes a rate parameter: its unit role + naming.
+"""
+    ParamRole
+
+Marker supertype describing how a kinetics-struct field materializes into a rate
+parameter during lowering — its unit role and naming. Concrete roles: `AFactor`
+(A-factor, carries the T^b exponent for unit derivation), `KTemp` (activation
+energy → θ = Ea/R [K]), `KValue` (plain temperature value [K]), `Plain`
+(dimensionless; no parameter is created). Build the `(field, role, tag)` triples
+of a `paramspec` table with the `afactor` / `ktemp` / `kvalue` / `plain` helpers.
+"""
 abstract type ParamRole end
 "struct AFactor carries the T^b exponent `b` for A-factor unit derivation ([A] = conc^(1-order)·s⁻¹/K^b)."
 struct AFactor <: ParamRole; b::Float64; end
+"""
+    KTemp()
+
+ParamRole for an activation-energy field: materialized as θ = Ea/R [K].
+"""
 struct KTemp    <: ParamRole; end   # activation energy → θ = Ea/R, unit K
+"""
+    KValue()
+
+ParamRole for a plain temperature-valued field (e.g. Troe T1/T2/T3), unit [K].
+"""
 struct KValue   <: ParamRole; end   # plain temperature value (Troe T1/T2/T3), unit K
+"""
+    Plain()
+
+ParamRole for a dimensionless field: passed through as a plain value; no
+parameter is created.
+"""
 struct Plain    <: ParamRole; end   # dimensionless plain value (exponent b, scale f), no param
 
 # numeric evaluation rules (MTK-free; live in data so generic rate_constant is pure Julia)
@@ -316,9 +342,29 @@ numeric_value(::KValue,   T) = T
 numeric_value(::Plain,    v) = v
 
 # role-table helpers (build (field::Symbol, role::ParamRole, tag) triples for paramspec)
+"""
+    afactor(field, tag, b) -> (field, AFactor(b), tag)
+
+`paramspec` entry helper: `field` is an A-factor with temperature exponent `b`.
+"""
 afactor(f, tag, b) = (f, AFactor(b), tag)
+"""
+    ktemp(field, tag) -> (field, KTemp(), tag)
+
+`paramspec` entry helper: `field` is an activation energy [J/mol].
+"""
 ktemp(f, tag)      = (f, KTemp(),    tag)
+"""
+    kvalue(field, tag) -> (field, KValue(), tag)
+
+`paramspec` entry helper: `field` is a plain temperature value [K].
+"""
 kvalue(f, tag)     = (f, KValue(),   tag)
+"""
+    plain(field) -> (field, Plain(), nothing)
+
+`paramspec` entry helper: `field` is a dimensionless plain value.
+"""
 plain(f)           = (f, Plain(),    nothing)
 
 # —— per-type declarations (user/framework provides these for each kinetics type) ——
@@ -327,7 +373,26 @@ plain(f)           = (f, Plain(),    nothing)
 # No generic fallback for paramspec/body: a law MUST declare them to use the generic path,
 # OR provide its own explicit symbolic_kf/rate_constant (built-in laws do — see Task 4).
 # Declare the function names (no methods) so external code can extend via Module.func(...).
+"""
+    paramspec(::AbstractKinetics) -> NTuple{N,Tuple{Symbol,ParamRole,Any}}
+
+Declare the parameter table of a custom rate law: one `(field, role, tag)`
+triple per kinetics-struct field, built with `afactor` / `ktemp` / `kvalue` /
+`plain`. Together with `body` and `needs_T` it completes the rate-law extension
+protocol (`struct + body + paramspec + needs_T`): a law that declares these
+lowers with zero framework edits via the generic `rate_constant` (numeric) and
+`symbolic_kf` (symbolic) paths. Worked example:
+`examples/demos/custom_ratelaw.jl`.
+"""
 function paramspec end
+"""
+    body(::AbstractKinetics) -> function(vals..., T)
+
+Declare the rate formula of a custom rate law: a pure function of the
+`paramspec` field values (converted per their `ParamRole`) and temperature.
+Written once — the numeric and symbolic paths both call it (see `paramspec`
+for the protocol overview).
+"""
 function body end
 
 "Generic numeric k_f(T) for a kinetics law that declares paramspec + body. Pure-Real, MTK-free."
