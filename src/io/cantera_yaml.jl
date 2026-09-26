@@ -326,7 +326,13 @@ end
 signature `(rxn_dict, reactants, name_to_id, ctx) -> AbstractKinetics`; entries here
 OVERRIDE the built-in parsers for the same type. Use `convert_afactor` / `ea_to_J_per_mol`
 on `ctx` for unit conversions. Reactions whose type has no parser are skipped, with one
-aggregated warning at the end."""
+aggregated warning at the end.
+
+# Example
+mech = load_mechanism("examples/mechanism/gri30.yaml")
+mech = load_mechanism("mcm.yaml";
+                      rate_type_handlers=Dict("Arrhenius-Photo" => my_parser))
+"""
 function load_mechanism(path::AbstractString;
                         phase::Union{Nothing,String}=nothing,
                         rate_type_handlers::Dict{String,Function}=Dict{String,Function}())::Mechanism
