@@ -114,9 +114,24 @@ function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
     end
 end
 
-"Simulate a ChemPhaseSystem over `tspan`. `u0` is a Dict(speciesname => value);
- `params` sets parameter values (e.g. `[T => 500.0]`). Default solver Tsit5()
- (non-stiff); stiff mechanisms (Phase 5) should pass Rodas5P/CVODE_BDF."
+"""Simulate over `tspan` — one-call convenience over `build_problem` + `solve`.
+
+    simulate(x, tspan=(0.0, 1.0); u0, solver=Tsit5(), params=Pair[], jac=false,
+             jac_chunked=false, jac_strategy=:auto, chunk_size=200,
+             cse_chunk_size=chunk_size, write_chunk_size=500, kwargs...)
+
+`x` is a `ChemPhaseSystem` or a `BatchReactor`. `u0` maps species names to
+concentrations [mol/m³] and `"T"` to the initial temperature [K]; `params` sets
+parameter values (e.g. `[T => 500.0]`); `kwargs` forward to `solve` (`reltol`,
+`abstol`, callbacks, ...). The default solver `Tsit5()` suits non-stiff toy
+mechanisms; pass a stiff solver for real chemistry (e.g. `Rodas5P()` or
+`FBDF()`). Jacobian options are those of `build_problem` (`jac=true` and
+friends).
+
+# Example
+reactor = BatchReactor(mech; mode=:adiabatic_constV)
+sol = simulate(reactor, (0.0, 5e-3); u0=u0, solver=FBDF(), reltol=1e-8, abstol=1e-12)
+"""
 function simulate(phase::ChemPhaseSystem, tspan=(0.0, 1.0); u0, solver=Tsit5(),
                   params=Pair[], jac::Bool=false, jac_chunked::Bool=false,
                   jac_strategy::Symbol=:auto,
@@ -152,8 +167,8 @@ build_problem(r::BatchReactor, u0::AbstractDict, tspan; params=Pair[], jac::Bool
                   chunk_size=chunk_size, cse_chunk_size=cse_chunk_size,
                   write_chunk_size=write_chunk_size)
 
-"Simulate a BatchReactor over `tspan`. `u0` is a Dict(speciesname => value);
- `params` sets parameter values. Default solver Tsit5()."
+"""Simulate a `BatchReactor` over `tspan`; see the `ChemPhaseSystem` method
+for the full argument documentation (the kwargs are identical)."""
 function simulate(r::BatchReactor, tspan=(0.0, 1.0); u0, solver=Tsit5(),
                   params=Pair[], jac::Bool=false, jac_chunked::Bool=false,
                   jac_strategy::Symbol=:auto,
