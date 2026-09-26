@@ -342,9 +342,29 @@ numeric_value(::KValue,   T) = T
 numeric_value(::Plain,    v) = v
 
 # role-table helpers (build (field::Symbol, role::ParamRole, tag) triples for paramspec)
+"""
+    afactor(field, tag, b) -> (field, AFactor(b), tag)
+
+`paramspec` entry helper: `field` is an A-factor with temperature exponent `b`.
+"""
 afactor(f, tag, b) = (f, AFactor(b), tag)
+"""
+    ktemp(field, tag) -> (field, KTemp(), tag)
+
+`paramspec` entry helper: `field` is an activation energy [J/mol].
+"""
 ktemp(f, tag)      = (f, KTemp(),    tag)
+"""
+    kvalue(field, tag) -> (field, KValue(), tag)
+
+`paramspec` entry helper: `field` is a plain temperature value [K].
+"""
 kvalue(f, tag)     = (f, KValue(),   tag)
+"""
+    plain(field) -> (field, Plain(), nothing)
+
+`paramspec` entry helper: `field` is a dimensionless plain value.
+"""
 plain(f)           = (f, Plain(),    nothing)
 
 # —— per-type declarations (user/framework provides these for each kinetics type) ——
