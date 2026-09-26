@@ -32,19 +32,29 @@ end
 # (which composes constraint layers) arrives in Phase 4, once the energy/EOS
 # layers it would compose actually exist.
 
-"A ChemPhaseSystem wrapper — the Layer-1 reactor entry point (zero-point for now).
- Holds the lowered phase; Phase 4 will extend the reactor concept with
- constraint-layer equations (const T / const V / const P)."
+"""A `ChemPhaseSystem` wrapper — the Layer-1 reactor entry point: the
+script-level object accepted by `simulate` / `build_problem` / `extract_system`."""
 struct BatchReactor
     phase::ChemPhaseSystem
     name::Symbol
 end
 
-"Build a BatchReactor from a Mechanism. Keyword args mirror MechanismConfig
- (default = the :kinetic zero-point). Pass `mode` to select a convenience preset
- (spec §5.3.3); when given, `mode` overrides the individual layer kwargs.
- Non-zero-point configs error inside lower_to_mtk until the energy/EOS/thermo
- layers arrive in later phases."
+"""Build a `BatchReactor` from a `Mechanism`.
+
+    BatchReactor(mech; mode=nothing, energy=:isothermal, constraint=:none,
+                 eos=:off, thermo_data=:none, reverse_rate=:irreversible,
+                 state_basis=:concentration, checks=true, name=:batch)
+
+Keyword args mirror `MechanismConfig` (defaults = the `:kinetic` zero-point);
+pass `mode` to select a convenience preset (`:kinetic`, `:fixedT`,
+`:adiabatic_constV`, `:adiabatic_constP`) — when given it overrides the
+individual layer kwargs. `checks` forwards to `lower_to_mtk` (pass `false` for
+very large mechanisms; see the `ChemPhaseSystem` constructor note).
+
+# Example
+reactor = BatchReactor(load_mechanism("examples/mechanism/gri30.yaml");
+                       mode=:adiabatic_constV)
+"""
 function BatchReactor(mech::Mechanism;
         mode::Union{Symbol,Nothing}=nothing,
         energy::Symbol=:isothermal,
