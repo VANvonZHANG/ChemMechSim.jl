@@ -3,6 +3,13 @@
 
 # —— Reversibility policy (replaces reversible::Bool) ——
 
+"""
+    ReverseRatePolicy
+
+Abstract supertype of the reversibility strategies: `Irreversible` (forward only),
+`ExplicitReverse` (an explicit reverse rate law), `ThermoReverse` (reverse rate from
+the thermodynamic equilibrium constant K_c(T)).
+"""
 abstract type ReverseRatePolicy end
 
 "Reaction proceeds only forward."
@@ -18,6 +25,13 @@ struct ThermoReverse <: ReverseRatePolicy end
 
 # —— Reaction metadata ——
 
+"""
+    ReactionMeta(; duplicate=false, orders=Dict())
+
+Per-reaction bookkeeping: `duplicate` flags CHEMKIN-style duplicate reactions, and
+`orders` holds non-mass-action reaction orders keyed by `SpeciesID` (empty = plain
+mass action).
+"""
 struct ReactionMeta
     duplicate::Bool
     orders::Dict{SpeciesID,Float64}   # non-mass-action reaction orders
@@ -28,6 +42,17 @@ ReactionMeta(; duplicate::Bool=false,
 
 # —— Reaction data ——
 
+"""
+    ReactionData(; reactants, products, kinetics, reverse_policy=Irreversible(), meta=ReactionMeta())
+
+One reaction. `reactants`/`products` are `Dict{SpeciesID,Float64}` stoichiometric
+coefficient maps, `kinetics` the forward rate law (`AbstractKinetics`), `reverse_policy`
+the reversibility strategy, and `meta` optional bookkeeping.
+
+# Example
+rxn = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                   kinetics=ElementaryArrhenius(0.5, 0.0, 0.0))   # k = 0.5 s⁻¹
+"""
 struct ReactionData
     reactants::Dict{SpeciesID,Float64}    # stoichiometric coefficients
     products::Dict{SpeciesID,Float64}
