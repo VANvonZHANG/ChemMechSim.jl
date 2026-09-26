@@ -4,7 +4,15 @@
 using SciMLBase: NoSpecialize, ODEFunction
 using ModelingToolkit: generate_rhs
 
-"Extract the underlying MTK ODESystem from a ChemPhaseSystem."
+"""Extract the underlying ModelingToolkit `ODESystem` from a `ChemPhaseSystem`.
+
+The returned system is `mtkcompile`d, so its states may be reordered relative to
+the mechanism; inspect with `ModelingToolkit.unknowns` / `equations`. A
+`BatchReactor` is accepted too (delegates to its wrapped phase).
+
+# Example
+sys = extract_system(reactor)   # then: ModelingToolkit.equations(sys)
+"""
 extract_system(phase::ChemPhaseSystem) = phase.sys
 
 "Resolve a speciesname => value initial-condition map to state => value pairs
@@ -144,7 +152,8 @@ function simulate(phase::ChemPhaseSystem, tspan=(0.0, 1.0); u0, solver=Tsit5(),
     return solve(prob, solver; kwargs...)
 end
 
-"Generate standalone RHS Julia code (an out-of-place function Expr) from an MTK system."
+"""Generate standalone RHS Julia code (an out-of-place function `Expr`) from an
+MTK system — or from a `BatchReactor`/`ChemPhaseSystem` via its system."""
 function generate_function(sys)
     rhss = [eq.rhs for eq in equations(sys)]
     return first(ModelingToolkit.build_function(rhss, ModelingToolkit.unknowns(sys),
@@ -187,7 +196,8 @@ generate_function(r::BatchReactor) = generate_function(extract_system(r))
 generate_jacobian(r::BatchReactor; kwargs...) = generate_jacobian(extract_system(r); kwargs...)
 
 "Generate standalone Jacobian Julia code from an MTK system (mirror of generate_function).
- `sparse=true` emits SparseMatrixCSC codegen (for large mechanisms — GRI-30 prep, Phase 5)."
+ `sparse=true` emits SparseMatrixCSC codegen (for large mechanisms). Accepts a
+ `BatchReactor` via its system."
 function generate_jacobian(sys; sparse::Bool=false)
     jac = ModelingToolkit.calculate_jacobian(sys; sparse=sparse)
     return first(ModelingToolkit.build_function(jac,
