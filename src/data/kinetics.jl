@@ -373,7 +373,26 @@ plain(f)           = (f, Plain(),    nothing)
 # No generic fallback for paramspec/body: a law MUST declare them to use the generic path,
 # OR provide its own explicit symbolic_kf/rate_constant (built-in laws do — see Task 4).
 # Declare the function names (no methods) so external code can extend via Module.func(...).
+"""
+    paramspec(::AbstractKinetics) -> NTuple{N,Tuple{Symbol,ParamRole,Any}}
+
+Declare the parameter table of a custom rate law: one `(field, role, tag)`
+triple per kinetics-struct field, built with `afactor` / `ktemp` / `kvalue` /
+`plain`. Together with `body` and `needs_T` it completes the rate-law extension
+protocol (`struct + body + paramspec + needs_T`): a law that declares these
+lowers with zero framework edits via the generic `rate_constant` (numeric) and
+`symbolic_kf` (symbolic) paths. Worked example:
+`examples/demos/custom_ratelaw.jl`.
+"""
 function paramspec end
+"""
+    body(::AbstractKinetics) -> function(vals..., T)
+
+Declare the rate formula of a custom rate law: a pure function of the
+`paramspec` field values (converted per their `ParamRole`) and temperature.
+Written once — the numeric and symbolic paths both call it (see `paramspec`
+for the protocol overview).
+"""
 function body end
 
 "Generic numeric k_f(T) for a kinetics law that declares paramspec + body. Pure-Real, MTK-free."
