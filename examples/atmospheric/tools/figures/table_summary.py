@@ -125,7 +125,7 @@ def final_state_rows():
 # --- Block 2: budget, netted by equation --------------------------------------
 def budget_blocks(top=3):
     """Top-`top` equations per kind after summing duplicate rows of the equation."""
-    df = pd.read_csv(style.DATA.parent / "budget.csv")  # analysis CSVs live at output/ top level
+    df = pd.read_csv(style.BUDGET_CSV)
     n_rows = len(df)
     net = (df.groupby(["kind", "equation"], as_index=False)["rate_mol_m3_s"]
              .sum())
@@ -158,7 +158,7 @@ solve_at = f2.solve_at
 
 
 def cost_block():
-    bench = pd.read_csv(style.DATA.parent / "bench_jac.csv", comment="#")
+    bench = pd.read_csv(style.BENCH_CSV, comment="#")
     bench["strategy"] = bench["strategy"].astype(str).str.strip()
     fits = {n: fit_strategy(bench, n) for n in ("finite-difference",
                                                 "reaction-sharded")}

@@ -28,7 +28,7 @@ transferable quantities are the per-span solve ratios and the build ratio.
 Grayscale/print safety: the two strategies differ by hue AND by hatch (bars) /
 marker fill, so the figure survives a grayscale print.
 
-Run:  python3 examples/atmospheric/tools/figures/fig2_efficiency.py
+Run:  python3 examples/atmospheric/tools/figures/perf.py
 """
 
 import sys
@@ -326,9 +326,9 @@ def build_figure(bench):
 
 def main():
     style.apply_style()
-    bench = load_bench(style.DATA.parent / "bench_jac.csv")  # analysis CSVs live at output/ top level
+    bench = load_bench(style.BENCH_CSV)
     fig, _, _, meta = build_figure(bench)
-    style.save(fig, "fig2_efficiency")
+    style.save(fig, "perf")
 
     # --- QA printout -------------------------------------------------------------
     print("\nQA (from bench_jac.csv):")

@@ -17,8 +17,15 @@ import matplotlib.pyplot as plt  # noqa: E402  (must follow matplotlib.use)
 # .../examples/atmospheric/tools/figures/style.py -> .../examples/atmospheric/
 FIGURES_DIR = Path(__file__).resolve().parent
 EXAMPLE_DIR = FIGURES_DIR.parent.parent
-DATA = EXAMPLE_DIR / "output" / "frozen"  # fig1/fig2/table inputs (diurnal run: output/diurnal/)
-OUT = EXAMPLE_DIR / "output"              # produced: fig1_series.{png,pdf}, ...
+# --- Run/artifact locations: the single source of truth for every path a figure
+# or the table touches. Scripts import these; nobody re-derives them.
+OUTPUT = EXAMPLE_DIR / "output"           # figures + analysis CSVs land here
+FROZEN = OUTPUT / "frozen"                # `mcm_box.jl frozen` artifacts
+DIURNAL = OUTPUT / "diurnal"              # `mcm_box.jl diurnal` artifacts
+BUDGET_CSV = OUTPUT / "budget.csv"        # tools/budget.jl
+BENCH_CSV = OUTPUT / "bench_jac.csv"      # tools/bench_jac.jl
+DATA = FROZEN                             # the default run for fig2/table inputs
+OUT = OUTPUT                              # produced: fig1_series.{png,pdf}, ...
 
 # --- Palette -----------------------------------------------------------------
 # One restrained palette per figure: neutral family for scaffolding, one
