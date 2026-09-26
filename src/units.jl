@@ -1,5 +1,15 @@
 # Canonical units for ChemMechSim — strict SI base, amount-of-substance in mol.
 # DynamicQuantities is MTK's native unit backend (Unitful is deprecated by SciML).
+"""
+    ChemUnits
+
+Canonical unit system: strict SI base with amount of substance in mol, built on
+DynamicQuantities (MTK's native unit backend). The unit constructors — `conc`
+(mol/m³), `temp` (K), `press` (Pa), `vol` (m³), `molmass` (kg/mol), `molenergy`
+(J/mol), `mol` (mol) — serve as dimensional references for `canonical`
+(accessible qualified as `ChemMechSim.ChemUnits.conc` even though only `canonical`
+is re-exported by the package).
+"""
 module ChemUnits
     using DynamicQuantities
 
