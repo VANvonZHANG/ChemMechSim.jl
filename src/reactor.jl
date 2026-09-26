@@ -94,10 +94,14 @@ const _CONVENIENCE_MODES = Dict{Symbol,MechanismConfig}(
                                          eos=:ideal_gas, thermo_data=:nasa7, reverse_rate=:thermo_equilibrium),
 )
 
-"Map a convenience-mode symbol to its MechanismConfig (spec §5.3.3).
+"""Map a convenience-mode symbol to its MechanismConfig.
  Known modes: :kinetic, :fixedT, :adiabatic_constV, :adiabatic_constP.
  When `mode` is passed to BatchReactor it overrides the individual
- energy/constraint/eos/thermo_data/reverse_rate/state_basis kwargs."
+ energy/constraint/eos/thermo_data/reverse_rate/state_basis kwargs.
+
+# Example
+cfg = convenience_config(:adiabatic_constV)   # :kinetic | :fixedT | :adiabatic_constV | :adiabatic_constP
+"""
 function convenience_config(mode::Symbol)
     haskey(_CONVENIENCE_MODES, mode) ||
         error("convenience_config: unknown mode :$mode; known modes: " *
