@@ -3,6 +3,20 @@
 # type users interact with. NOT the same abstraction as Catalyst's ReactionSystem
 # (a symbolic system); this is a data record.
 
+"""
+    Mechanism(; species, reactions, thermo=ThermoDatabase(), elements=String[])
+
+Top-level pure-data aggregate of a gas-phase mechanism: `species::Vector{SpeciesData}`,
+`reactions::Vector{ReactionData}`, an optional NASA-coefficient `thermo::ThermoDatabase`,
+and the `elements` list used by element-conservation validation. Build programmatically,
+import from Catalyst (`import_from_catalyst`), or parse Cantera-YAML (`load_mechanism`);
+lower with `lower_to_mtk` / `BatchReactor`.
+
+# Example
+mech = Mechanism(species=[spA, spB],
+                 reactions=[ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                                         kinetics=ElementaryArrhenius(0.5, 0.0, 0.0))])
+"""
 struct Mechanism
     species::Vector{SpeciesData}
     reactions::Vector{ReactionData}
