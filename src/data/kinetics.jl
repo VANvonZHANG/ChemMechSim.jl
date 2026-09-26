@@ -9,6 +9,12 @@
 
 # —— Falloff center-broadening parameter packs ——
 
+"""
+    TroeParams(α, T1, T2, T3)
+
+Troe center-broadening parameters: blending function Fcent is built from `α` (dimensionless)
+and the three temperatures `T1`, `T2`, `T3` [K]. Carried by `TroeFalloff`.
+"""
 struct TroeParams
     α::Float64
     T1::Float64
@@ -16,6 +22,12 @@ struct TroeParams
     T3::Float64
 end
 
+"""
+    SRIParams(a, b, c)
+
+SRI center-broadening parameters (dimensionless `a`, `b` and temperature `c` [K]).
+Carried by `SRIFalloff`.
+"""
 struct SRIParams
     a::Float64
     b::Float64
@@ -41,8 +53,23 @@ struct ThirdBodyArrhenius <: AbstractKinetics
 end
 
 # Falloff: low/high-pressure limits + center broadening
+"""
+    AbstractFalloff
+
+Common supertype of the pressure-falloff rate laws: `TroeFalloff`, `SRIFalloff`,
+`LindemannFalloff`. Each blends a low- and high-pressure Arrhenius limit over the
+reduced pressure Pr = [M]_eff / k₀-derived scale, with optional center broadening.
+"""
 abstract type AbstractFalloff <: AbstractKinetics end
 
+"""
+    TroeFalloff(low_rate, high_rate, efficiencies, troe)
+
+Pressure-dependent falloff with Troe center broadening: `low_rate`/`high_rate` are the
+`ElementaryArrhenius` limits, `efficiencies` the third-body enhancement map (as in
+`ThirdBodyArrhenius`), and `troe::TroeParams` the broadening parameters. Lowered
+symbolically via `symbolic_kf`; numeric evaluation via `rate_constant`.
+"""
 struct TroeFalloff <: AbstractFalloff
     low_rate::ElementaryArrhenius
     high_rate::ElementaryArrhenius
@@ -50,6 +77,11 @@ struct TroeFalloff <: AbstractFalloff
     troe::TroeParams
 end
 
+"""
+    SRIFalloff(low_rate, high_rate, efficiencies, sri)
+
+As `TroeFalloff` but with SRI center broadening (`sri::SRIParams`).
+"""
 struct SRIFalloff <: AbstractFalloff
     low_rate::ElementaryArrhenius
     high_rate::ElementaryArrhenius
@@ -57,6 +89,12 @@ struct SRIFalloff <: AbstractFalloff
     sri::SRIParams
 end
 
+"""
+    LindemannFalloff(low_rate, high_rate, efficiencies)
+
+Plain Lindemann-Hinshelwood falloff — low/high `ElementaryArrhenius` limits plus the
+third-body `efficiencies` map, with no center broadening.
+"""
 struct LindemannFalloff <: AbstractFalloff   # no extra center-broadening params
     low_rate::ElementaryArrhenius
     high_rate::ElementaryArrhenius
