@@ -1,41 +1,72 @@
 # ChemMechSim.jl
 
-MTK-first、符号透明、反应器可组合的气相化学机理建模框架。
+**English** | [简体中文](README.zh-CN.md)
 
-> **状态：** 可用。机理解析（Cantera-YAML 子集）、逐反应 lowering 到带单位的 ModelingToolkit `ODESystem`、反应分片解析 Jacobian 与 SciML 求解链路已实现并经 Cantera 对照验证；详细 API 见 `examples/demos/brusselator.jl`。
+[![CI](https://github.com/VANvonZHANG/ChemMechSim.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/VANvonZHANG/ChemMechSim.jl/actions/workflows/CI.yml)
+[![Julia](https://img.shields.io/badge/Julia-1.12%2B-9558B2.svg)](https://julialang.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-informational.svg)](LICENSE)
 
-设计文档见 `../docs/superpowers/specs/2026-06-23-chemmechsim-design.md`。
+An MTK-first, symbolically transparent, reactor-composable framework for gas-phase
+chemical-kinetics modeling.
 
-## 快速开始
+> **Status:** Usable. Cantera-YAML (subset) mechanism parsing, per-reaction lowering to
+> unit-carrying ModelingToolkit `ODESystem`s, reaction-sharded analytic Jacobians, and the
+> SciML solve chain are implemented and validated against Cantera. For a first tour of the
+> API see `examples/demos/brusselator.jl`.
+
+## Quick start
 
 ```julia
 using Pkg; Pkg.activate("."); Pkg.instantiate()
-using ChemMechSim
+using ChemMechSim, OrdinaryDiffEq
 
-mech  = load_mechanism("examples/mechanism/gri30.yaml")          # Cantera-YAML → Mechanism
-rx    = BatchReactor(mech; mode=:adiabatic_constV)               # 便捷模式 → MTK ODESystem
-# u0: Dict(物种名 => 浓度) 加 "T" => 初温；完整示例见 examples/demos/brusselator.jl
-sol   = simulate(rx, (0.0, 5.0e-3); u0=u0, solver=FBDF())        # → ODESolution
+mech    = load_mechanism("examples/mechanism/gri30.yaml")   # Cantera-YAML → Mechanism
+reactor = BatchReactor(mech; mode=:adiabatic_constV)        # convenience preset → MTK ODESystem
+
+# Stoichiometric CH4-air at 1500 K, 1 atm (same setup as examples/validation/gri30_ignition.jl)
+R, T0, P0 = 8.314, 1500.0, 101325.0
+c_tot = P0 / (R * T0)
+u0 = Dict("CH4" => c_tot / 10.52, "O2" => 2c_tot / 10.52, "N2" => 7.52c_tot / 10.52, "T" => T0)
+
+sol = simulate(reactor, (0.0, 5e-3); u0 = u0, solver = FBDF(), reltol = 1e-8, abstol = 1e-12)
 ```
 
-## 范围（当前框架）
+## Features
 
-- 数据层（纯 Julia）：`SpeciesData`、`ReactionData`、`Mechanism`、`AbstractKinetics` 层级（基元/第三体/Lindemann/Troe/PLOG + 热力学逆速率）
-- 单位系统：`ChemUnits`（DynamicQuantities，SI/mol），构建期量纲检查
-- 分层接口：`simulate`（一键）/ `build_problem`（SciML `ODEProblem`）/ `extract_system`（可检查的 `ODESystem`）/ `lower_to_mtk`（裸 MTK 中间结果原语）
-- 速率律扩展协议：`struct + body + paramspec + needs_T`，公式只写一遍，数值与符号调用同源
-- 反应器模式：`:kinetic` / `:fixedT` / `:adiabatic_constV` / `:adiabatic_constP`
+- **Data layer** (pure Julia): `SpeciesData`, `ReactionData`, `Mechanism`, and the
+  `AbstractKinetics` hierarchy (elementary / third-body / Lindemann / Troe / PLOG +
+  thermodynamic reverse rates)
+- **Unit system**: `ChemUnits` (DynamicQuantities, SI/mol) with build-time dimensional checks
+- **Layered interface**: `simulate` (one call) → `build_problem` (SciML `ODEProblem`) →
+  `extract_system` (inspectable `ODESystem`) → `lower_to_mtk` (bare MTK primitives)
+- **Rate-law extension protocol**: `struct + body + paramspec + needs_T` — write the formula
+  once; the numeric and symbolic paths share it
+- **Reactor modes**: `:kinetic` / `:fixedT` / `:adiabatic_constV` / `:adiabatic_constP`
 
 ## Performance
 
-`examples/perf/bench_pipeline_stages.jl`（3 次中位数，Julia 1.12.7；恒容绝热 CH₄-air 点火，FBDF @ reltol=1e-8/abstol=1e-12，反应分片 Jacobian，KLU）：
+`examples/perf/bench_pipeline_stages.jl` (median of 3; Julia 1.12.7; const-V adiabatic
+CH4-air ignition, FBDF @ reltol=1e-8/abstol=1e-12, reaction-sharded analytic Jacobian, KLU):
 
-| 机理 | build | JIT 编译 | 冷求解 | 热求解 |
+| Mechanism | build | JIT compile | cold solve | warm solve |
 |---|---:|---:|---:|---:|
-| GRI-Mech 3.0（53 sp / 325 rxn） | 2.5 s | 9.9 s | 10.2 s | 0.27 s |
-| FFCM 2.0（96 sp / 1054 rxn） | 8.4 s | 31.2 s | 31.7 s | 0.55 s |
-| Aramco 3.0（581 sp / 3037 rxn） | 47.5 s | 197.9 s | 201.5 s | **3.55 s** |
+| GRI-Mech 3.0 (53 sp / 325 rxn) | 2.5 s | 9.9 s | 10.2 s | 0.27 s |
+| FFCM 2.0 (96 sp / 1054 rxn) | 8.4 s | 31.2 s | 31.7 s | 0.55 s |
+| Aramco 3.0 (581 sp / 3037 rxn) | 47.5 s | 197.9 s | 201.5 s | **3.55 s** |
 
-- **最大机理的热求解快于 Cantera**（同容差 `IdealGasReactor` 3.87 s），积分步数约为其一半（898 对 1783）。
-- 冷求解由生成代码的一次性 LLVM JIT 编译主导；热求解复用已编译函数。
-- 线性求解器对比（KLU/UMFPACK/Sparspak/Pardiso/MUMPS）见 `examples/perf/bench_linsolver_matrix.jl`。
+- On the largest mechanism the **warm solve is faster than Cantera** (same tolerance:
+  `IdealGasReactor` 3.87 s), with roughly half the integration steps (898 vs 1783).
+- Cold solves are dominated by the one-time LLVM JIT compilation of generated code; warm
+  solves reuse the compiled functions.
+- Linear-solver comparison (KLU / UMFPACK / Sparspak / Pardiso / MUMPS):
+  `examples/perf/bench_linsolver_matrix.jl`.
+
+## Documentation
+
+- [`examples/README.md`](examples/README.md) — guided tour: demo learning path, validation
+  workflows vs Cantera, performance benchmarks
+- User documentation site: landing with this release
+
+## License
+
+[MIT](LICENSE)
