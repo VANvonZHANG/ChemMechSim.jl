@@ -65,3 +65,17 @@ plog_dkdT
 plog_dkdP
 ChebyshevRate
 ```
+
+## Units
+
+```@docs
+ChemMechSim.ChemUnits
+ChemMechSim.ChemUnits.canonical
+```
+
+## Configuration
+
+```@docs
+MechanismConfig
+convenience_config
+```
