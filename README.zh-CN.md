@@ -2,6 +2,11 @@
 
 **[English](README.md)** | 简体中文
 
+[![CI](https://github.com/VANvonZHANG/ChemMechSim.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/VANvonZHANG/ChemMechSim.jl/actions/workflows/CI.yml)
+[![Docs](https://github.com/VANvonZHANG/ChemMechSim.jl/actions/workflows/Documenter.yml/badge.svg)](https://vanvonzhang.github.io/ChemMechSim.jl/)
+[![Julia](https://img.shields.io/badge/Julia-1.12%2B-9558B2.svg)](https://julialang.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-informational.svg)](LICENSE)
+
 > 中文版由英文版（`README.md`）派生；英文版为权威版本，中文版可能滞后。
 
 MTK-first、符号透明、反应器可组合的气相化学机理建模框架。
@@ -41,3 +46,8 @@ sol   = simulate(rx, (0.0, 5.0e-3); u0=u0, solver=FBDF())        # → ODESoluti
 - **最大机理的热求解快于 Cantera**（同容差 `IdealGasReactor` 3.87 s），积分步数约为其一半（898 对 1783）。
 - 冷求解由生成代码的一次性 LLVM JIT 编译主导；热求解复用已编译函数。
 - 线性求解器对比（KLU/UMFPACK/Sparspak/Pardiso/MUMPS）见 `examples/perf/bench_linsolver_matrix.jl`。
+
+## 文档
+
+- 用户文档：<https://vanvonzhang.github.io/ChemMechSim.jl>（Getting started 与完整 API reference，英文）
+- [`examples/README.md`](examples/README.md)——导览：demo 学习路径、Cantera 对照验证工作流、性能基准
