@@ -79,3 +79,15 @@ ChemMechSim.ChemUnits.canonical
 MechanismConfig
 convenience_config
 ```
+
+## Solve API
+
+```@docs
+simulate
+build_problem
+extract_system
+generate_function
+generate_jacobian
+ChemPhaseSystem
+BatchReactor
+```
