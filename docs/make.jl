@@ -16,6 +16,7 @@ makedocs(;
     ),
     pages = [
         "Home" => "index.md",
+        "Getting started" => "getting_started.md",
     ],
     # Documenter 1.19: doc-error classes are fatal by default (warnonly = Symbol[]);
     # `strict = true` of older versions is gone. This keeps markdown warnings fatal too:
