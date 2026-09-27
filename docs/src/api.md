@@ -116,3 +116,18 @@ ktemp
 kvalue
 plain
 ```
+
+## I/O
+
+```@docs
+load_mechanism
+convert_afactor
+ea_to_J_per_mol
+```
+
+## Validation
+
+```@docs
+ValidationReport
+validate
+```
