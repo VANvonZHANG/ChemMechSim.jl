@@ -3,6 +3,7 @@
 **English** | [简体中文](README.zh-CN.md)
 
 [![CI](https://github.com/VANvonZHANG/ChemMechSim.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/VANvonZHANG/ChemMechSim.jl/actions/workflows/CI.yml)
+[![Docs](https://github.com/VANvonZHANG/ChemMechSim.jl/actions/workflows/Documenter.yml/badge.svg)](https://vanvonzhang.github.io/ChemMechSim.jl/)
 [![Julia](https://img.shields.io/badge/Julia-1.12%2B-9558B2.svg)](https://julialang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-informational.svg)](LICENSE)
 
@@ -65,7 +66,8 @@ CH4-air ignition, FBDF @ reltol=1e-8/abstol=1e-12, reaction-sharded analytic Jac
 
 - [`examples/README.md`](examples/README.md) — guided tour: demo learning path, validation
   workflows vs Cantera, performance benchmarks
-- User documentation site: landing with this release
+- User documentation: <https://vanvonzhang.github.io/ChemMechSim.jl> — getting started
+  and the full API reference
 
 ## License
 
