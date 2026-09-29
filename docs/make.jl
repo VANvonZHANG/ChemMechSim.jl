@@ -21,6 +21,7 @@ makedocs(;
         "Atmospheric box tutorial" => "tutorial_atmospheric.md",
         "Reactor modes" => "reactors.md",
         "Mechanism format" => "mechanism_format.md",
+        "Rate-law extensibility" => "ratelaw_extensibility.md",
         "API reference" => "api.md",
     ],
     # Documenter 1.19: doc-error classes are fatal by default (warnonly = Symbol[]);
