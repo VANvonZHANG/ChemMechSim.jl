@@ -17,17 +17,14 @@ makedocs(;
     pages = [
         "Home" => "index.md",
         "Getting started" => "getting_started.md",
-<<<<<<< HEAD
         "Ignition tutorial" => "tutorial_ignition.md",
         "Atmospheric box tutorial" => "tutorial_atmospheric.md",
         "Reactor modes" => "reactors.md",
         "Mechanism format" => "mechanism_format.md",
         "Rate-law extensibility" => "ratelaw_extensibility.md",
+        "Solver guide" => "solvers.md",
         "Validation" => "validation.md",
         "Performance" => "performance.md",
-=======
-        "Solver guide" => "solvers.md",
->>>>>>> 629f5e4 (docs(site): solver guide — FBDF, jac strategy, linsolve, tolerances, u0 completeness)
         "API reference" => "api.md",
     ],
     # Documenter 1.19: doc-error classes are fatal by default (warnonly = Symbol[]);
