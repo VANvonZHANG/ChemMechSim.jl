@@ -90,7 +90,6 @@ mech = Mechanism(species=[H2, O2, H2O, H, O, OH, HO2], reactions=[
 
 ## Next
 
-- The reactor-mode presets (`:kinetic`, `:fixedT`, `:adiabatic_constV`,
-  `:adiabatic_constP`) — see `examples/demos/` and the demos' headers.
-- What `load_mechanism` reads — see `src/io/cantera_yaml.jl` docstrings.
+- [Reactor modes](@ref) — what each of the four presets does.
+- [Mechanism format](@ref) — what `load_mechanism` reads.
 - `examples/demos/` — the full learning path, one demo per framework feature.
