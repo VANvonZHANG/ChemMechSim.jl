@@ -42,6 +42,30 @@ python3 examples/validation/plot_validation.py     # 3. figures + validation_err
 across mechanisms — required for Aramco (581 sp) where the default dense Jacobian
 OOMs.
 
+## Combined-species results
+
+![Combined validation: ChemMechSim vs Cantera, three mechanisms](assets/fig_combined_validation.png)
+
+GRI-Mech 3.0, same condition as workflow A:
+![GRI-30 combined-species validation](assets/fig_gri30_validation.png)
+
+Error table from workflow B (`validation_errors.txt`; condition: T0 = 1500 K,
+P0 = 1 atm, phi = 1.0 CH4-air, constant-volume adiabatic, t in [0, 5] ms.
+Δt_ign in %, max ΔX = max absolute mole-fraction difference over the trajectory
+for each of CH4, O2, CO2, OH, H2O):
+
+| Mechanism | Δt_ign | max ΔX (CH4 / O2 / CO2 / OH / H2O) |
+|---|---|---|
+| GRI-Mech 3.0 | 0.065% | 4.3e-3 / 2.0e-2 / 3.4e-3 / 8.6e-3 / 1.3e-2 |
+| FFCM 2.0 | 0.168% | 1.6e-2 / 3.9e-2 / 1.7e-2 / 1.7e-2 / 3.1e-2 |
+| Aramco 3.0 | 0.333% | 2.2e-2 / 7.2e-2 / 2.5e-2 / 2.4e-2 / 5.2e-2 |
+
+Figures and the error table are produced by the repository scripts above; the
+committed copies under `docs/src/assets/` are their direct output (workflow-B data
+run of 2026-09-17, figures re-rendered on the current tree — the only `src/`
+changes since are docstring-only plus two commits off these code paths; the GRI30
+leg is re-verified on current main: t_ign = 1.108 ms, 0.01% vs Cantera).
+
 ## PLOG rates
 
 PLOG `kf` is validated in the **test suite** (`test/test_plog.jl`) against
