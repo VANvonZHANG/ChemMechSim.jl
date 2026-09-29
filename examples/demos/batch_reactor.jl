@@ -2,8 +2,9 @@
 # Run:  julia --project=. examples/demos/batch_reactor.jl
 #
 # Shows the script API: build a reactor from a Mechanism, choose a convenience
-# mode, and simulate. Only :kinetic (the zero-point) is runnable so far; :fixedT
-# etc. error with guidance until their layers (EOS/energy/NASA) arrive.
+# mode, and simulate. This demo uses :kinetic (the MechanismConfig zero point);
+# the other three modes are demonstrated by fixedT_reactor.jl,
+# adiabatic_reactor.jl and adiabatic_constP_reactor.jl — all four are implemented.
 using ChemMechSim
 using ModelingToolkit: equations, unknowns, getname
 
@@ -22,9 +23,5 @@ a_idx = findfirst(s -> String(getname(s)) == "A", unknowns(extract_system(reacto
 println("\nA(2.0) = ", round(sol.u[end][a_idx], digits=5),
         "   (analytic exp(-4) = ", round(exp(-4.0), digits=5), ")")
 
-# Non-zero-point mode: documented but not runnable yet.
-try
-    BatchReactor(mech; mode=:fixedT)
-catch e
-    println("\n(mode=:fixedT) expected error: ", e)
-end
+# The other convenience modes (:fixedT, :adiabatic_constV, :adiabatic_constP) are
+# shown in the sibling demos — see examples/demos/ and the "Reactor modes" docs page.
