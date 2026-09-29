@@ -18,6 +18,7 @@ makedocs(;
         "Home" => "index.md",
         "Getting started" => "getting_started.md",
         "Ignition tutorial" => "tutorial_ignition.md",
+        "Atmospheric box tutorial" => "tutorial_atmospheric.md",
         "Reactor modes" => "reactors.md",
         "Mechanism format" => "mechanism_format.md",
         "API reference" => "api.md",
