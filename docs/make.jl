@@ -23,6 +23,7 @@ makedocs(;
         "Mechanism format" => "mechanism_format.md",
         "Rate-law extensibility" => "ratelaw_extensibility.md",
         "Validation" => "validation.md",
+        "Performance" => "performance.md",
         "API reference" => "api.md",
     ],
     # Documenter 1.19: doc-error classes are fatal by default (warnonly = Symbol[]);
