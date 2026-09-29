@@ -1,0 +1,68 @@
+name: TagBot
+on:
+  issue_comment:
+    types:
+      - created
+  workflow_dispatch:
+    inputs:
+      lookback:
+        default: 3
+  schedule:
+    - cron: 0 0 * * *
+jobs:
+  TagBot:
+    if: github.event_name == 'workflow_dispatch' || github.actor == 'JuliaTagBot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: JuliaRegistries/TagBot@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      # No `ssh:` deploy key: the tagged version commit does not touch
+      # .github/workflows/. If a future release commit does, add a TAGBOT_KEY
+      # deploy key (see auxiliary docs) to avoid the GITHUB_TOKEN 403.
+      - name: Prepend CHANGELOG to release notes
+        run: |
+          # Target the version in the checked-out Project.toml (the version just released),
+          # NOT "whatever release is latest" — immune to release-list API lag and no-op runs.
+          VERSION=$(grep -m1 '^version' Project.toml | cut -d'"' -f2)
+          if [ -z "$VERSION" ]; then
+            echo "Could not read version from Project.toml, skipping CHANGELOG prepend"
+            exit 0
+          fi
+          TAG="v$VERSION"
+          # Wait for the release object to become visible (TagBot action created it moments ago)
+          EXISTING=""
+          for _ in 1 2 3 4 5 6; do
+            EXISTING=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body -q '.body' 2>/dev/null || true)
+            [ -n "$EXISTING" ] && break
+            sleep 10
+          done
+          NOTES=$(awk '/^## \['"$VERSION"'\]/{flag=1;next}/^## \[/{flag=0}flag' CHANGELOG.md | sed '/./,$!d' | sed -n ':a;N;$!ba;s/\n*$//;p')
+          if [ -z "$NOTES" ]; then
+            echo "No CHANGELOG section for $VERSION, skipping prepend"
+            exit 0
+          fi
+          # Idempotency guard: skip if this CHANGELOG section is already in the notes
+          FIRST_HEADING=$(printf '%s\n' "$NOTES" | grep -m1 '^#\+ ' || true)
+          if [ -n "$FIRST_HEADING" ] && printf '%s\n' "$EXISTING" | grep -qF -- "$FIRST_HEADING"; then
+            echo "CHANGELOG section already present in $TAG notes, skipping prepend"
+            exit 0
+          fi
+          if [ -n "$EXISTING" ]; then
+            # Extract title (first non-empty line, e.g. "MyPkg v1.2.3"), keep it above the section
+            TITLE=$(printf '%s\n' "$EXISTING" | awk 'NF{print; exit}')
+            BODY=$(printf '%s\n' "$EXISTING" | awk 'found{print; next} NF{found=1}')
+            # Strip registrator release-notes summary lines from body
+            CLEANED=$(printf '%s\n' "$BODY" | sed '/^[[:space:]]*See CHANGELOG/d; /^[[:space:]]*Release notes:/d' | sed '/./,$!d')
+            if [ -n "$CLEANED" ]; then
+              COMBINED="${TITLE}"$'\n\n'"${NOTES}"$'\n\n---\n\n'"${CLEANED}"
+            else
+              COMBINED="${TITLE}"$'\n\n'"${NOTES}"
+            fi
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "${COMBINED}"
+          else
+            echo "Release $TAG not visible after retries, skipping prepend"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
