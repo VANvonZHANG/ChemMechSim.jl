@@ -18,6 +18,7 @@ makedocs(;
         "Home" => "index.md",
         "Getting started" => "getting_started.md",
         "Ignition tutorial" => "tutorial_ignition.md",
+        "Reactor modes" => "reactors.md",
         "API reference" => "api.md",
     ],
     # Documenter 1.19: doc-error classes are fatal by default (warnonly = Symbol[]);
