@@ -51,7 +51,9 @@ per-mech ref CSVs and ignition PNGs also land in `output/`.
 
 `export_species.jl` uses `jac=true` + `FBDF(linsolve=UMFPACKFactorization())` uniformly
 across all mechanisms — required for Aramco (581 sp) where the default dense Jacobian
-OOMs; see `examples/perf/` and the linsolve probe for the 35× KLU→UMFPACK finding.
+OOMs. The linear-solver comparison lives in `examples/perf/bench_linsolver_matrix.jl`
+(it splits one-time codegen compile from warm solve; the historical "KLU 35× slower"
+probe number was an artifact of KLU running first and paying that compile).
 
 ## Files
 
