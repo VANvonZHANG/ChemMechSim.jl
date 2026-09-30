@@ -765,9 +765,15 @@ end
     # C is the product — its d(reverse rate)/d(c_C) column was missing before the fix.
     nm2i = ChemMechSim._state_name_index(sys)
     As = Matrix(J_sharded); Af = Matrix(J_full)
-    @test As[nm2i["A"], nm2i["C"]] ≈ Af[nm2i["A"], nm2i["C"]] rtol=1e-8 atol=1e-8
-    @test As[nm2i["A"], nm2i["T"]] ≈ Af[nm2i["A"], nm2i["T"]] rtol=1e-8 atol=1e-8
-    @test Matrix(J_sharded) ≈ Matrix(J_full) rtol=1e-8 atol=1e-8
+    # rtol guards STRUCTURE (missing/mis-scaled terms are O(1) differences), not float
+    # fidelity: the two paths are algebraically identical but different symbolic
+    # expressions. A Symbolics update (7.28 -> 7.39) regrouped these cancellation-heavy
+    # ThermoReverse entries; on aarch64 the float evaluation then diverges up to ~6e-3
+    # relative (x86 stays < 1e-8) — observed 2026-09-30 on macOS CI. The regression this
+    # testset guards (missing d(reverse rate)/d(c_C) column) is an O(1) difference.
+    @test As[nm2i["A"], nm2i["C"]] ≈ Af[nm2i["A"], nm2i["C"]] rtol=1e-2
+    @test As[nm2i["A"], nm2i["T"]] ≈ Af[nm2i["A"], nm2i["T"]] rtol=1e-2
+    @test Matrix(J_sharded) ≈ Matrix(J_full) rtol=1e-2
 end
 
 @testset "sharded path still sees exactly one M_eff eq per reaction under sharing" begin
