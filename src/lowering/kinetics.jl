@@ -98,14 +98,14 @@ direct_mtk_lowering(rx::ReactionData, mech::Mechanism, cvar, T, j::Int, ctx::Rat
 _direct_rate(kin::ElementaryArrhenius, rx, mech, cvar, T, j, ctx::RateCtx) =
     symbolic_kf(kin, ctx) * _mass_action(rx.reactants, cvar)
 
-"Third-body enhanced rate (spec §5.2): k_base(T)·∏ reactants·[M]_eff. The third body is
+"Third-body enhanced rate: k_base(T)·∏ reactants·[M]_eff. The third body is
  NOT a reactant — it enters via the efficiencies map. k_base carries a unit one order higher
  than the elementary base (the [M]_eff factor adds one concentration).
  Thin wrapper over `symbolic_kf` (DRY): rate = kf · mass_action(reactants)."
 _direct_rate(kin::ThirdBodyArrhenius, rx, mech, cvar, T, j, ctx::RateCtx) =
     symbolic_kf(kin, ctx) * _mass_action(rx.reactants, cvar)
 
-"Troe falloff forward rate (spec §5.2, §3.4 #2). k_blend = kinf·(Pr/(1+Pr))·F_Troe, with
+"Troe falloff forward rate. k_blend = kinf·(Pr/(1+Pr))·F_Troe, with
  Pr = k0·[M]_eff/kinf (dimensionless). kinf carries the high-pressure (Σν-reactant) unit;
  k0 carries one order higher. Verified 2026-06-26: log10/10^x/exp of symbolic Nums survive
  mtkCompile and the dimension check passes (Pr dimensionless)."
@@ -114,7 +114,7 @@ function _direct_rate(kin::TroeFalloff, rx, mech, cvar, T, j, ctx::RateCtx)
     return symbolic_kf(kin, ctx) * _mass_action(rx.reactants, cvar)
 end
 
-"Lindemann falloff forward rate (spec §5.2). F≡1 (no center broadening), so the rate is
+"Lindemann falloff forward rate. F≡1 (no center broadening), so the rate is
  kinf·(Pr/(1+Pr))·∏reactants. Dispatched like TroeFalloff; symbolic_kf provides the effective
  forward rate constant so ThermoReverse can compute kr = kf/Kc consistently."
 function _direct_rate(kin::LindemannFalloff, rx, mech, cvar, T, j, ctx::RateCtx)
@@ -246,7 +246,7 @@ end
 
 "Default full forward rate = symbolic_kf × mass-action(reactants). Laws with extra
  concentration-dependent factors (e.g. inhibition, [M]_eff beyond the rate constant)
- override this with an explicit method. Default protocol entry (design §5)."
+ override this with an explicit method."
 symbolic_rate(kin::AbstractKinetics, rx::ReactionData, ctx::RateCtx) =
     symbolic_kf(kin, ctx) * _mass_action(rx.reactants, ctx.cvar)
 
@@ -255,7 +255,7 @@ symbolic_rate(kin::AbstractKinetics, rx::ReactionData, ctx::RateCtx) =
  the identity of M_eff: reactions sharing it share one variable and emit its equation once.
  (Without this, MCM alkanes/alkenes emits 1269 M_eff variables where only 3 distinct α vectors
  exist — 2,338,767 summed terms instead of 5,529.) Emits a M_eff algebraic variable
- (state+algebraic pattern, §7.1): the equation M_eff ~ Σα·c is registered in ctx.meff_eqs, and
+ (state+algebraic pattern): the equation M_eff ~ Σα·c is registered in ctx.meff_eqs, and
  the variable is returned for use in the rate. MTK tearing eliminates it → observed at compile
  time, so MTK's dim-check processes one symbol per rate instead of an N-term expression
  (inlining the sum into every rate instead hangs the dim-check — observed on Aramco's 581

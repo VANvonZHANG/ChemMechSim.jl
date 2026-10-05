@@ -331,7 +331,7 @@ function _reaction_rate_expr_with_meff(rx::ReactionData, mech::Mechanism, sys,
     return (rate_expr, meff_sym, effs)
 end
 
-"Symbolic net rate for one reaction, reusing the lowering protocol (design §5).
+"Symbolic net rate for one reaction, reusing the lowering protocol.
  Irreversible: _reaction_sharded_symbolic_kf · mass_action(reactants). Reversible: routes
  through thermo.jl's `_net_rate`, which forms the reverse rate from the policy (ExplicitReverse
  own rate law, or the opaque keq call node) WITHOUT duplicating any rate-law formula here."

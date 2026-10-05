@@ -137,7 +137,7 @@ function _reverse_rate(policy::ExplicitReverse, rx::ReactionData, mech, cvar, T,
     return kr * _mass_action(rx.products, cvar)
 end
 
-"LEGACY numeric inlined K_c(T) = exp(-Δg°/RT)·(P°/(R·T))^Δν (spec §3.4 #4, §4.2).
+"LEGACY numeric inlined K_c(T) = exp(-Δg°/RT)·(P°/(R·T))^Δν.
  Kept as a numeric-test helper ONLY — _reverse_rate(ThermoReverse) now emits an opaque keq(T,id)
  call node and the data-layer `equilibrium_constant(KcData, T)` is the single source of truth.
  Tests in test/test_thermo.jl use this for the cross-check `equilibrium_constant ≈ _equilibrium_constant`.
@@ -209,14 +209,14 @@ function _nasa7_coeffs_sym(m::NASA7, T, sid, ctx)
     return c
 end
 
-"Symbolic dimensionless cp/R for a unit-bearing T (energy equation, Phase 4a).
+"Symbolic dimensionless cp/R for a unit-bearing T (energy equation).
  Calls the data-layer _nasa7_cp body (single polynomial definition; T2 dedup)."
 function _cp_over_R(m::NASA7, T::Num, sid, ctx)
     coeffs, _, _ = _nasa7_coeffs_sym(m, T, sid, ctx)
     return _nasa7_cp(coeffs, T)
 end
 
-"Symbolic dimensionless h/RT for a unit-bearing T (energy equation, Phase 4a).
+"Symbolic dimensionless h/RT for a unit-bearing T (energy equation).
  Calls the data-layer _nasa7_h body (single polynomial definition; T2 dedup)."
 function _h_over_RT(m::NASA7, T::Num, sid, ctx)
     coeffs, _, _ = _nasa7_coeffs_sym(m, T, sid, ctx)

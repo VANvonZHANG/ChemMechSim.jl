@@ -140,8 +140,8 @@ function _check_reverse_consistency(mech::Mechanism, rep::ValidationReport)
 end
 _species_by_id(mech::Mechanism, sid) = species_by_id(mech, sid)
 
-"Phase 4a/4b: energy=:adiabatic (const-V OR const-P) needs NASA7 thermo on every species (the energy
- equation uses cp/cv(const-V) or cp/h(const-P) of each). Reports one error per offending species (§5.3.4)."
+"energy=:adiabatic (const-V or const-P) needs NASA7 thermo on every species (the energy
+ equation uses cp/cv (const-V) or cp/h (const-P) of each). Reports one error per offending species."
 function _check_energy_thermo(mech::Mechanism, config::MechanismConfig, rep::ValidationReport)
     config.energy === :adiabatic || return
     for sp in mech.species
