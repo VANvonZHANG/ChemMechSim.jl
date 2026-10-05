@@ -26,7 +26,7 @@ function _energy_ode_constP(mech::Mechanism, nvar, Vvar, T, rates, tcx)
     for sp in mech.species
         sp.thermo isa NASA7 ||
             error("_energy_ode_constP: species $(sp.name) (id $(sp.id)) has no NASA7 thermo; " *
-                  ":adiabatic requires NASA7 thermo on all species (spec §5.3.4). " *
+                  ":adiabatic requires NASA7 thermo on all species. " *
                   "Use energy=:isothermal or provide NASA7 thermo.")
     end
     cp_sum = sum(nvar[sp.id] * _cp_over_R(sp.thermo, T, sp.id, tcx) * R for sp in mech.species)   # [J/K]
@@ -70,7 +70,7 @@ function _energy_rhs_constV(mech::Mechanism, cvar, T, rates, tcx)
     for sp in mech.species
         sp.thermo isa NASA7 ||
             error("_energy_rhs_constV: species $(sp.name) (id $(sp.id)) has no NASA7 thermo; " *
-                  ":adiabatic requires NASA7 thermo on all species (spec §5.3.4). " *
+                  ":adiabatic requires NASA7 thermo on all species. " *
                   "Use energy=:isothermal or provide NASA7 thermo.")
     end
     cv_sum = _cv_sum_constV(mech, cvar, T, tcx)

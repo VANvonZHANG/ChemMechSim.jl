@@ -162,7 +162,7 @@ function _parse_thermo(thermo_dict)
     # consults thermo. Any other unknown model stays loud.
     model == "constant-cp" && return nothing
     model == "NASA7" ||
-        error("_parse_thermo: unsupported thermo model \"$model\" (only NASA7 in Phase 5a)")
+        error("_parse_thermo: unsupported thermo model \"$model\" (only NASA7 and constant-cp are supported)")
     ranges = thermo_dict["temperature-ranges"]
     data   = thermo_dict["data"]
     low  = NTuple{7,Float64}(Float64(x) for x in data[1])

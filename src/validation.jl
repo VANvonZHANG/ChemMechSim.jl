@@ -76,7 +76,7 @@ function _check_molecular_weights(mech::Mechanism, rep::ValidationReport)
         isnan(sp.molecular_weight) &&
             push!(rep.warnings,
                   "species $(sp.name) (id $(sp.id)) has no molecular weight " *
-                  "(required for EOS / mass-fraction state basis; spec §5.3.4).")
+                  "(required for EOS / mass-fraction state basis).")
     end
 end
 
@@ -150,7 +150,7 @@ function _check_energy_thermo(mech::Mechanism, config::MechanismConfig, rep::Val
                   "energy=:adiabatic requires NASA7 thermo on all species, but $(sp.name) " *
                   "(id $(sp.id)) has $(sp.thermo === nothing ? "no thermo" :
                                       "non-NASA7 thermo ($(typeof(sp.thermo)))"). " *
-                  "Provide NASA7 thermo or use energy=:isothermal (spec §5.3.4).")
+                  "Provide NASA7 thermo or use energy=:isothermal.")
     end
 end
 
