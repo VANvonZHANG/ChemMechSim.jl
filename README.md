@@ -81,6 +81,21 @@ CH4-air ignition, FBDF @ reltol=1e-8/abstol=1e-12, reaction-sharded analytic Jac
 - User documentation: <https://vanvonzhang.github.io/ChemMechSim.jl> — getting started
   and the full API reference
 
+## Third-party data
+
+`examples/mechanism/` redistributes third-party reaction mechanisms **unmodified and with
+attribution, for validation and example use**. The MIT license of this repository covers
+its original code and documentation only — the mechanism files below are excluded from
+that grant and remain subject to their respective sources. All other fixtures
+(e.g. `brusselator.yaml`) are original toy mechanisms of this repository.
+
+| Files | Source | Attribution |
+|---|---|---|
+| `gri30.yaml` | GRI-Mech 3.0, vendored via Cantera's `ck2yaml` conversion (Cantera is BSD-3-Clause) | Cite as the [GRI-Mech site](http://combustion.berkeley.edu/gri-mech/version30/text30.html) requests: *Gregory P. Smith, David M. Golden, Michael Frenklach, Nigel W. Moriarty, Boris Eiteneer, Mikhail Goldenberg, C. Thomas Bowman, Ronald K. Hanson, Soonho Song, William C. Gardiner, Jr., Vitali V. Lissianski, and Zhiwei Qin*, http://www.me.berkeley.edu/gri_mech/ |
+| `h2o2.yaml`, `test/data/h2o2.yaml` | Cantera `data/h2o2.yaml` (H2-O2 submechanism of GRI-Mech 3.0) | BSD-3-Clause (Cantera); distributed unchanged |
+| `FFCM2.yaml` | [FFCM-2](https://web.stanford.edu/group/haiwanglab/FFCM2/), July 2023 release, © Stanford Foundational Fuel Chemistry Model Initiative | Citation required: *Y. Zhang, W. Dong, L. Vandewalle, R. Xu, G.P. Smith and H. Wang, "Foundational Fuel Chemistry Model Version 2.0 (FFCM-2)", https://web.stanford.edu/group/haiwanglab/FFCM2, 2023* (also embedded in the file header) |
+| `AramcoMech3.0.{MECH,THERM,TRAN}` (+ `AramcoMech3.0.yaml`, our `ck2yaml` conversion) | [Combustion Chemistry Centre, University of Galway](https://c3.universityofgalway.ie/combustionchemistrycentre/mechanismdownloads/), AramcoMech 3.0 (2018) | The download site provides no license for these files; they are redistributed here unmodified with attribution. Cite the source publication: *C-W. Zhou, Y. Li, U. Burke, C. Banyon, K.P. Somers, S. Khan, J.W. Hargis, T. Sikes, E.L. Petersen, M. AlAbbad, A. Farooq, Y. Pan, Y. Zhang, Z. Huang, J. Lopez, Z. Loparo, S.S. Vasu, H.J. Curran, "An experimental and chemical kinetic modeling study of 1,3-butadiene combustion: Ignition delay time and laminar flame speed measurements", Combustion and Flame 197 (2018) 423-438* ([doi](https://doi.org/10.1016/j.combustflame.2018.08.006)) |
+
 ## License
 
 [MIT](LICENSE)
