@@ -1,5 +1,5 @@
 # Large-mech T4: Aramco 3.0 CH4-air ignition — ChemMechSim vs Cantera.
-# Run: julia --project=. examples/validation/aramco_ignition.jl
+# Run: julia --project=examples examples/validation/aramco_ignition.jl
 # Requires examples/validation/aramco_ref_constV.csv (run the .py first).
 #
 # Status (2026-07-18): SOLVED via opaque PLOG call node + P differential state

@@ -1,5 +1,5 @@
 # Phase 5a example: H2-O2 ignition — ChemMechSim vs Cantera (if ref CSV present) + CairoMakie plot.
-# Run: julia --project=. examples/validation/h2o2_ignition.jl
+# Run: julia --project=examples examples/validation/h2o2_ignition.jl
 # Requires examples/validation/h2o2_ref_{constV,constP}.csv for Cantera compare (run the .py first).
 using ChemMechSim
 using OrdinaryDiffEq: Rodas5P

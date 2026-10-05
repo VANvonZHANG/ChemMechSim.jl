@@ -1,6 +1,6 @@
 # Atmospheric box model: MCM alkanes/alkenes, isothermal at 298 K, fixed pressure.
 #
-#   julia --project=. examples/atmospheric/mcm_box.jl <frozen|diurnal> [span_days]
+#   julia --project=examples examples/atmospheric/mcm_box.jl <frozen|diurnal> [span_days]
 #
 # One driver, two photolysis modes (span_days defaults to 8 for both):
 #   frozen  — photolysis parameters at their defaults = J at overhead sun (perpetual day)
@@ -35,7 +35,7 @@ include(joinpath(@__DIR__, "tools", "diurnal_env.jl"))   # zenith clock + J law 
 
 # ———————————————————— script body (skipped when included by anything else) ————————
 if abspath(PROGRAM_FILE) == @__FILE__
-    usage = "usage: julia --project=. examples/atmospheric/mcm_box.jl <frozen|diurnal> [span_days]"
+    usage = "usage: julia --project=examples examples/atmospheric/mcm_box.jl <frozen|diurnal> [span_days]"
     isempty(ARGS) && error(usage)
     const MODE = ARGS[1]
     MODE in ("frozen", "diurnal") || error(usage)

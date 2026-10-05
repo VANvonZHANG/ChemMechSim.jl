@@ -7,7 +7,7 @@
 # reproducibility metadata YAML for plotting.
 #
 # Run (framework only — run on the target machine for paper numbers):
-#   julia --project=. examples/perf/bench_linsolver_matrix.jl \
+#   julia --project=examples examples/perf/bench_linsolver_matrix.jl \
 #       [--mechs gri30,ffcm2,aramco] [--solvers klu,umfpack,sparspak,mumps,pardiso] \
 #       [--repeats 1] [--no-warmup] [--reltol 1e-8] [--abstol 1e-12] [--tspan-ms 5.0] \
 #       [--no-microbench] [--no-accuracy] [--quick] [--out-dir DIR]

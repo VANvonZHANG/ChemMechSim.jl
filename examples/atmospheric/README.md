@@ -41,12 +41,12 @@ the source), and each step reads what the previous one wrote:
 # 1. the box, either mode (span_days defaults to 8 for both):
 #    frozen  -> output/frozen/{series.csv, final_state.csv, run_meta.txt}
 #    diurnal -> output/diurnal/{...} — photolysis driven by the zenith clock, 60-s grid
-julia --project=. examples/atmospheric/mcm_box.jl frozen
-julia --project=. examples/atmospheric/mcm_box.jl diurnal
+julia --project=examples examples/atmospheric/mcm_box.jl frozen
+julia --project=examples examples/atmospheric/mcm_box.jl diurnal
 # 2. analyses on the frozen run: O3/HOx rate budgets at the final state -> budget.csv;
 #    Jacobian-strategy bench (one build per strategy, solves at 0.25/0.5/1 day) -> bench_jac.csv
-julia --project=. examples/atmospheric/tools/budget.jl
-julia --project=. examples/atmospheric/tools/bench_jac.jl
+julia --project=examples examples/atmospheric/tools/budget.jl
+julia --project=examples examples/atmospheric/tools/bench_jac.jl
 # 3. figures + summary table (matplotlib/numpy/pandas, see tools/requirements-figures.txt)
 python3 examples/atmospheric/tools/figures/fig_series.py   # -> series_frozen.png + series_diurnal.png
 python3 examples/atmospheric/tools/figures/perf.py         # -> perf.png

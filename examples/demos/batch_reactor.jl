@@ -1,5 +1,5 @@
 # BatchReactor Layer-1 demo for ChemMechSim (Phase 2).
-# Run:  julia --project=. examples/demos/batch_reactor.jl
+# Run:  julia --project=examples examples/demos/batch_reactor.jl
 #
 # Shows the script API: build a reactor from a Mechanism, choose a convenience
 # mode, and simulate. This demo uses :kinetic (the MechanismConfig zero point);

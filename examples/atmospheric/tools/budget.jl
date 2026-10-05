@@ -1,6 +1,6 @@
 # Rank the reactions driving O3 and HOx at the final state of the box.
 #
-#   julia --project=. examples/atmospheric/tools/budget.jl
+#   julia --project=examples examples/atmospheric/tools/budget.jl
 #
 # WHY A BUDGET AND NOT A TIME SERIES: the box reaches a near-steady state, so the interesting
 # statement is not "O3 falls" but "O3 falls because of THESE reactions". This evaluates each
