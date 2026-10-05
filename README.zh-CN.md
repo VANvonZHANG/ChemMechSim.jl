@@ -62,3 +62,14 @@ sol   = simulate(rx, (0.0, 5.0e-3); u0=u0, solver=FBDF())        # → ODESoluti
 - 面向刚性大机理的可选 Jacobian 策略（验证至 Aramco 3.0，581 物种）。
 
 v1.0.0 面向气相化学；多相、多状态反应器模型为规划中的扩展。
+
+## 第三方数据
+
+`examples/mechanism/` 以**未修改、附署名**的方式随包再分发第三方反应机理，供验证与示例使用。本仓库的 MIT 许可仅覆盖其原创代码与文档——下表机理文件不在该授权范围内，受各自来源约束。其余 fixture（如 `brusselator.yaml`）为本仓库自创的 toy 机理。
+
+| 文件 | 来源 | 署名 |
+|---|---|---|
+| `gri30.yaml` | GRI-Mech 3.0，经 Cantera `ck2yaml` 转换引入（Cantera 为 BSD-3-Clause） | 按 [GRI-Mech 官网](http://combustion.berkeley.edu/gri-mech/version30/text30.html)要求引用：*Gregory P. Smith, David M. Golden, Michael Frenklach, Nigel W. Moriarty, Boris Eiteneer, Mikhail Goldenberg, C. Thomas Bowman, Ronald K. Hanson, Soonho Song, William C. Gardiner, Jr., Vitali V. Lissianski, and Zhiwei Qin*, http://www.me.berkeley.edu/gri_mech/ |
+| `h2o2.yaml`、`test/data/h2o2.yaml` | Cantera `data/h2o2.yaml`（GRI-Mech 3.0 的 H2-O2 子机理） | BSD-3-Clause（Cantera）；未修改分发 |
+| `FFCM2.yaml` | [FFCM-2](https://web.stanford.edu/group/haiwanglab/FFCM2/) 2023 年 7 月版，© Stanford Foundational Fuel Chemistry Model Initiative | 要求引用：*Y. Zhang, W. Dong, L. Vandewalle, R. Xu, G.P. Smith and H. Wang, "Foundational Fuel Chemistry Model Version 2.0 (FFCM-2)", https://web.stanford.edu/group/haiwanglab/FFCM2, 2023*（亦嵌于文件头） |
+| `AramcoMech3.0.{MECH,THERM,TRAN}`（含我们转换的 `AramcoMech3.0.yaml`） | [戈尔韦大学燃烧化学中心](https://c3.universityofgalway.ie/combustionchemistrycentre/mechanismdownloads/)，AramcoMech 3.0（2018） | 官方下载页未提供这些文件的许可条款；此处以未修改、附署名方式再分发。引用来源论文：*C-W. Zhou, Y. Li, U. Burke, C. Banyon, K.P. Somers, S. Khan, J.W. Hargis, T. Sikes, E.L. Petersen, M. AlAbbad, A. Farooq, Y. Pan, Y. Zhang, Z. Huang, J. Lopez, Z. Loparo, S.S. Vasu, H.J. Curran, "An experimental and chemical kinetic modeling study of 1,3-butadiene combustion: Ignition delay time and laminar flame speed measurements", Combustion and Flame 197 (2018) 423-438*（[doi](https://doi.org/10.1016/j.combustflame.2018.08.006)） |
