@@ -16,10 +16,11 @@ MTK-first、符号透明、反应器可组合的气相化学机理建模框架�
 ## 快速开始
 
 ```julia
-using Pkg; Pkg.activate("."); Pkg.instantiate()
-using ChemMechSim
+using Pkg; Pkg.add(["ChemMechSim", "OrdinaryDiffEq"])  # OrdinaryDiffEq 提供 FBDF
+using ChemMechSim, OrdinaryDiffEq
 
-mech  = load_mechanism("examples/mechanism/gri30.yaml")          # Cantera-YAML → Mechanism
+# GRI-Mech 3.0 随包分发（位于包目录内）：
+mech  = load_mechanism(joinpath(pkgdir(ChemMechSim), "examples", "mechanism", "gri30.yaml"))  # Cantera-YAML → Mechanism
 rx    = BatchReactor(mech; mode=:adiabatic_constV)               # 便捷模式 → MTK ODESystem
 # u0: Dict(物种名 => 浓度) 加 "T" => 初温；完整示例见 examples/demos/brusselator.jl
 sol   = simulate(rx, (0.0, 5.0e-3); u0=u0, solver=FBDF())        # → ODESolution
