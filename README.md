@@ -18,10 +18,11 @@ chemical-kinetics modeling.
 ## Quick start
 
 ```julia
-using Pkg; Pkg.activate("."); Pkg.instantiate()
+using Pkg; Pkg.add(["ChemMechSim", "OrdinaryDiffEq"])  # OrdinaryDiffEq provides FBDF
 using ChemMechSim, OrdinaryDiffEq
 
-mech    = load_mechanism("examples/mechanism/gri30.yaml")   # Cantera-YAML → Mechanism
+# GRI-Mech 3.0 ships inside the package tarball:
+mech    = load_mechanism(joinpath(pkgdir(ChemMechSim), "examples", "mechanism", "gri30.yaml"))  # Cantera-YAML → Mechanism
 reactor = BatchReactor(mech; mode=:adiabatic_constV)        # convenience preset → MTK ODESystem
 
 # Stoichiometric CH4-air at 1500 K, 1 atm (same setup as examples/validation/gri30_ignition.jl)
