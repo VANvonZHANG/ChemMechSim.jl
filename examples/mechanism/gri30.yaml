@@ -1,4 +1,4 @@
-# Vendored from Cantera (https://cantera.org, BSD-3-Clause) for ChemMechSim Phase 5b scale tests.
+# Vendored from Cantera (https://cantera.org, BSD-3-Clause) as a validation-scale fixture.
 description: |-
   GRI-Mech Version 3.0 7/30/99  CHEMKIN-II format
   See README30 file at anonymous FTP site unix.sri.com, directory gri;
