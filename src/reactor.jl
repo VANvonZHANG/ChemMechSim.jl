@@ -80,7 +80,7 @@ BatchReactor(phase::ChemPhaseSystem; name::Symbol=:batch) = BatchReactor(phase, 
 "Build a BatchReactor from a Catalyst ReactionSystem (imports, then wraps)."
 BatchReactor(rn; kwargs...) = BatchReactor(import_from_catalyst(rn); kwargs...)
 
-"Mechanism-file parsing (YAML/CHEMKIN) is not implemented yet (spec §6 Layer 1)."
+"Construct a BatchReactor from a mechanism object, not a file path."
 BatchReactor(s::AbstractString; kwargs...) =
     error("BatchReactor: mechanism-file parsing (\"$s\") arrives in a later phase; " *
           "pass a Mechanism or a Catalyst ReactionSystem.")

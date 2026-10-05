@@ -6,7 +6,7 @@
  macros reject interpolated names with [unit=...], so units are attached via setmetadata)."
 _attach_unit(sym, unit) = ModelingToolkit.setmetadata(sym, ModelingToolkit.VariableUnit, unit)
 
-"Build a rate-constant parameter `name` with `default` value and a derived `unit` (§5.6.5).
+"Build a rate-constant parameter `name` with `default` value and a derived `unit`.
  The @parameters macro only accepts a LITERAL default with interpolation, so create with a
  placeholder then setdefault + setmetadata."
 function rate_param(name::Symbol, default, unit)

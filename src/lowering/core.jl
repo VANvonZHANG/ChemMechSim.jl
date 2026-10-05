@@ -98,7 +98,7 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
     return mtkcompile(raw; checks=checks)
 end
 
-"Build the system with EOS P. Two regimes (spec §5.3 iii; Task 4 + Task 3):
+"Build the system with EOS P. Two regimes:
    • const-V (p_differential=true; applies to BOTH :adiabatic_constV AND :fixedT): P is a
      DIFFERENTIAL state — its ODE was already pushed into `eqs` by `lower_to_mtk`. Under
      :adiabatic the ODE is D(P) ~ R·(T·Σ物种RHS + (Σc)·能量RHS); under :fixedT (isothermal)
