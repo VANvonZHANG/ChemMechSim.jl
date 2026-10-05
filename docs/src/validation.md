@@ -15,7 +15,7 @@ reports the ignition-delay relative difference, and saves a comparison plot.
 
 ```bash
 python3 examples/validation/gri30_ref.py
-julia --project=. examples/validation/gri30_ignition.jl
+julia --project=examples examples/validation/gri30_ignition.jl
 ```
 
 **Metric:** `t_ignition` = time of maximum `|dT/dt|` (robust against noise).
@@ -34,7 +34,7 @@ table embedded below:
 
 ```bash
 python3 examples/validation/gen_ref_species.py     # 1. Cantera T + 5 species (CH4, O2, CO2, OH, H2O)
-julia --project=. examples/validation/export_species.jl   # 2. ChemMechSim, same grid
+julia --project=examples examples/validation/export_species.jl   # 2. ChemMechSim, same grid
 python3 examples/validation/plot_validation.py     # 3. figures + validation_errors.txt
 ```
 

@@ -28,7 +28,7 @@ How to read it:
   steps (898 vs 1783).
 
 ```bash
-julia --project=. examples/perf/bench_pipeline_stages.jl     # → output/bench_pipeline.csv
+julia --project=examples examples/perf/bench_pipeline_stages.jl     # → output/bench_pipeline.csv
 python3 examples/perf/plot_pipeline.py                       # figures from the CSVs
 ```
 
@@ -40,7 +40,7 @@ standalone linear-solve micro-benchmark and trajectory-accuracy checks against a
 reference:
 
 ```bash
-julia --project=. examples/perf/bench_linsolver_matrix.jl --repeats 5
+julia --project=examples examples/perf/bench_linsolver_matrix.jl --repeats 5
 python3 examples/perf/plot_bench.py
 ```
 

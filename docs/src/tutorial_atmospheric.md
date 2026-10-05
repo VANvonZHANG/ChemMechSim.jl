@@ -29,10 +29,10 @@ dimensionally correct; the checker cannot prove it in reasonable time).
 The source mechanism is not committed — copy it in from the converter, then:
 
 ```bash
-julia --project=. examples/atmospheric/mcm_box.jl frozen     # J at overhead sun (perpetual day)
-julia --project=. examples/atmospheric/mcm_box.jl diurnal    # photolysis driven by the zenith clock
-julia --project=. examples/atmospheric/tools/budget.jl       # O3/HOx rate budgets
-julia --project=. examples/atmospheric/tools/bench_jac.jl    # Jacobian-strategy A/B
+julia --project=examples examples/atmospheric/mcm_box.jl frozen     # J at overhead sun (perpetual day)
+julia --project=examples examples/atmospheric/mcm_box.jl diurnal    # photolysis driven by the zenith clock
+julia --project=examples examples/atmospheric/tools/budget.jl       # O3/HOx rate budgets
+julia --project=examples examples/atmospheric/tools/bench_jac.jl    # Jacobian-strategy A/B
 python3 examples/atmospheric/tools/figures/fig_series.py     # series_frozen.png + series_diurnal.png
 ```
 
