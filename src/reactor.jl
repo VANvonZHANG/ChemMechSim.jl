@@ -82,8 +82,9 @@ BatchReactor(rn; kwargs...) = BatchReactor(import_from_catalyst(rn); kwargs...)
 
 "Construct a BatchReactor from a mechanism object, not a file path."
 BatchReactor(s::AbstractString; kwargs...) =
-    error("BatchReactor: mechanism-file parsing (\"$s\") arrives in a later phase; " *
-          "pass a Mechanism or a Catalyst ReactionSystem.")
+    error("BatchReactor: cannot build from a mechanism-file path (\"$s\"); " *
+          "load it first with `load_mechanism(path)` and pass the resulting Mechanism " *
+          "(or pass a Catalyst ReactionSystem).")
 
 Base.show(io::IO, r::BatchReactor) =
     print(io, "BatchReactor(:$(r.name), energy=$(r.phase.config.energy), " *

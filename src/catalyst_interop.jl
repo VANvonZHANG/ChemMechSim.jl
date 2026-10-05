@@ -21,11 +21,11 @@ function import_from_catalyst(rn)
     reactions = ReactionData[]
     for r in Catalyst.reactions(rn)
         r.only_use_rate &&
-            error("import_from_catalyst: only_use_rate reactions are not supported in Phase 1.")
+            error("import_from_catalyst: only_use_rate reactions are not supported.")
         kval = try
             Float64(r.rate)
         catch _
-            error("import_from_catalyst: non-numeric rate law ($(r.rate)) is not supported in Phase 1; " *
+            error("import_from_catalyst: non-numeric rate law ($(r.rate)) is not supported; " *
                   "use plain numeric rate constants.")
         end
         reactants = Dict{SpeciesID,Float64}(
