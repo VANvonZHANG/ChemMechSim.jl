@@ -47,7 +47,9 @@ Jacobian; loose tolerance with many forced restarts favors FD.
 ## Linear solvers
 
 Pass via the solver: `FBDF(linsolve = KLU())`, `FBDF(linsolve = LUFactorization())`,
-… (any `LinearSolve.jl` algorithm). Measured guidance:
+… (any `LinearSolve.jl` algorithm; `LinearSolve` is **not** a package dependency —
+`Pkg.add("LinearSolve")` it into your environment, likewise `MUMPS`/`Pardiso` when
+benchmarking those). Measured guidance:
 
 - **KLU** is the best general choice at full mechanism scale (581 sp) — the
   default in the pipeline benchmarks.
