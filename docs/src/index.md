@@ -8,6 +8,10 @@ the SciML solve chain.
 > unit-carrying ModelingToolkit `ODESystem`s, reaction-sharded analytic Jacobians, and the
 > SciML solve chain are implemented and validated against Cantera.
 
+## Related packages
+
+[ReactionMechanismSimulator.jl](https://github.com/ReactionMechanismGenerator/ReactionMechanismSimulator.jl) (RMS) is a registered, actively maintained Julia package that also simulates large gas-phase mechanisms read from Cantera YAML — if it already fits your workflow, keep using it. ChemMechSim.jl differs architecturally: the mechanism lowers to a ModelingToolkit/Catalyst `ODESystem` as the primary artifact — composable with the SciML ecosystem, on a unit-aware data layer with an extensible rate-law protocol.
+
 ## What you can do
 
 - **Parse** published mechanisms from Cantera-YAML — GRI-Mech 3.0, FFCM-2, Aramco 3.0,
