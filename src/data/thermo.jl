@@ -6,7 +6,7 @@
 "Abstract parent of thermodynamic models (e.g. NASA7, NASA9)."
 abstract type ThermoModel end
 
-"NASA7 7-coefficient polynomial thermo model (spec §5.5).
+"NASA7 7-coefficient polynomial thermo model.
  Two coefficient sets span [Tlow,Tmid] (low) and [Tmid,Thigh] (high); each set is
  (a1,a2,a3,a4,a5,a6,a7) where:
    cp/R = a1 + a2·T + a3·T² + a4·T³ + a5·T⁴
@@ -47,7 +47,7 @@ h_over_RT(m::NASA7, T::Real) = _nasa7_h(_nasa7_coeffs(m, T), T)
 "Dimensionless s/R."
 s_over_R(m::NASA7, T::Real)  = _nasa7_s(_nasa7_coeffs(m, T), T)
 
-"Dimensionless g/RT = h/RT - s/R (Task 6 uses this for K_c)."
+"Dimensionless g/RT = h/RT - s/R (used for K_c)."
 g_over_RT(m::NASA7, T::Real) = h_over_RT(m, T) - s_over_R(m, T)
 
 # —— Equilibrium constant K_c(T) + analytic ∂K_c/∂T (data layer; MTK-free) ——
@@ -76,7 +76,7 @@ function KcData(rx, mech)
     KcData(prod, react, dnu)
 end
 
-"Equilibrium constant K_c(T) = exp(-Δg°/RT)·(P°/(R·T))^Δν (spec §3.4 #4). MTK-free, generic
+"Equilibrium constant K_c(T) = exp(-Δg°/RT)·(P°/(R·T))^Δν. MTK-free, generic
  over Real. Numerically identical to lowering's _equilibrium_constant (R_GAS = 8.314 J/(mol·K),
  P_STD = 1.0e5 Pa, the package-global defaults)."
 function equilibrium_constant(kcd::KcData, T; R::Real=R_GAS, P_STD::Real=P_STD)
@@ -111,7 +111,7 @@ s_molar(m::NASA7, T::Real) = s_over_R(m, T) * R_GAS
 "Molar g = (g/RT)·R·T  [J/mol] (equivalently h - T·s)."
 g_molar(m::NASA7, T::Real) = g_over_RT(m, T) * R_GAS * T
 
-"Molar internal energy ū = h̄ − R·T  [J/mol] (ideal gas; const-V energy equation, Phase 4a)."
+"Molar internal energy ū = h̄ − R·T  [J/mol] (ideal gas)."
 u_molar(m::NASA7, T::Real) = h_molar(m, T) - R_GAS * T
 
 "Molar constant-volume heat capacity cv = cp − R  [J/(mol·K)] (ideal gas)."
