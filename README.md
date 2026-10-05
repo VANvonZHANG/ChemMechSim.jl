@@ -45,6 +45,17 @@ sol = simulate(reactor, (0.0, 5e-3); u0 = u0, solver = FBDF(), reltol = 1e-8, ab
   once; the numeric and symbolic paths share it
 - **Reactor modes**: `:kinetic` / `:fixedT` / `:adiabatic_constV` / `:adiabatic_constP`
 
+## Related packages
+
+[ReactionMechanismSimulator.jl](https://github.com/ReactionMechanismGenerator/ReactionMechanismSimulator.jl) (RMS) is a registered, actively maintained Julia package that also simulates large gas-phase mechanisms read from Cantera YAML — if it already fits your workflow, keep using it. ChemMechSim.jl exists because we wanted the mechanism itself to be a ModelingToolkit/Catalyst `ODESystem` as the primary artifact — inspectable, symbolically transformable equations that compose with the wider SciML ecosystem — and that representation is architectural, so we built a new package rather than rearchitecting an existing one. On that foundation ChemMechSim.jl offers:
+
+- a unit-aware data layer (DynamicQuantities) with dimension checks at construction time;
+- an extensible rate-law protocol (`rate_type_handlers`) — custom rate types without forking the package;
+- explicit reactor-physics presets (`:kinetic` / `:fixedT` / `:adiabatic_constV` / `:adiabatic_constP`) with conserved invariants (U, H);
+- selectable Jacobian strategies for stiff, large mechanisms (validated to Aramco 3.0, 581 species).
+
+v1.0.0 targets gas-phase chemistry; multiphase and multi-state reactor models are planned extensions.
+
 ## Performance
 
 `examples/perf/bench_pipeline_stages.jl` (median of 3; Julia 1.12.7; const-V adiabatic

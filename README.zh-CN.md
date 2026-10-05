@@ -52,3 +52,14 @@ sol   = simulate(rx, (0.0, 5.0e-3); u0=u0, solver=FBDF())        # → ODESoluti
 
 - 用户文档：<https://vanvonzhang.github.io/ChemMechSim.jl>（Getting started 与完整 API reference，英文）
 - [`examples/README.md`](examples/README.md)——导览：demo 学习路径、Cantera 对照验证工作流、性能基准
+
+## 相关包
+
+[ReactionMechanismSimulator.jl](https://github.com/ReactionMechanismGenerator/ReactionMechanismSimulator.jl)（RMS）是已注册、活跃维护的 Julia 包，同样从 Cantera YAML 读取并模拟大型气相机理——若它已满足你的工作流，请继续使用。ChemMechSim.jl 的差异在于架构取向：我们要求机理本身成为 ModelingToolkit/Catalyst 的 `ODESystem` 主产物——可检视、可符号变换、可与 SciML 生态组合；这一表征是架构级的，因此我们选择新写一个包而非改造既有包。在此之上，ChemMechSim.jl 提供：
+
+- 带构建期量纲检查的单位感知数据层（DynamicQuantities）；
+- 可扩展速率律协议（`rate_type_handlers`），无需 fork 即可接入自定义速率类型；
+- 显式反应器物理预设（`:kinetic` / `:fixedT` / `:adiabatic_constV` / `:adiabatic_constP`），带守恒不变量（U、H）；
+- 面向刚性大机理的可选 Jacobian 策略（验证至 Aramco 3.0，581 物种）。
+
+v1.0.0 面向气相化学；多相、多状态反应器模型为规划中的扩展。
