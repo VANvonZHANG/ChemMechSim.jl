@@ -19,3 +19,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+The MIT license above applies to the original work of the ChemMechSim.jl contributors.
+It does not cover the third-party mechanism data redistributed under examples/mechanism/
+and test/data/ — see "Third-party data" in the README for each file's source, terms, and
+required citation.
