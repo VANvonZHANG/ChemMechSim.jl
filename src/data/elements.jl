@@ -23,8 +23,8 @@ const ATOMIC_MASSES = Dict{String,Float64}(
     "Ca" => 0.040078,
 )
 
-"Molar mass [kg/mol] from elemental composition (§5.6 canonical SI, quantity=mol).
- Throws on unknown element so missing data is caught at parse time (§5.3.4)."
+"Molar mass [kg/mol] from elemental composition (canonical SI, quantity=mol).
+ Throws on unknown element so missing data is caught at parse time."
 function molecular_weight(composition::Dict{String,Int})::Float64
     mw = 0.0
     for (elem, count) in composition

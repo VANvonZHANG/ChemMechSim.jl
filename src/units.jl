@@ -30,8 +30,7 @@ module ChemUnits
     carries the expected physical dimension (a mismatch throws). A bare `Real` is
     assumed already canonical and returned unchanged.
 
-    Note: `uconvert(ref, q)` (as in spec §5.6.4) does NOT work with regular
-    `u"..."` units — DynamicQuantities only allows `uconvert` for symbolic
+    Note: `uconvert(ref, q)` does NOT work with regular `u"..."` units — DynamicQuantities only allows `uconvert` for symbolic
     (`us"..."`) dimensions. Plain `ustrip` is the correct canonicalizer here.
     """
     function canonical(q::AbstractQuantity, ref)
