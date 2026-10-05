@@ -43,6 +43,9 @@ Initial release.
   ignition-delay workflow and combined-species trajectories (GRI-30 Δt_ign
   0.065%, FFCM-2 0.168%, Aramco 3.0 0.333%); PLOG rate constants validated
   against Cantera in the test suite.
+- Minimal dependency footprint: the package depends only on what `src/` uses;
+  example scripts (plotting, benchmarks, validation) run in their own `examples/`
+  environment.
 - Documentation site with automated deployment: getting started, ignition and
   atmospheric box tutorials (diurnal photolysis), mechanism format, solver
   guide, validation, performance, and full API reference.
