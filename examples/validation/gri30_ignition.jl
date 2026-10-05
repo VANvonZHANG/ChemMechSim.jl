@@ -1,5 +1,5 @@
 # Phase 5b example: GRI30 CH4-air ignition — ChemMechSim vs Cantera + CairoMakie plot.
-# Run: julia --project=. examples/validation/gri30_ignition.jl
+# Run: julia --project=examples examples/validation/gri30_ignition.jl
 # Requires examples/validation/gri30_ref_constV.csv (run the .py first).
 using ChemMechSim
 using OrdinaryDiffEq: FBDF

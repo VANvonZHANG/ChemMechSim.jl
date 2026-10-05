@@ -1,5 +1,5 @@
 # Large-mech T4: FFCM2 CH4-air ignition — ChemMechSim vs Cantera.
-# Run: julia --project=. examples/validation/ffcm2_ignition.jl
+# Run: julia --project=examples examples/validation/ffcm2_ignition.jl
 # Requires examples/validation/ffcm2_ref_constV.csv (run the .py first).
 #
 # Status (2026-07-18): SOLVED via opaque PLOG + P differential state. FFCM2 exercises

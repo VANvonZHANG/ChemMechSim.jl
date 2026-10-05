@@ -4,9 +4,9 @@
 # GRI-Mech 3.0, FFCM 2.0, Aramco 3.0.
 #
 # Run from the package root:
-#   julia --project=. examples/perf/jacobian_sparsity_figure.jl
-#   julia --project=. examples/perf/jacobian_sparsity_figure.jl --mechs gri30 --sources sharded,mtk
-#   julia --project=. examples/perf/jacobian_sparsity_figure.jl --sources sharded,bench
+#   julia --project=examples examples/perf/jacobian_sparsity_figure.jl
+#   julia --project=examples examples/perf/jacobian_sparsity_figure.jl --mechs gri30 --sources sharded,mtk
+#   julia --project=examples examples/perf/jacobian_sparsity_figure.jl --sources sharded,bench
 #
 # Outputs under examples/perf/output/ by default:
 #   fig04_jacobian_sparsity.{svg,pdf,png}
@@ -63,7 +63,7 @@ end
 function _usage()
     return """
     Usage:
-      julia --project=. examples/perf/jacobian_sparsity_figure.jl [options]
+      julia --project=examples examples/perf/jacobian_sparsity_figure.jl [options]
 
     Options:
       --mechs LIST          Comma list: gri30,aramco,ffcm2,h2o2. Default: gri30,ffcm2,aramco

@@ -9,6 +9,7 @@ are written under `output/` and gitignored; `output/` is created on first run.
 ## Setup
 
     pip install cantera
+    julia --project=examples -e 'using Pkg; Pkg.develop(path=".."); Pkg.instantiate()'  # one-time
 
 ## Two workflows
 
@@ -22,7 +23,7 @@ The Cantera reference runs at the *same* tolerances as ChemMechSim (`rtol=1e-8`,
 the model/implementation rather than the integrator tolerance.
 
     python3 examples/validation/h2o2_ref.py        # or gri30_ref.py / ffcm2_ref.py / aramco_ref.py
-    julia --project=. examples/validation/h2o2_ignition.jl
+    julia --project=examples examples/validation/h2o2_ignition.jl
 
 | Mechanism | Ref script | Julia script | Tol (Δt_ign) |
 |---|---|---|---|
@@ -41,7 +42,7 @@ and a quantitative error table (`validation_errors.txt`):
     # 1. Cantera side: T + 5 species (CH4, O2, CO2, OH, H2O) trajectories
     python3 examples/validation/gen_ref_species.py
     # 2. ChemMechSim side: same species on the same time grid
-    julia --project=. examples/validation/export_species.jl
+    julia --project=examples examples/validation/export_species.jl
     # 3. Figures + error table
     python3 examples/validation/plot_validation.py
 

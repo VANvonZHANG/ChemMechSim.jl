@@ -1,6 +1,6 @@
 # Confirm that solve time scales linearly with simulated span for both Jacobian strategies.
 #
-#   julia --project=. examples/atmospheric/tools/bench_jac.jl
+#   julia --project=examples examples/atmospheric/tools/bench_jac.jl
 #
 # One build_problem per strategy, then SOLVES at increasing spans on the same problem via
 # remake — so the per-span numbers cost only solve time, not a rebuild.

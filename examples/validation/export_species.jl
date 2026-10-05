@@ -1,5 +1,5 @@
 # Export ChemMechSim T + species mole fractions to CSV for validation figures.
-# Run: julia --project=. examples/validation/export_species.jl
+# Run: julia --project=examples examples/validation/export_species.jl
 # Outputs: examples/validation/{gri30,ffcm2,aramco}_cms_species.csv
 using ChemMechSim
 using OrdinaryDiffEq: FBDF

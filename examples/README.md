@@ -1,8 +1,13 @@
 # ChemMechSim.jl examples
 
-Run any example from the repo root (`ChemMechSim.jl/`) with:
+Examples run in their own environment (plotting / linear-solver / benchmark
+dependencies are **not** package dependencies). One-time setup from the repo root:
 
-    julia --project=. examples/<dir>/<script>.jl
+    julia --project=examples -e 'using Pkg; Pkg.develop(path=".."); Pkg.instantiate()'
+
+Then run any example with:
+
+    julia --project=examples examples/<dir>/<script>.jl
 
 ## Layout
 
@@ -37,7 +42,7 @@ dependency — only the generated CSVs are committed/used).
 **A. Per-mechanism ignition (interactive, single mechanism, CairoMakie plot):**
 
     cd examples/validation && python3 <mech>_ref.py && cd ../..   # generate the Cantera ref CSV
-    julia --project=. examples/validation/<mech>_ignition.jl       # ChemMechSim solve + comparison plot
+    julia --project=examples examples/validation/<mech>_ignition.jl       # ChemMechSim solve + comparison plot
 
 Scripts: `h2o2_ignition.jl` (P5a, const-V + const-P), `gri30_ignition.jl` (P5b),
 `ffcm2_ignition.jl`, `aramco_ignition.jl`. Metric: ignition-delay relative diff at
@@ -46,7 +51,7 @@ max |dT/dt|.
 **B. Combined-species validation (publication figures + error table):**
 
     python3 examples/validation/gen_ref_species.py                 # Cantera T + 5 species for all 3 mechs
-    julia --project=. examples/validation/export_species.jl        # ChemMechSim side (jac=true + UMFPACK)
+    julia --project=examples examples/validation/export_species.jl        # ChemMechSim side (jac=true + UMFPACK)
     python3 examples/validation/plot_validation.py                 # 3 single-mech figures + 1 combined + validation_errors.txt
 
 See [`validation/README.md`](validation/README.md) for details.
@@ -60,7 +65,7 @@ See [`validation/README.md`](validation/README.md) for details.
 | Script | Measures |
 |---|---|
 | `bench_pipeline_stages.jl` | Pipeline-stage decomposition benchmark — parse / lowering / build_problem / cold / warm (JIT = cold − warm) per mechanism (GRI30/FFCM2/Aramco) on the reaction-sharded Jacobian path, with an untimed h2o2 warmup; writes `output/bench_pipeline.csv` |
-| `bench_linsolver_matrix.jl` + `plot_bench.py` | mechanism × linear-solver benchmark matrix on the `jac=true` path (GRI30/FFCM2/Aramco × 5 linear solvers): end-to-end solve time + a standalone linear-solve micro-benchmark + trajectory accuracy vs a reference. Streams CSVs → publication figures. Run on the target machine: `julia --project=. examples/perf/bench_linsolver_matrix.jl --repeats 5`, then `python3 examples/perf/plot_bench.py`. |
+| `bench_linsolver_matrix.jl` + `plot_bench.py` | mechanism × linear-solver benchmark matrix on the `jac=true` path (GRI30/FFCM2/Aramco × 5 linear solvers): end-to-end solve time + a standalone linear-solve micro-benchmark + trajectory accuracy vs a reference. Streams CSVs → publication figures. Run on the target machine: `julia --project=examples examples/perf/bench_linsolver_matrix.jl --repeats 5`, then `python3 examples/perf/plot_bench.py`. |
 | `jacobian_sparsity_figure.jl` | Fig. 7 Jacobian nonzero-pattern workflow. Supports all three data paths: `--sources sharded` for the reaction-sharded sparse template used for the publication figure; `--sources mtk` for `ModelingToolkit.calculate_jacobian(sys; sparse=true)` cross-checks on small/medium mechanisms; `--sources bench` to import `bench_matrix.csv` summary statistics when only `nnz`/density, not row-col coordinates, are needed. |
 
 > `aramco_linsolve_probe.jl` (the single-mech prototype) and `aramco_ffcm2_plog_load.jl`

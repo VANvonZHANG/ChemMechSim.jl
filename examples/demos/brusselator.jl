@@ -1,7 +1,7 @@
 # Brusselator demo for ChemMechSim (Phase 1 MVP): one system, three input
 # routes -> one Mechanism -> one solution, closed by a CairoMakie portrait of
 # the A=1/B=3 limit cycle.
-# Run:  julia --project=. examples/demos/brusselator.jl
+# Run:  julia --project=examples examples/demos/brusselator.jl
 using ChemMechSim
 using Catalyst: @reaction_network
 using ModelingToolkit: equations, unknowns, getname

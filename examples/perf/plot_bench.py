@@ -125,7 +125,7 @@ def main():
     d = args.out_dir
     mtx = os.path.join(d, "bench_matrix.csv")
     if not os.path.exists(mtx):
-        sys.exit(f"no {mtx} — run `julia --project=. examples/perf/bench_linsolver_matrix.jl ...` first")
+        sys.exit(f"no {mtx} — run `julia --project=examples examples/perf/bench_linsolver_matrix.jl ...` first")
     df = pd.read_csv(mtx)
     df = df[df["wall_s"].notna()]                      # drop CRASH / WARMUP_CRASH rows
     if df.empty:
