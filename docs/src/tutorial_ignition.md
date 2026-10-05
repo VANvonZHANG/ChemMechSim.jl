@@ -12,7 +12,7 @@ parts mixture:
 ```julia
 using ChemMechSim, OrdinaryDiffEq
 
-mech    = load_mechanism("examples/mechanism/gri30.yaml")   # Cantera-YAML → Mechanism
+mech    = load_mechanism(joinpath(pkgdir(ChemMechSim), "examples", "mechanism", "gri30.yaml"))  # Cantera-YAML → Mechanism
 reactor = BatchReactor(mech; mode=:adiabatic_constV)        # preset → MTK ODESystem
 
 R, T0, P0 = 8.314, 1500.0, 101325.0
