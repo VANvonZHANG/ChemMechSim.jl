@@ -6,14 +6,12 @@
 
 ## Installation
 
-ChemMechSim is not yet in the General registry — install directly from the repository:
-
 ```julia
 using Pkg
-Pkg.add(url = "https://github.com/VANvonZHANG/ChemMechSim.jl")
+Pkg.add(["ChemMechSim", "OrdinaryDiffEq"])  # OrdinaryDiffEq provides the solvers (FBDF, Rodas5P, …)
 ```
 
-For working on the package itself, use a development clone instead:
+To work on the package itself, use a development clone instead:
 
 ```bash
 git clone https://github.com/VANvonZHANG/ChemMechSim.jl
@@ -23,13 +21,13 @@ julia --project=. -e 'using Pkg; Pkg.instantiate()'
 
 ## First run: CH4-air ignition delay
 
-The examples below assume the development clone (they read mechanism files from
-`examples/mechanism/`). From the repository root:
+Mechanism fixtures ship inside the package tarball, so the example works identically
+from an installed package and from a development clone:
 
 ```julia
 using ChemMechSim, OrdinaryDiffEq
 
-mech    = load_mechanism("examples/mechanism/gri30.yaml")   # Cantera-YAML → Mechanism
+mech    = load_mechanism(joinpath(pkgdir(ChemMechSim), "examples", "mechanism", "gri30.yaml"))  # Cantera-YAML → Mechanism
 reactor = BatchReactor(mech; mode=:adiabatic_constV)        # convenience preset → MTK ODESystem
 
 # Stoichiometric CH4-air at 1500 K, 1 atm (same setup as examples/validation/gri30_ignition.jl)
@@ -45,6 +43,9 @@ plot with your favourite backend, or read the ignition delay as the time of maxi
 `|dT/dt|` (the validation scripts in `examples/validation/` do exactly this).
 
 ## Where to go next
+
+All `examples/` paths below are relative to the repository root; installed copies
+live under `pkgdir(ChemMechSim)`.
 
 - [API reference](@ref) for every exported symbol.
 - `examples/demos/brusselator.jl` — a first tour of the three input routes
