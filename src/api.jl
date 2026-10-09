@@ -122,6 +122,41 @@ function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
     end
 end
 
+"""The flat parameter vector of a built problem, in `parameters(sys)` order.
+
+`prob.p` is an `MTKParameters` wrapper whose FIRST field is exactly this continuous
+buffer, so `flat_params(prob)[j]` is the value of `parameters(sys)[j]` (defaults with
+`build_problem(...; params=[...])` overrides baked in). The verified adjoint gradient
+channel composes it with [`flat_to_mtk`](@ref):
+
+    G(v) = solve(remake(prob, p = flat_to_mtk(prob, v)), alg;
+                 saveat=[tf], sensealg=InterpolatingAdjoint()).u[end][i]
+    Zygote.gradient(G, flat_params(prob))
+
+NOTE (probe 2026-10-09): `remake(prob, p = v::Vector)` itself is broken on this
+ModelingToolkit version (`FieldError: initials`, even outside AD), and feeding a raw
+Vector to the generated RHS is *silently wrong* — always go through `flat_to_mtk`."""
+function flat_params(prob)
+    v = prob.p[1]                       # MTKParameters.getindex[1] = continuous buffer
+    v isa AbstractVector || error("flat_params: prob.p[1] is not a vector — unexpected p shape")
+    return copy(v)
+end
+
+"""Rebuild `prob.p`'s type with `v` as the continuous buffer (fields 2–6 shared).
+
+`v` must be in `parameters(sys)` order — i.e. a mutated copy of
+[`flat_params(prob)`](@ref). Uses the default struct constructor on the captured
+template; `MTKParameters` only defines `getindex[1]/[2]`, so the remaining fields are
+read with `getfield` (verified 2026-10-09, probe round 3)."""
+function flat_to_mtk(prob, v::AbstractVector)
+    p = prob.p
+    n = length(p[1])
+    length(v) == n ||
+        throw(DimensionMismatch("flat_to_mtk: expected $n values (parameters(sys) order), got $(length(v))"))
+    return typeof(p)(v, getfield(p, 2), getfield(p, 3),
+                    getfield(p, 4), getfield(p, 5), getfield(p, 6))
+end
+
 """Simulate over `tspan` — one-call convenience over `build_problem` + `solve`.
 
     simulate(x, tspan=(0.0, 1.0); u0, solver=Tsit5(), params=Pair[], jac=false,
