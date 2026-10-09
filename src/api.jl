@@ -157,6 +157,19 @@ function flat_to_mtk(prob, v::AbstractVector)
                     getfield(p, 4), getfield(p, 5), getfield(p, 6))
 end
 
+"""Row of species `name` in the lowered state vector (`unknowns(sys)` order).
+
+The order is ModelingToolkit's, NOT species-id order (the toy A⇄B lowers to [B, A] —
+pinned in test_adjoint.jl). Objective functions for adjoint gradients must index the
+state through this, never by position assumptions:
+
+    sol.u[end][state_index(sys, "A")]"""
+function state_index(sys, name::AbstractString)
+    idx = findfirst(u -> String(getname(u)) == name, ModelingToolkit.unknowns(sys))
+    idx === nothing && throw(KeyError(name))
+    return idx
+end
+
 """Simulate over `tspan` — one-call convenience over `build_problem` + `solve`.
 
     simulate(x, tspan=(0.0, 1.0); u0, solver=Tsit5(), params=Pair[], jac=false,

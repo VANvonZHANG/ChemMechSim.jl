@@ -80,3 +80,13 @@ end
                 FBDF(autodiff = false); reltol=1e-10, abstol=1e-12, saveat=[3.0])
     @test sol.u[end] ≈ [1 - goldA(3.0; k1=0.2, k2=0.5), goldA(3.0; k1=0.2, k2=0.5)] rtol = 1e-8
 end
+
+@testset "state_index (the [B,A] order trap)" begin
+    sys = extract_system(BatchReactor(ab_toy(); mode=:kinetic, checks=false, name=:adjtest))
+    # unknowns(sys) is MTK-ordered [B, A] on this toy (verified) — the WHOLE POINT:
+    # position-indexed objectives would silently read the wrong species.
+    @test ModelingToolkit.getname.(ModelingToolkit.unknowns(sys)) == [:B, :A]
+    @test ChemMechSim.state_index(sys, "A") == 2
+    @test ChemMechSim.state_index(sys, "B") == 1
+    @test_throws KeyError ChemMechSim.state_index(sys, "NOPE")
+end
