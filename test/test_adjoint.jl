@@ -44,3 +44,39 @@ end
     prob.f.jac(Jd2, u, [0.3, 0.8], 0.0)
     @test Jd2 == Jd
 end
+
+@testset "flat parameter helpers (the verified gradient channel)" begin
+    mech = ab_toy()
+    r = BatchReactor(mech; mode=:kinetic, checks=false, name=:adjtest)
+    sys = extract_system(r)
+
+    for (name, prob) in (("fd(MTK)", build_problem(r, Dict("A"=>1.0,"B"=>0.0), (0.0,3.0); jac=false)),
+                         ("sharded", build_problem(r, Dict("A"=>1.0,"B"=>0.0), (0.0,3.0); jac=true)))
+        # 1. flat_params: plain Vector, parameters(sys) order — [k_2_A, k_1_A] = [0.3, 0.8]
+        v0 = ChemMechSim.flat_params(prob)
+        @test v0 isa Vector{Float64}
+        @test v0 == [0.3, 0.8]
+        @test length(v0) == length(parameters(sys))
+
+        # 2. flat_to_mtk: same-type p; the generated rhs consumes it with CORRECT values.
+        #    (A raw Vector fed to the sharded rhs is SILENTLY WRONG — probe 2026-10-09,
+        #    du = ∓0.12 vs correct ±0.03 at u=[B,A]=[0.7,0.3]. This pins the fix.)
+        pmtk = ChemMechSim.flat_to_mtk(prob, v0)
+        @test pmtk isa typeof(prob.p)
+        du = zeros(2)
+        prob.f(du, [0.7, 0.3], pmtk, 0.0)
+        @test du ≈ [0.03, -0.03] atol = 1e-12     # [dB, dA] = [k1·A−k2·B, −k1·A+k2·B]
+
+        # 3. length guard
+        @test_throws DimensionMismatch ChemMechSim.flat_to_mtk(prob, [1.0])
+    end
+
+    # 4. end-to-end remake channel on the SHARDED path vs the closed form
+    #    A(t) = ss + (A0−ss)e^{−(k1+k2)t}, ss = k2/(k1+k2) (N = A0+B0 = 1)
+    prob = build_problem(BatchReactor(ab_toy(); mode=:kinetic, checks=false, name=:adjtest),
+                         Dict("A"=>1.0,"B"=>0.0), (0.0,3.0); jac=true)
+    goldA(t; k1=0.8, k2=0.3, A0=1.0, N=1.0) = (s = k1 + k2; ss = k2/s*N; ss + (A0-ss)*exp(-s*t))
+    sol = solve(remake(prob, p = ChemMechSim.flat_to_mtk(prob, [0.5, 0.2])),   # k2=0.5, k1=0.2
+                FBDF(autodiff = false); reltol=1e-10, abstol=1e-12, saveat=[3.0])
+    @test sol.u[end] ≈ [1 - goldA(3.0; k1=0.2, k2=0.5), goldA(3.0; k1=0.2, k2=0.5)] rtol = 1e-8
+end
