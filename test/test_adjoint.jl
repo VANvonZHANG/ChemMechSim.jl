@@ -1,0 +1,46 @@
+using Test
+using ChemMechSim
+using ChemMechSim: SpeciesData, ReactionData, ElementaryArrhenius, Irreversible
+using ModelingToolkit
+using ModelingToolkit: getname, parameters
+using OrdinaryDiffEq
+
+# ---- the golden toy used by every adjoint test: A --k1--> B --k2--> A ----
+# Linear, so the exact solution and Jacobian are closed forms. STATE ORDER IS MTK's:
+# unknowns(sys) = [B, A] (verified 2026-10-09) — never assume species-id order.
+function ab_toy()
+    spA = SpeciesData(id=1, name="A"); spB = SpeciesData(id=2, name="B")
+    rx1 = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                       kinetics=ElementaryArrhenius(0.8, 0.0, 0.0), reverse_policy=Irreversible())
+    rx2 = ReactionData(reactants=Dict(2 => 1.0), products=Dict(1 => 1.0),
+                       kinetics=ElementaryArrhenius(0.3, 0.0, 0.0), reverse_policy=Irreversible())
+    return Mechanism(species=[spA, spB], reactions=[rx1, rx2])
+end
+
+@testset "jac! dense branch (the adjoint call shape)" begin
+    mech = ab_toy()
+    r = BatchReactor(mech; mode=:kinetic, checks=false, name=:adjtest)
+    prob = build_problem(r, Dict("A" => 1.0, "B" => 0.0), (0.0, 3.0); jac=true)
+
+    u = [0.7, 0.3]                      # state order [B, A]
+    p = prob.p
+    # sparse path (forward-solver shape) — the reference:
+    Js = copy(prob.f.jac_prototype)
+    prob.f.jac(Js, u, p, 0.0)
+    # dense path — THIS EXACT CALL was the 2026-10-08 probe's MethodError (SciMLSensitivity's
+    # reverse pass allocates its own dense Matrix and hands it to f.jac):
+    Jd = Matrix{Float64}(undef, 2, 2)
+    prob.f.jac(Jd, u, p, 0.0)
+
+    # 1. dense == sparse (bitwise by construction: fill-then-copyto!)
+    @test Jd == Matrix(Js)
+    # 2. == analytic Jacobian in [B,A] rows/cols:
+    #    dB/dt = k1*A - k2*B;  dA/dt = -k1*A + k2*B;  k1=0.8, k2=0.3
+    @test Jd ≈ [-0.3  0.8;
+                0.3 -0.8] atol = 1e-12
+    # 3. p as a plain Vector goes through _parameter_vector in the SAME values
+    #    (MTKParameters' first field is [k_2_A, k_1_A] = [0.3, 0.8]):
+    Jd2 = Matrix{Float64}(undef, 2, 2)
+    prob.f.jac(Jd2, u, [0.3, 0.8], 0.0)
+    @test Jd2 == Jd
+end

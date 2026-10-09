@@ -687,6 +687,13 @@ function build_reaction_sharded_jac(mech::Mechanism;
     Pn = Vector{Float64}(undef, nstates)   # ∂(Σ rate·Δu)/∂x  (energy-row direct part)
     thermo = [sp.thermo for sp in mech.species]
 
+    # Dense-caller workspace: SciMLSensitivity's adjoint and other external users hand
+    # f.jac their own DENSE Matrix buffer (verified 2026-10-08: that exact call shape was
+    # a MethodError). The dense method below fills this captured sparse copy and copies
+    # out — the forward solver still dispatches to the SparseMatrixCSC method unchanged.
+    # Plain capture (NOT `const` — const is global-scope-only in Julia):
+    J_sp_workspace = copy(J_proto)
+
     # Single jac! branching on energy regime. fixedT: species rows + the isothermal pressure
     # row (dP/dt = R·T·ΣΔν·rate). adiabatic: species rows (incl. T,P columns) + the energy (T)
     # and pressure (P) rows assembled in factored form.
@@ -906,6 +913,15 @@ function build_reaction_sharded_jac(mech::Mechanism;
             pressure_idx === nothing ||
                 (J.nzval[slotmap[(pressure_idx, pressure_idx)]] = R_GAS*(T*dG[pressure_idx] + csum*(-Pn[pressure_idx]*inv_cv)))
         end
+        return nothing
+    end
+
+    # Adjoint/external callers (dense buffer): fill the captured sparse workspace, then
+    # copy out wholesale. One O(nnz) copy per call — the reverse pass evaluates J only
+    # sparsely, so this is not a hot path. Returns nothing (ODEFunction jac convention).
+    function jac!(J::AbstractMatrix, u, p, t)
+        jac!(J_sp_workspace, u, p, t)
+        copyto!(J, J_sp_workspace)
         return nothing
     end
 
