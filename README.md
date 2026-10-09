@@ -74,6 +74,37 @@ CH4-air ignition, FBDF @ reltol=1e-8/abstol=1e-12, reaction-sharded analytic Jac
 - Linear-solver comparison (KLU / UMFPACK / Sparspak / Pardiso / MUMPS):
   `examples/perf/bench_linsolver_matrix.jl`.
 
+## Adjoint gradients
+
+Reverse-mode (adjoint) gradients of ODE-solution objectives work on both `build_problem`
+paths, with the pieces above: the sharded `jac!` accepts the dense buffer the reverse
+pass hands it, `flat_params`/`flat_to_mtk` are the parameter channel, and `state_index`
+protects objectives from MTK's state ordering. SciMLSensitivity/Zygote are **not**
+dependencies of the package — load them yourself and use the recipe below (exactly what
+`test/test_adjoint_sensitivity.jl` runs in CI):
+
+```julia
+using OrdinaryDiffEq, LinearSolve, ADTypes, SciMLSensitivity, Zygote
+
+prob = build_problem(reactor, u0, (0.0, tf); jac = true)   # or jac=false for the MTK path
+v0   = ChemMechSim.flat_params(prob)                       # Vector, parameters(sys) order
+iA   = ChemMechSim.state_index(sys, "A")                   # never index by position
+
+G(v) = (sol = solve(remake(prob, p = ChemMechSim.flat_to_mtk(prob, v)),
+                    FBDF(autodiff = ADTypes.AutoFiniteDiff(), linsolve = LUFactorization());
+                    reltol = 1e-10, abstol = 1e-12, saveat = [tf],
+                    sensealg = InterpolatingAdjoint());
+        sol.u[end][iA])
+
+grad = Zygote.gradient(G, v0)[1]        # dG/dp for ALL parameters, one reverse pass
+```
+
+Standing caveats: kinks (clamps, cutoffs) make gradients meaningless at the kink;
+discrete callbacks (e.g. the atmospheric diurnal ticks) need segmented treatment; and
+λ grows exponentially on chaotic trajectories — adjoint gradients there are correct but
+numerically delicate. `remake(prob, p = v::Vector)` is broken on this ModelingToolkit
+version (`FieldError: initials`) — always wrap with `flat_to_mtk`.
+
 ## Documentation
 
 - [`examples/README.md`](examples/README.md) — guided tour: demo learning path, validation
