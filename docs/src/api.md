@@ -92,6 +92,17 @@ ChemPhaseSystem
 BatchReactor
 ```
 
+## Adjoint gradients
+
+The flat parameter channel and the symbol-indexed objective helper — see the README
+"Adjoint gradients" recipe for the full pinned configuration.
+
+```@docs
+flat_params
+flat_to_mtk
+state_index
+```
+
 ## Lowering & the rate-law protocol
 
 ```@docs
