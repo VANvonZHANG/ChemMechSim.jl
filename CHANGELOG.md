@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-10
+
+### Added
+
+- Adjoint (reverse-mode) gradients on both `build_problem` paths, verified against
+  analytic gold: the reaction-sharded `jac!` accepts the dense `AbstractMatrix` buffer
+  SciMLSensitivity's reverse pass hands it (dispatch-shadowed; the sparse hot path is
+  byte-identical).
+- `flat_params(prob)` / `flat_to_mtk(prob, v)` — the verified parameter-gradient
+  channel (`remake(p=Vector)` is broken on this ModelingToolkit version; a raw Vector
+  fed to the generated RHS is silently wrong — the helpers route around both, and their
+  docstrings + README "Adjoint gradients" record the pinned recipe).
+- `state_index(sys, name)` — symbol-indexed objectives; the lowered state order is
+  ModelingToolkit's, not species-id order.
+- Golden adjoint test suite (`test_adjoint.jl`, `test_adjoint_sensitivity.jl`):
+  u₀ and parameter gradients vs independent ForwardDiff gold + pinned literals, on both
+  paths. SciMLSensitivity/Zygote et al. are test-target extras only; `[deps]` is
+  unchanged.
+
 ## [1.0.0] - 2026-10-05
 
 Initial release.
