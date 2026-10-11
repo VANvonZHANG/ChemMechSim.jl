@@ -1,4 +1,4 @@
-# Thermodynamic lowering (§3.4 #4, §4.2, Phase 4a): NASA7 symbolic cp/h/g for a unit-bearing
+# Thermodynamic lowering: NASA7 symbolic cp/h/g for a unit-bearing
 # temperature, the equilibrium constant K_c(T) = exp(-Δg°/RT)·(P°/RT)^Δν, and the reverse-rate
 # policy machinery (_net_rate + _reverse_rate for Irreversible / ThermoReverse / ExplicitReverse).
 # symbolic_kf (kinetics.jl) supplies the forward rate constant so ThermoReverse can form kr=kf/Kc.
@@ -8,7 +8,7 @@
 using ModelingToolkit: @register_symbolic, @register_derivative
 using DynamicQuantities: Quantity, ustrip
 
-# —— Opaque K_c call node (spec §5.2) ——————————————————————————————
+# —— Opaque K_c call node ————————————————————————————————————————
 # ThermoReverse's kr = kf/K_c inlines a NASA7 Gibbs polynomial at scale (Aramco 479 reverse
 # rxn → build_function / dual-RHS compile explosion). Emit K_c's NASA7 part (exp(-Δg°/RT)) as a
 # registered call node with a registered analytic ∂/∂T (sin→cos pattern), mirroring plog_kf.
@@ -78,14 +78,14 @@ keq_dT(T::Quantity, rxid)           = keq_dT(ustrip(T), _keq_id_int(rxid)) / u"K
 @register_symbolic keq_dT(T, rxid::Int)
 @register_derivative keq(T, rxid) 1 keq_dT(T, rxid)     # ∂/∂T  (rxid literal Int — no rule)
 
-# ThermoReverse net rate: forward minus reverse (Task 6, §3.4 #4).
+# ThermoReverse net rate: forward minus reverse.
 
 "Net rate = forward − reverse for a reversible reaction (direct path). ExplicitReverse uses the
  general forward dispatch (_direct_rate) since its reverse is independent of the forward k_f.
  ThermoReverse needs the forward k_f (for k_r = k_f/K_c); `symbolic_kf` provides the per-kinetics
  effective rate constant (elementary, ThirdBody, or Troe) so K_c-based reverse works for any
- forward kinetics type. Phase 5a T5fix removed the elementary-only guard that previously blocked
- ThirdBody/Troe under ThermoReverse."
+ forward kinetics type (an early elementary-only guard here previously blocked
+ ThirdBody/Troe under ThermoReverse; removed when this was generalized)."
 function _net_rate(rx::ReactionData, mech, cvar, T, j, ctx)
     policy = rx.reverse_policy
     if policy isa ExplicitReverse
@@ -116,7 +116,7 @@ function _reverse_rate(::ThermoReverse, rx, mech, cvar, T, kf, ctx)
 end
 
 "Reverse rate for an ExplicitReverse policy: kr(T)·∏products, kr from the policy's own rate law.
- Phase 3 supports policy.rate::ElementaryArrhenius (the common explicit-reverse form)."
+ Currently supports policy.rate::ElementaryArrhenius (the common explicit-reverse form)."
 function _reverse_rate(policy::ExplicitReverse, rx::ReactionData, mech, cvar, T, j, ctx)
     policy.rate isa ElementaryArrhenius ||
         error("_reverse_rate(ExplicitReverse): non-Arrhenius reverse rate ($(typeof(policy.rate))) " *

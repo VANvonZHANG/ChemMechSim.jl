@@ -1,8 +1,8 @@
-# Constraint-layer assembly (spec §5.4; Phase 4a const-V, Phase 4b const-P):
+# Constraint-layer assembly (const-V and const-P energy equations):
 # append_constraint_layers! adds the adiabatic energy equation for T to the equation set.
 #   - _energy_ode_constV : dT/dt = -Σⱼ rⱼ·Δūⱼ / Σᵢ cᵢ·cvᵢ  (ū = h̄ - RT, cv = cp - R; U conserved)
 #   - _energy_ode_constP : dT/dt = -V·Σⱼ rⱼ·Δh̄ⱼ / Σᵢ nᵢ·cpᵢ   (H conserved)
-# Both require NASA7 thermo on every species (spec §5.3.4 — clear error otherwise).
+# Both require NASA7 thermo on every species (clear error otherwise).
 
 "Append energy/reactor constraint layers to the equation set. The energy
  layer (:adiabatic) adds the const-V energy ODE for T. `cvar`/`T`/`rates` are the shared species
@@ -10,7 +10,7 @@
 function append_constraint_layers!(eqs, mech, config, cvar, T, rates; tcx, nvar=nothing, Vvar=nothing)
     config.energy === :adiabatic || return eqs
     if config.constraint === :constant_pressure
-        push!(eqs, _energy_ode_constP(mech, nvar, Vvar, T, rates, tcx))    # Task 2
+        push!(eqs, _energy_ode_constP(mech, nvar, Vvar, T, rates, tcx))
     else
         push!(eqs, _energy_ode_constV(mech, cvar, T, rates, tcx))
     end
@@ -65,7 +65,7 @@ _cv_sum_constV(mech::Mechanism, cvar, T, tcx) =
     sum(cvar[sp.id] * (_cp_over_R(sp.thermo, T, sp.id, tcx) - 1) * tcx.R for sp in mech.species)
 
 "Const-V adiabatic energy RHS dT/dt (the expression, not the equation). Refactored out so the
- P-ODE (Task 4) can reuse it without duplicating the Σⱼ rⱼ·Δūⱼ / Σᵢ cᵢ·cvᵢ expression."
+ P-ODE can reuse it without duplicating the Σⱼ rⱼ·Δūⱼ / Σᵢ cᵢ·cvᵢ expression."
 function _energy_rhs_constV(mech::Mechanism, cvar, T, rates, tcx)
     for sp in mech.species
         sp.thermo isa NASA7 ||
@@ -88,7 +88,7 @@ function _energy_ode_constV(mech::Mechanism, cvar, T, rates, tcx)
 end
 
 "Σᵢ dcᵢ/dt = Σⱼ (Σ_prod ν − Σ_react ν)·rateⱼ — total concentration RHS (for the const-V P-ODE,
- spec §5.3 iii). Pure: depends only on stoichiometry and the per-reaction rates."
+ the const-V P-ODE RHS). Pure: depends only on stoichiometry and the per-reaction rates."
 _sum_species_rhs(mech::Mechanism, rates) =
     sum((sum(values(rx.products)) - sum(values(rx.reactants))) * rates[j]
         for (j, rx) in enumerate(mech.reactions))

@@ -1,6 +1,6 @@
-# Reactor assembly. Phase 1 ships a minimal ChemPhaseSystem: the lowering entry
+# Reactor assembly. Ships a minimal ChemPhaseSystem: the lowering entry
 # point / wrapper around a Mechanism (+ optional Catalyst import). The full
-# @mtkmodel reactor family (BatchReactor) arrives in Phase 2 (spec §5.5).
+# The @mtkmodel reactor family is a possible future addition.
 
 "A ChemPhaseSystem wraps a lowered MTK ODESystem with its source Mechanism and config."
 struct ChemPhaseSystem
@@ -24,12 +24,12 @@ function ChemPhaseSystem(rn; config::MechanismConfig=MechanismConfig(), checks::
     return ChemPhaseSystem(import_from_catalyst(rn); config=config, checks=checks)
 end
 
-# Reactor assembly (spec §5.5). Phase 2 ships a zero-point BatchReactor: a thin
+# Reactor assembly. The zero-point BatchReactor: a thin
 # wrapper around a ChemPhaseSystem that provides the Layer-1 script API and the
 # solve/build/extract dispatch surface. On the :kinetic zero-point the reactor
-# adds NO constraint equations (spec §5.5: "零点连约束层都不带，就是裸 ODE"), so it
+# adds NO constraint equations (a bare ODE by design), so it
 # is a plain struct rather than an @mtkmodel — the @mtkmodel reactor family
-# (which composes constraint layers) arrives in Phase 4, once the energy/EOS
+# (which composes constraint layers) can build on this once the energy/EOS
 # layers it would compose actually exist.
 
 """A `ChemPhaseSystem` wrapper — the Layer-1 reactor entry point: the
@@ -90,9 +90,9 @@ Base.show(io::IO, r::BatchReactor) =
     print(io, "BatchReactor(:$(r.name), energy=$(r.phase.config.energy), " *
               "constraint=$(r.phase.config.constraint))")
 
-# —— Convenience modes (spec §5.3.3) ————————————————————————————————
+# —— Convenience modes ——————————————————————————————————————————
 # Short symbols that expand to a MechanismConfig. Only :kinetic (the zero-point)
-# is lowerable in Phase 2; the others document the target API and error helpfully
+# is lowerable now; the others document the target API and error helpfully
 # (via lower_to_mtk's zero-point guard) until their layers (EOS/energy/NASA) land.
 
 const _CONVENIENCE_MODES = Dict{Symbol,MechanismConfig}(

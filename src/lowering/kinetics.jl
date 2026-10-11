@@ -7,7 +7,7 @@
 using ModelingToolkit: @register_symbolic, @register_derivative
 using DynamicQuantities: Quantity, ustrip
 
-# —— Opaque PLOG call node (spec §5.2) ——————————————————————————————
+# —— Opaque PLOG call node ————————————————————————————————————————
 # PLOG rate is emitted as a call to a registered Julia function (not an inlined ifelse tree),
 # with registered analytic derivatives (∂k/∂T, ∂k/∂P) — the sin→cos pattern. This keeps
 # symbolic differentiation (calculate_jacobian) working AND cheap. The PlogRate params live
@@ -85,7 +85,7 @@ end
  its rate parameters)."
 function lower_reaction(rx::ReactionData, mech::Mechanism, cvar, T, config::MechanismConfig, j::Int, ctx::RateCtx)
     rx.reverse_policy isa Irreversible ||
-        return _net_rate(rx, mech, cvar, T, j, ctx)            # ThermoReverse (Task 6)
+        return _net_rate(rx, mech, cvar, T, j, ctx)            # ThermoReverse
     return direct_mtk_lowering(rx, mech, cvar, T, j, ctx)
 end
 
@@ -130,7 +130,7 @@ end
 _direct_rate(kin::AbstractKinetics, rx, mech, cvar, T, j, ctx::RateCtx) =
     symbolic_rate(rx.kinetics, rx, ctx)
 
-# —— Symbolic k_f(T) via data-layer bodies (Task 4: eliminate inline formulas) ——————————
+# —— Symbolic k_f(T) via data-layer bodies (formulas live only in the data layer) —————
 # Each built-in symbolic_kf method materializes unit-bearing params via _aparam/_kparam/
 # _tvparam (same names as the former _arrhenius_k_param/_troe_F), then calls the data-layer
 # body _arrhenius_body / _troe_F_body. The symbolic expressions are IDENTICAL to the former
@@ -229,7 +229,7 @@ end
 # —— generic paramspec-driven symbolic_kf (the L2 default for custom / paramspec laws) ——
 # A kinetics law that declares paramspec + body (no explicit symbolic_kf) lowers via this:
 # materialize each (field, role, tag) into a unit-bearing param (or plain value), then call
-# body(vals..., ctx.T). Built-in laws override symbolic_kf per-type (Task 4) and bypass this.
+# body(vals..., ctx.T). Built-in laws override symbolic_kf per-type and bypass this.
 
 "Materialize one paramspec entry (role + value) into a symbolic param or plain value, per role."
 materialize(role::AFactor, ctx, tag, A) = _aparam(ctx, tag, A, role.b)   # b carried by AFactor for unit

@@ -1,6 +1,6 @@
 # Layered API: extract_system / build_problem / simulate / generate_function.
-# simulate/build_problem operate on a ChemPhaseSystem (the Phase 1 "reactor").
-# generate_function returns standalone Julia code (spec §6, §7).
+# simulate/build_problem operate on a ChemPhaseSystem (a BatchReactor is one).
+# generate_function returns standalone Julia code.
 using SciMLBase: NoSpecialize, ODEFunction
 using ModelingToolkit: generate_rhs
 
@@ -75,7 +75,7 @@ function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
     unks = ModelingToolkit.unknowns(sys)
     byname = Dict(String(ModelingToolkit.getname(s)) => s for s in unks)
     pairs = [_u0_pairs(phase, u0); params]
-    # P0 auto-fill (const-V P differential, Task 4 + Task 3): P0 = (Σ species c0)·R·T0 when P
+    # P0 auto-fill (const-V P differential): P0 = (Σ species c0)·R·T0 when P
     # is a state and the caller did not supply it. Excludes T and P from the concentration sum.
     if haskey(byname, "P") && !haskey(u0, "P")
         csum = sum(v for (k, v) in u0 if haskey(byname, k) && k != "T" && k != "P")
@@ -209,7 +209,7 @@ function generate_function(sys)
                                                 [ModelingToolkit.t_nounits]))
 end
 
-# —— BatchReactor dispatch (Phase 2): delegate to the wrapped ChemPhaseSystem ——
+# —— BatchReactor dispatch: delegate to the wrapped ChemPhaseSystem ——
 
 "Extract the underlying MTK ODESystem from a BatchReactor."
 extract_system(r::BatchReactor) = extract_system(r.phase)
