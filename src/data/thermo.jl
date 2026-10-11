@@ -1,7 +1,7 @@
 # Thermodynamic model types. Pure Julia (no MTK/unit dependency).
 #
 # NASA7 polynomial model: cp/R, h/RT, s/R as 7-coefficient polynomials in T.
-# Task 6 (K_c/ThermoReverse) consumes g_over_RT = h_over_RT - s_over_R.
+# K_c/ThermoReverse consumes g_over_RT = h_over_RT - s_over_R.
 
 "Abstract parent of thermodynamic models (e.g. NASA7, NASA9)."
 abstract type ThermoModel end
@@ -51,7 +51,7 @@ s_over_R(m::NASA7, T::Real)  = _nasa7_s(_nasa7_coeffs(m, T), T)
 g_over_RT(m::NASA7, T::Real) = h_over_RT(m, T) - s_over_R(m, T)
 
 # —— Equilibrium constant K_c(T) + analytic ∂K_c/∂T (data layer; MTK-free) ——
-# Task 1 of the K_c-opaque plan: numeric primitives that Task 2's registered `keq`
+# Numeric primitives that the registered `keq`
 # opaque call node will invoke at runtime (Float64). Mirrors the PLOG opaque pattern:
 # the data layer owns the formula; the lowering layer registers the opaque wrapper.
 # Behavior reference: src/lowering/thermo.jl `_equilibrium_constant` (same R_GAS, P_STD).

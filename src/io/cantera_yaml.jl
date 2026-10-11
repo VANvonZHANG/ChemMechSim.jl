@@ -1,6 +1,6 @@
-# Cantera YAML mechanism parser → Mechanism (spec §5.1, Phase 5a).
+# Cantera YAML mechanism parser → Mechanism.
 # Depends on: YAML.jl, the data layer (SpeciesData/ReactionData/Mechanism/NASA7/kinetics).
-# Entry point `load_mechanism` arrives in Task 4.
+# Entry point: `load_mechanism`.
 
 using YAML
 using ..ChemMechSim: SpeciesData, SpeciesID, ReactionData, ReactionMeta,
@@ -65,7 +65,7 @@ function _parse_equation(eq::AbstractString)
     return (reactants=reactants, products=products, reversible=rev, third_body=third_body)
 end
 
-# —— Unit conversion context (spec §5.6.3) ——————————————————————————
+# —— Unit conversion context ———————————————————————————————————
 
 struct _UnitCtx
     length_m::Float64        # length unit in meters (cm→0.01, m→1.0)

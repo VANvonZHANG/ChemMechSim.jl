@@ -371,7 +371,7 @@ plain(f)           = (f, Plain(),    nothing)
 # paramspec(kin) :: NTuple of (field, role, tag); body(kin) :: function(vals..., T);
 # needs_T(kin) :: Bool. Generic rate_constant/symbolic_kf (lowering) drive off these.
 # No generic fallback for paramspec/body: a law MUST declare them to use the generic path,
-# OR provide its own explicit symbolic_kf/rate_constant (built-in laws do — see Task 4).
+# OR provide its own explicit symbolic_kf/rate_constant (built-in laws do).
 # Declare the function names (no methods) so external code can extend via Module.func(...).
 """
     paramspec(::AbstractKinetics) -> NTuple{N,Tuple{Symbol,ParamRole,Any}}

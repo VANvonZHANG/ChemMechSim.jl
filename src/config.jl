@@ -1,4 +1,4 @@
-# MechanismConfig: how a Mechanism is lowered into an ODESystem/DAE (spec §5.3).
+# MechanismConfig: how a Mechanism is lowered into an ODESystem/DAE.
 # Named MechanismConfig (not the generic "Config") — it travels with a Mechanism.
 
 """

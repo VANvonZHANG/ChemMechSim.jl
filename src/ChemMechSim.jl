@@ -42,7 +42,7 @@ export Mechanism
 include("config.jl")             # MechanismConfig
 export MechanismConfig
 
-# —— MTK / Catalyst / solver (arrive in Phase 1; data layer above stays pure) ——
+# —— MTK / Catalyst / solver layer (the data layer above stays pure Julia) ——
 using ModelingToolkit, Catalyst, OrdinaryDiffEq
 
 # —— Interface stubs (implemented in later phase plans) ——

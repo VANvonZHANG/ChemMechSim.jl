@@ -14,7 +14,7 @@ const SpeciesID = Int
 
 # Role of a species within a simulation. Valid values:
 #   :dynamic         — evolved by the ODE (default)
-#   :algebraic_qssa  — quasi-steady-state algebraic variable (reserved; Phase 7)
+#   :algebraic_qssa  — quasi-steady-state algebraic variable (reserved, unimplemented)
 #   :constant_pool   — held at a fixed concentration
 #   :bath_gas        — third-body bath gas
 """
@@ -26,7 +26,7 @@ the ODE, default), `:algebraic_qssa` (quasi-steady-state, reserved), `:constant_
 """
 const SpeciesRole = Symbol
 
-# Molar gas constant (spec §5.6.2: R = 8.314 J/(mol·K)).
+# Molar gas constant (R = 8.314 J/(mol·K)).
 # Lives in the data layer so src/data/thermo.jl can use it WITHOUT `using` MTK;
 # types.jl is included before both thermo.jl and lowering.jl.
 """
@@ -40,9 +40,9 @@ const R_GAS = 8.314   # J/(mol·K)
 # `quantity: molec` A-factors (KPP/MCM convention: cm-molec-s) to canonical mol.
 const N_AVOGADRO = 6.02214076e23   # 1/mol
 
-# Standard-state pressure for NASA-polynomial thermo (spec §4.2 / §5.6).
+# Standard-state pressure for NASA-polynomial thermo.
 # 1 bar = 1e5 Pa (modern Cantera/GRI30 ideal-gas convention; CHEMKIN historical = 1 atm = 101325).
-# Revisit at Phase 5 (Cantera validation) if ignition-delay comparison shows a systematic offset.
+# Revisit if Cantera-validation ignition-delay comparison shows a systematic offset.
 """
     P_STD
 

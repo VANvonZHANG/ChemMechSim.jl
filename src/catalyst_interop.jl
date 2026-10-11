@@ -1,5 +1,5 @@
 # Catalyst interoperability: import a Catalyst ReactionSystem (mass-action,
-# numeric-rate subset) as a ChemMechSim Mechanism (spec §3.3, §4).
+# numeric-rate subset) as a ChemMechSim Mechanism.
 #
 # Catalyst v16 exports no accessor functions for Reaction fields, so we read the
 # documented fields directly: r.rate, r.substrates, r.substoich, r.products,

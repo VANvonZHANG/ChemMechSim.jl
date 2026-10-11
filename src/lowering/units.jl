@@ -1,4 +1,4 @@
-# Unit-bearing symbolic parameter construction (spec §5.6): attaching DynamicQuantities
+# Unit-bearing symbolic parameter construction: attaching DynamicQuantities
 # units to variables/parameters via setmetadata, the rate-constant parameter builder
 # rate_param, and the stoichiometrically-derived rate-constant unit _k_unit.
 
@@ -21,7 +21,7 @@ end
 _k_unit(order, b) = ChemUnits.conc^(1 - order) * u"s^-1" / (u"K"^b)
 
 # —— direct param-materialization helpers (reproduce current param naming verbatim) ——
-# Used by built-in symbolic_kf methods (Task 4) AND by materialize (Task 6). The naming
+# Used by both built-in symbolic_kf methods and materialize. The naming
 # Symbol("k_", j, tag, "_A") matches the former _arrhenius_k_param("k_$j"*tag, ...) output:
 # tag="" → k_{j}_A, tag="_high" → k_{j}_high_A. θ/Troe-T names likewise.
 _aparam(ctx, tag, A, b)  = rate_param(Symbol("k_", ctx.j, tag, "_A"),     A,         _k_unit(ctx.order, b))

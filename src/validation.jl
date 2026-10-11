@@ -1,5 +1,5 @@
 # Validation module. ValidationReport is concrete (data); the `validate` checks
-# are implemented starting Phase 2.5b (spec §8).
+# are implemented here.
 
 "A structured validation report: errors (must fix), warnings, info."
 struct ValidationReport

@@ -1,7 +1,7 @@
 # Lowering core: assembly entry points (lower_to_mtk, const-V/const-P lowering,
-# _lower_with_eos, _lowerable config guard, _species_rhs) — spec §5.4.
+# _lower_with_eos, _lowerable config guard, _species_rhs).
 #
-# Task 1 of the lowering-modularization refactor seeds this file with the entire
+# The lowering-modularization refactor seeded this file with the entire
 # former src/lowering.jl body. Tasks 2–6 move cohesive chunks out to sibling files
 # (units/state/kinetics/thermo/energy); what remains here at the end is the
 # assembly core listed above.
@@ -76,9 +76,9 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
              for (j, rx) in enumerate(mech.reactions)]
     eqs = [D(cvars[i]) ~ _species_rhs(mech.species[i].id, mech, rates)
            for i in eachindex(mech.species)]
-    # Constraint-layer assembly (energy layer adds the const-V dT/dt under :adiabatic; spec §5.4).
+    # Constraint-layer assembly (energy layer adds the const-V dT/dt under :adiabatic).
     eqs = append_constraint_layers!(eqs, mech, config, cvar, Tparam, rates; tcx=tcx)
-    # P differential state (spec §5.3 iii; Task 4 + Task 3): under :constant_volume with
+    # P differential state: under :constant_volume with
     # an EOS-provided P, the EOS total derivative D(P) ~ R·(T·Σ物种RHS + (Σc)·能量RHS) is
     # pushed so P becomes a state rather than an observed variable. This applies to BOTH
     # energy regimes: :adiabatic_constV (full coupling — the energy RHS is the dT/dt ODE)
