@@ -107,6 +107,14 @@ Two runnable applications of the same channel:
   Optimization.jl v5 notes baked into the demo: the objective must take `f(θ, p)`,
   pass `p = nothing` to `OptimizationProblem`, and the callback receives an
   `OptimizationState` (`.iter`/`.objective`/`.u`).
+- **Sensitivity ranking** — [`examples/atmospheric/mcm_sensitivity.jl`](examples/atmospheric/mcm_sensitivity.jl):
+  one reverse pass through the 1843-species MCM box model (frozen photolysis — no
+  runtime callbacks) yields ∂O₃/∂(all ~5600 thermal rate constants) simultaneously;
+  the demo cross-checks against finite differences, ranks reactions by the
+  dimensionless elasticity |∂ln O₃/∂ln k|, and propagates a first-order uncertainty.
+  On mechanisms of this size force the tape-based VJP — `sensealg =
+  InterpolatingAdjoint(autojacvec = ReverseDiffVJP(false))` with `using ReverseDiff` —
+  and budget the first gradient as a heavyweight one-time compile.
 
 Standing caveats: kinks (clamps, cutoffs) make gradients meaningless at the kink;
 discrete callbacks (e.g. the atmospheric diurnal ticks) need segmented treatment; and
