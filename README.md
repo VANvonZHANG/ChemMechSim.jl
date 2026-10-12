@@ -99,6 +99,15 @@ G(v) = (sol = solve(remake(prob, p = ChemMechSim.flat_to_mtk(prob, v)),
 grad = Zygote.gradient(G, v0)[1]        # dG/dp for ALL parameters, one reverse pass
 ```
 
+Two runnable applications of the same channel:
+
+- **Parameter fitting** — [`examples/demos/fit_parameters.jl`](examples/demos/fit_parameters.jl):
+  minimize a relative-residual misfit over θ = log k with Optimization.jl's Adam; each
+  iteration costs one forward + one adjoint solve, independent of parameter count.
+  Optimization.jl v5 notes baked into the demo: the objective must take `f(θ, p)`,
+  pass `p = nothing` to `OptimizationProblem`, and the callback receives an
+  `OptimizationState` (`.iter`/`.objective`/`.u`).
+
 Standing caveats: kinks (clamps, cutoffs) make gradients meaningless at the kink;
 discrete callbacks (e.g. the atmospheric diurnal ticks) need segmented treatment; and
 λ grows exponentially on chaotic trajectories — adjoint gradients there are correct but
