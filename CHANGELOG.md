@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `examples/demos/fit_parameters.jl` — adjoint-gradient parameter fitting demo:
   Optimization.jl Adam over log-space rate constants recovers them from noisy
   synthetic data on the toy mechanism (no hand-written optimizer loop).
+- `examples/atmospheric/mcm_sensitivity.jl` — adjoint sensitivity ranking demo for
+  the MCM box model under frozen photolysis: one reverse pass differentiates O₃ at
+  the final time w.r.t. all ~5600 thermal rate constants; includes a finite-difference
+  cross-check, elasticity ranking, and first-order uncertainty propagation.
 - Examples environment: ADTypes / Optimization / OptimizationOptimisers /
   SciMLSensitivity / Zygote / ReverseDiff dependencies with compat bounds.
 
