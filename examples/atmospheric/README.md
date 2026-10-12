@@ -47,6 +47,10 @@ julia --project=examples examples/atmospheric/mcm_box.jl diurnal
 #    Jacobian-strategy bench (one build per strategy, solves at 0.25/0.5/1 day) -> bench_jac.csv
 julia --project=examples examples/atmospheric/tools/budget.jl
 julia --project=examples examples/atmospheric/tools/bench_jac.jl
+# 3. adjoint sensitivity ranking (frozen mode, no callbacks): O3 at final time vs
+#    ALL ~5600 thermal rate constants in ONE reverse pass; FD cross-check included;
+#    -> output/sensitivity/frozen_<h>h.csv   (heavyweight first-time compile)
+julia --project=examples examples/atmospheric/mcm_sensitivity.jl 6
 # 3. figures + summary table (matplotlib/numpy/pandas, see tools/requirements-figures.txt)
 python3 examples/atmospheric/tools/figures/fig_series.py   # -> series_frozen.png + series_diurnal.png
 python3 examples/atmospheric/tools/figures/perf.py         # -> perf.png
