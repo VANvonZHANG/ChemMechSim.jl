@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-12
+
 ### Added
 
+- Adjoint-gradient applications of the v1.1.0 channel (examples + docs; the package
+  itself gains no new dependencies):
 - `examples/demos/fit_parameters.jl` — adjoint-gradient parameter fitting demo:
   Optimization.jl Adam over log-space rate constants recovers them from noisy
   synthetic data on the toy mechanism (no hand-written optimizer loop).
@@ -18,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cross-check, elasticity ranking, and first-order uncertainty propagation.
 - Examples environment: ADTypes / Optimization / OptimizationOptimisers /
   SciMLSensitivity / Zygote / ReverseDiff dependencies with compat bounds.
+
+### Changed
+
+- Internal docstrings/comments rewritten in descriptive language (internal
+  phase/spec/task-number references removed).
 
 ## [1.1.0] - 2026-10-10
 
