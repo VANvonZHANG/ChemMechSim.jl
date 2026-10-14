@@ -2,9 +2,16 @@ using Test
 using ChemMechSim
 using ChemMechSim: SpeciesData, ReactionData, ElementaryArrhenius, ThirdBodyArrhenius,
                    Irreversible, ExplicitReverse, Mechanism, BatchReactor, extract_system,
-                   build_param_vjp
+                   build_param_vjp, flat_params, flat_to_mtk, state_index
 using ModelingToolkit: parameters, getname, unknowns
 using ForwardDiff: Dual, ForwardDiff
+# head-of-file (testset-local `using` is illegal) imports for the wiring testset below.
+# Deviations from the brief's list: no `using ReverseDiff` (not a direct dep / test extra —
+# `ReverseDiffVJP` itself comes from SciMLSensitivity), and full `using OrdinaryDiffEq`
+# instead of `: FBDF` (solve/remake are not exported by SciMLSensitivity; OrdinaryDiffEq
+# re-exports SciMLBase, which supplies them — same import set as test_adjoint_sensitivity.jl).
+using SciMLSensitivity, Zygote
+using OrdinaryDiffEq
 
 @testset "param_vjp: θ-block plan" begin
     mech = ab_toy()
@@ -204,4 +211,69 @@ end
     vjpp, gaps = build_param_vjp(mech; config=r.phase.config, checks=false, sys=sys)
     @test vjpp !== nothing          # species-T must NOT trip the energy-mode rejection
     @test isempty(gaps)
+end
+
+@testset "param_vjp: build_problem wiring + toy end-to-end" begin
+    mech = ab_toy()
+    r = BatchReactor(mech; mode=:kinetic, checks=false, name=:pvjp4)
+    u0 = Dict("A" => 1.0, "B" => 0.0)
+    kw = (reltol=1e-8, abstol=1e-10, saveat=[3.0])
+    prob_plain = build_problem(r, u0, (0.0, 3.0); jac=true)
+    prob_v = build_problem(r, u0, (0.0, 3.0); jac=true, param_vjp=true)
+    @test prob_v.f.vjp_p !== nothing
+    @test prob_v.f.vjp   !== nothing   # probe 2026-10-13: without state vjp, vjp_p never routes
+
+    # 1. forward solutions BIT-IDENTICAL (vjp_p must not touch the forward path)
+    s1 = solve(prob_plain, FBDF(autodiff=false); kw...)
+    s2 = solve(prob_v,    FBDF(autodiff=false); kw...)
+    @test s1.u == s2.u
+
+    # 2. adjoint gradient through the vjp_p channel == existing default channel (k columns)
+    v0 = flat_params(prob_v)
+    iA = state_index(extract_system(r), "A")   # state_index takes a SYS (api.jl:167)
+    # probe: an EXPLICIT autojacvec (ReverseDiffVJP) bypasses the vjp_p channel — the
+    # plain problem uses the tape; the vjp problem MUST use the default autojacvec.
+    Gp(v) = solve(remake(prob_plain, p=flat_to_mtk(prob_plain, v)), FBDF(autodiff=false);
+                  kw..., sensealg=InterpolatingAdjoint(autojacvec=ReverseDiffVJP(false)),
+                  verbose=false).u[end][iA]
+    Gv(v) = solve(remake(prob_v,    p=flat_to_mtk(prob_v,    v)), FBDF(autodiff=false);
+                  kw..., sensealg=InterpolatingAdjoint(), verbose=false).u[end][iA]
+    g1 = Zygote.gradient(Gp, v0)[1]
+    g2 = Zygote.gradient(Gv, v0)[1]
+    ps = parameters(extract_system(r))
+    kcols = [i for (i, p) in enumerate(ps) if occursin(r"^k_\d+_A$", String(getname(p)))]
+    @test length(kcols) == 2
+    @test g2[kcols] ≈ g1[kcols] rtol = 1e-5
+
+    # 3. FD cross-check on the vjp_p channel itself. Deviation from the brief: h scale
+    # 1e-6 → 1e-4 (probe 2026-10-14: at 1e-6 the central difference sits below the
+    # solver-noise floor — reltol 1e-8 on G≈0.3 is ~3e-9 absolute; /2h≈1.6e-7 gives ~2e-3
+    # relative noise; measured fd-vs-adjoint agreement at scale 1e-4 is ~3e-6).
+    for i in kcols
+        h = 1e-4 * max(abs(v0[i]), 1e-3)
+        e = zeros(length(v0)); e[i] = h
+        fd = (Gv(v0 .+ e) - Gv(v0 .- e)) / (2h)
+        @test isapprox(g2[i], fd; rtol = 1e-3, atol = 1e-10)
+    end
+
+    # 4. energy mode → loud no-attach (falls back to default channel). Deviation from the
+    # brief: it passed `mech` (ab_toy) straight into :adiabatic_constV, but adiabatic
+    # lowering REQUIRES NASA7 thermo on every species (energy.jl gate — ab_toy has none,
+    # so BatchReactor construction throws). Smallest fix: ab_toy's exact two reactions on
+    # constant-cp NASA7 species (zero reaction heat — irrelevant here: the vjp_p gate only
+    # needs the T STATE to exist, mirroring _exothermic_ab_mech in test_adiabatic.jl).
+    function _ab_toy_nasa7()
+        a1 = 2.5; a6 = -a1 * 298.15
+        nA = NASA7((a1, 0, 0, 0, 0, a6, 0.0), (a1, 0, 0, 0, 0, a6, 0.0), 200.0, 1000.0, 3500.0)
+        spA = SpeciesData(id=1, name="A", thermo=nA); spB = SpeciesData(id=2, name="B", thermo=nA)
+        rx1 = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                           kinetics=ElementaryArrhenius(0.8, 0.0, 0.0), reverse_policy=Irreversible())
+        rx2 = ReactionData(reactants=Dict(2 => 1.0), products=Dict(1 => 1.0),
+                           kinetics=ElementaryArrhenius(0.3, 0.0, 0.0), reverse_policy=Irreversible())
+        return Mechanism(species=[spA, spB], reactions=[rx1, rx2])
+    end
+    ra = BatchReactor(_ab_toy_nasa7(); mode=:adiabatic_constV, checks=false, name=:pvjp4a)
+    prob_a = build_problem(ra, Dict("A" => 1.0, "B" => 0.0, "T" => 1200.0), (0.0, 1e-3);
+                           jac=true, param_vjp=true)
+    @test prob_a.f.vjp_p === nothing        # + @warn printed (visible in test log)
 end

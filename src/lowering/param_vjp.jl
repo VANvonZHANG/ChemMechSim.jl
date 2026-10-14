@@ -187,3 +187,15 @@ function _make_param_vjp_p!(blocks::Vector{ParamVjpBlock}, S, nparam_expected::I
         return nothing
     end
 end
+
+"""State VJP over the dense analytic Jacobian: mul!(dλ, J', λ). REQUIRED alongside
+vjp_p — SciMLSensitivity only routes into the vjp_p-honoring _vecjacobian_vjp! when
+the state vjp is present (derivative_wrappers.jl:272; probe 2026-10-13)."""
+function _jac_vjp!(jac!, J_proto)
+    J = similar(J_proto)
+    return function vjp!(dλ, λ, y, p, t)
+        jac!(J, y, p, t)
+        dλ .= J' * λ     # dλ = Jᵀλ; brief said mul! — unavailable (LinearAlgebra is not a
+        return nothing   # ChemMechSim dep); sparse Jᵀ·vec is SparseArrays-only (probe 2026-10-14)
+    end
+end
