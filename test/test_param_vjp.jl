@@ -1,7 +1,8 @@
 using Test
 using ChemMechSim
 using ChemMechSim: SpeciesData, ReactionData, ElementaryArrhenius, ThirdBodyArrhenius,
-                   Irreversible, ExplicitReverse, Mechanism, BatchReactor, extract_system
+                   Irreversible, ExplicitReverse, Mechanism, BatchReactor, extract_system,
+                   build_param_vjp
 using ModelingToolkit: parameters, getname, unknowns
 using ForwardDiff: Dual, ForwardDiff
 
@@ -154,4 +155,33 @@ end
     for (i, s) in enumerate(b.θ_syms)
         @test g[i] ≈ expected[String(getname(s))] rtol = 1e-10
     end
+end
+
+@testset "param_vjp: Sᵀλ · local-FD assembly vs hand calculation" begin
+    mech = ab_toy()
+    r = BatchReactor(mech; mode=:kinetic, checks=false, name=:pvjp3)
+    sys = extract_system(r)
+    prob = build_problem(r, Dict("A" => 0.4, "B" => 0.6), (0.0, 1.0); jac=true)
+    vjpp, gaps = build_param_vjp(mech; config=r.phase.config, checks=false, sys=sys)
+    @test vjpp !== nothing && isempty(gaps)
+    ps = parameters(sys)
+    # name-exact lookup: the toy's flat p order is [k_2_A, k_1_A] (pinned by
+    # test_adjoint_sensitivity.jl), so findfirst/findlast over "_A" would cross them
+    ikA = findfirst(p -> String(getname(p)) == "k_1_A", ps)   # k_1_A
+    ikB = findfirst(p -> String(getname(p)) == "k_2_A", ps)    # k_2_A
+    si = Dict(String(getname(s)) => i for (i, s) in enumerate(unknowns(sys)))
+    u = zeros(2); u[si["A"]] = 0.4; u[si["B"]] = 0.6
+    λ = [0.7, -0.3]
+    dgrad = fill(NaN, length(ps))
+    vjpp(dgrad, λ, u, prob.p, 0.0)
+    @test dgrad[ikA] ≈ 0.4 atol = 1e-12     # A·(λ_B − λ_A) = 0.4·(0.7+0.3)
+    @test dgrad[ikB] ≈ -0.6 atol = 1e-12    # B·(λ_A − λ_B) = 0.6·(−0.3−0.7)
+    # T parameter column is ZERO by design (v1 spec amendment)
+    iT = findfirst(p -> String(getname(p)) == "T", ps)
+    iT === nothing || (@test iszero(dgrad[iT]))
+    # Float64 λ (plain) and Dual λ must both work — eltype-generic assembly:
+    # (testset-local `using` is illegal; the file head already imports Dual)
+    dgradD = fill(Dual{Nothing}(0.0, 0.0), length(ps))
+    vjpp(dgradD, Dual{Nothing}.(λ, 0.0), u, prob.p, 0.0)
+    @test ForwardDiff.value(dgradD[ikA]) ≈ 0.4 atol = 1e-12
 end
