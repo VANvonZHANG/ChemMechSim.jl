@@ -1,19 +1,25 @@
 # —— Parameter VJP (θ-explicit rate kernels + local ForwardDiff) ————————————————————
 # Spec: docs/superpowers/specs/2026-10-13-vjpp-local-forwarddiff-design.md
-# dgrad[block_j] = (λ·ν_j) · ∂r_j/∂θ_j — assembled per reverse-pass node; the 2900×7915
-# ∂f/∂p matrix is NEVER materialized (the vjp_p SciMLBase hook exists for exactly this).
+# dgrad[block_j] = (λ·ν_j) · ∂r_j/∂θ_j — assembled per reverse-pass node; the ∂f/∂p
+# matrix is NEVER materialized (the vjp_p SciMLBase hook exists for exactly this).
 
 """One reaction's θ-block: dependency state columns, flat tunable indices (ascending),
 the parameter symbols matching `pidx` order, and (Task 2) a generated rate kernel
 `fn(buf, x, p, t)` with `x = [u[dep_cols]…; θ…]` — parameters as EXPLICIT inputs, the
 only door through which ForwardDiff can inject tags."""
 mutable struct ParamVjpBlock
-    rx::Int                       # reaction index into mech.reactions
-    dep_cols::Vector{Int}         # dependency state columns into u
-    pidx::Vector{Int}             # flat tunable indices (parameters(sys) order), ascending
-    θ_syms::Vector{Any}           # parameter symbols matching pidx order
-    fn::Any                       # filled by _materialize_param_vjp_blocks; nothing until then
+    rx_idx::Int                  # reaction index into mech.reactions (the object stays `rx`)
+    dep_cols::Vector{Int}        # dependency state columns into u
+    pidx::Vector{Int}            # flat tunable indices (parameters(sys) order), ascending
+    θ_syms::Vector{Any}          # parameter symbols matching pidx order
+    fn::Any                      # filled by _materialize_param_vjp_blocks; nothing until then
 end
+
+# v1 gradient columns that are ZERO BY DESIGN (spec amendment 2026-10-13): T/P reach the
+# opaque Float64 evaluators (keq in ThermoReverse, PLOG tables) that cannot carry
+# ForwardDiff tags. They stay OUT of θ blocks — rate kernels read them from `p` (Float64),
+# so their dgrad columns are simply never written.
+const _VJP_ZERO_COLUMN_PARAMS = ("T", "P")
 
 """Order the parameter symbols appearing in `expr` by their flat index (ascending) —
 deterministic block layout independent of hashing."""
@@ -30,20 +36,27 @@ end
 
 """Per-reaction θ-blocks. Reuses the lowering net-rate symbolic body (`_reaction_rate_expr`,
 which routes every built-in and paramspec law through the same formula-once `symbolic_kf`);
-the θ block is simply the parameters(sys) members appearing in it. PLOG rates keep their
-params in PLOG_TABLE (not tunables) → no block, no dgrad column — correct by construction."""
+the θ block is the tunable `parameters(sys)` members appearing in it, minus the zero-column
+set (T/P — see `_VJP_ZERO_COLUMN_PARAMS`). `sys` must be the exact structural instance the
+ODEProblem is built from: `pidx` indexes ITS flat parameter vector, and parameter ordering
+is not stable across re-derivations of the system. Reactions whose only "parameters" are
+the excluded ones get no block (e.g. PLOG: coefficients live in PLOG_TABLE)."""
 function _param_vjp_blocks(mech::Mechanism, sys, config::MechanismConfig)
     param_syms = ModelingToolkit.parameters(sys)
     flat_of = Dict(p => i for (i, p) in enumerate(param_syms))
     state_idx = _state_name_index(sys)
+    @assert !haskey(state_idx, "T") && !haskey(state_idx, "P")  # caller gate: isothermal, no P-ODE (v1)
     sid_to_idx = _species_id_to_state_index(mech, sys)
     blocks = ParamVjpBlock[]
     for (j, rx) in enumerate(mech.reactions)
         rate_expr = _reaction_rate_expr(rx, mech, sys, config, j)
-        θ = _ordered_param_syms(rate_expr, flat_of)
+        θ = filter(s -> !(String(ModelingToolkit.getname(s)) in _VJP_ZERO_COLUMN_PARAMS),
+                   _ordered_param_syms(rate_expr, flat_of))
         isempty(θ) && continue
         pidx = Int[flat_of[s] for s in θ]
-        dep_cols = _reaction_dependency_state_indices(rx, mech, state_idx, sid_to_idx, false)
+        # unique: the shared helper concatenates sids + extra states without dedupe, and a
+        # duplicate column would bind two kernel inputs to the same state variable.
+        dep_cols = unique(_reaction_dependency_state_indices(rx, mech, state_idx, sid_to_idx, false))
         push!(blocks, ParamVjpBlock(j, dep_cols, pidx, θ, nothing))
     end
     covered = sort!(unique(Int[i for b in blocks for i in b.pidx]))
