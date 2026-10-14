@@ -188,10 +188,13 @@ function _make_param_vjp_p!(blocks::Vector{ParamVjpBlock}, S, nparam_expected::I
     end
 end
 
-"""State VJP over the dense analytic Jacobian: mul!(dλ, J', λ). REQUIRED alongside
-vjp_p — SciMLSensitivity only routes into the vjp_p-honoring _vecjacobian_vjp! when
-the state vjp is present (derivative_wrappers.jl:272; probe 2026-10-13)."""
+"""State VJP over the analytic Jacobian: dλ = Jᵀλ. REQUIRED alongside vjp_p —
+SciMLSensitivity only routes into the vjp_p-honoring _vecjacobian_vjp! when the state
+vjp is present (derivative_wrappers.jl:272; probe 2026-10-13). The captured J buffer is
+per-problem (shared across calls): solving the same problem from multiple threads needs
+separately built problems."""
 function _jac_vjp!(jac!, J_proto)
+    @assert J_proto isa SparseMatrixCSC  # J'*λ below relies on SparseArrays' lazy-adjoint matvec
     J = similar(J_proto)
     return function vjp!(dλ, λ, y, p, t)
         jac!(J, y, p, t)

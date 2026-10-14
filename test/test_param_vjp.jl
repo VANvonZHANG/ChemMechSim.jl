@@ -273,7 +273,58 @@ end
         return Mechanism(species=[spA, spB], reactions=[rx1, rx2])
     end
     ra = BatchReactor(_ab_toy_nasa7(); mode=:adiabatic_constV, checks=false, name=:pvjp4a)
-    prob_a = build_problem(ra, Dict("A" => 1.0, "B" => 0.0, "T" => 1200.0), (0.0, 1e-3);
-                           jac=true, param_vjp=true)
-    @test prob_a.f.vjp_p === nothing        # + @warn printed (visible in test log)
+    # loudness is a CONTRACT, not a log observation: deleting the @warn must fail CI
+    prob_a = @test_logs (:warn, r"param_vjp") begin
+        build_problem(ra, Dict("A" => 1.0, "B" => 0.0, "T" => 1200.0), (0.0, 1e-3);
+                      jac=true, param_vjp=true)
+    end
+    @test prob_a.f.vjp_p === nothing        # else-branch attaches NEITHER hook…
+    @test prob_a.f.vjp   === nothing        # …not even the state vjp
+
+    # 5. non-sharded jac path → param_vjp silently ignored is FORBIDDEN: the request must
+    # warn loudly (the same family as the 2026-09-20 :auto→:none silent-degradation lesson).
+    # NOTE: jac=false alone does NOT dodge the sharded path — :auto resolves to
+    # :reaction_sharded for supported mechanisms regardless of jac; :none forces it.
+    prob_ns = @test_logs (:warn, r"param_vjp") begin
+        build_problem(r, u0, (0.0, 3.0); jac_strategy=:none, param_vjp=true)
+    end
+    @test prob_ns.f.vjp_p === nothing
+    @test prob_ns.f.vjp   === nothing
+end
+
+@testset "param_vjp: routing canary — the vjp_p channel was actually taken" begin
+    # ab_toy is T-dead (Ea=b=0), so its tape-channel T column is ALSO zero — g2≈g1 there
+    # would pass trivially even if routing into vjp_p silently failed (identical channels
+    # on both sides). The T column is the routing fingerprint: tape channel → nonzero,
+    # vjp_p channel → exactly 0 (zero-column policy). One T-sensitive reaction (Ea≠0)
+    # makes the canary sensitive; do NOT mutate the shared ab_toy fixture.
+    spA = SpeciesData(id=1, name="A"); spB = SpeciesData(id=2, name="B")
+    rx1 = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                       kinetics=ElementaryArrhenius(0.8, 0.0, 1000.0), reverse_policy=Irreversible())
+    rx2 = ReactionData(reactants=Dict(2 => 1.0), products=Dict(1 => 1.0),
+                       kinetics=ElementaryArrhenius(0.3, 0.0, 0.0), reverse_policy=Irreversible())
+    mech = Mechanism(species=[spA, spB], reactions=[rx1, rx2])
+    r = BatchReactor(mech; mode=:kinetic, checks=false, name=:pvjpcanary)
+    kw = (reltol=1e-8, abstol=1e-10, saveat=[3.0])
+    prob_plain = build_problem(r, Dict("A" => 1.0, "B" => 0.0), (0.0, 3.0); jac=true)
+    prob_v = build_problem(r, Dict("A" => 1.0, "B" => 0.0), (0.0, 3.0); jac=true, param_vjp=true)
+    v0 = flat_params(prob_v)
+    iA = state_index(extract_system(r), "A")
+    Gp(v) = solve(remake(prob_plain, p=flat_to_mtk(prob_plain, v)), FBDF(autodiff=false);
+                  kw..., sensealg=InterpolatingAdjoint(autojacvec=ReverseDiffVJP(false)),
+                  verbose=false).u[end][iA]
+    Gv(v) = solve(remake(prob_v,    p=flat_to_mtk(prob_v,    v)), FBDF(autodiff=false);
+                  kw..., sensealg=InterpolatingAdjoint(), verbose=false).u[end][iA]
+    g1 = Zygote.gradient(Gp, v0)[1]
+    g2 = Zygote.gradient(Gv, v0)[1]
+    ps = parameters(extract_system(r))
+    tcol = findfirst(p -> String(getname(p)) == "T", ps)
+    kcols = [i for (i, p) in enumerate(ps) if startswith(String(getname(p)), "k_")]
+    # partition pin: every flat column is either a compared k-column or the T canary —
+    # any future param class must be consciously classified here
+    @test isempty(setdiff(1:length(v0), [kcols; tcol]))
+    @test !all(iszero, g2[kcols])                   # k-columns themselves nonzero (sanity)
+    @test iszero(g2[tcol])                          # vjp_p channel: T column EXACTLY zero
+    @test abs(g1[tcol]) > 1e-8                      # tape channel: T column nonzero → canary sensitive
+    @test g2[kcols] ≈ g1[kcols] rtol = 1e-5         # and the compared columns still agree
 end

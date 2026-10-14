@@ -64,12 +64,14 @@ explicitly for a precise P0 — the auto-fill falls back to the T-param default,
 not the overridden value.
 
 `param_vjp=true` (with `jac=true`'s `:reaction_sharded` path) attaches BOTH a state VJP
-(`vjp = mul!(dλ, J', λ)` over the analytic Jacobian — required for routing) and a
+(computing dλ = Jᵀλ over the analytic Jacobian — required for routing) and a
 parameter VJP (`vjp_p`, assembled from Sᵀλ + per-reaction local ForwardDiff), so the
 adjoint skips SciMLSensitivity's AD tape entirely (no matrix, no tape). Not attachable
-(energy/pressure-ODE modes, uncovered tunables) degrades LOUDLY to the default AD
-channel; do not pass an explicit `autojacvec` sensealg option — it bypasses this channel.
-The T-parameter column of the gradient is zero by design in v1.
+(energy/pressure-ODE modes, uncovered tunables, non-sharded jac path) degrades LOUDLY
+to the default AD channel; do not pass an explicit `autojacvec` sensealg option — it
+bypasses this channel. The T-parameter column of the gradient is zero by design in v1.
+The attached closures share buffers per problem — solving the SAME problem from multiple
+threads needs separately built problems.
 
 # Example
 prob = build_problem(reactor, u0, (0.0, 5e-3); jac=true)
@@ -119,6 +121,12 @@ function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
         end
         strategy = supported ? :reaction_sharded : :none
     end
+    # param_vjp only lives on the :reaction_sharded path — an explicit request that cannot
+    # be honored must not degrade silently (same lesson as the jac=true fallback above).
+    if param_vjp && strategy !== :reaction_sharded
+        @warn "build_problem: param_vjp=true ignored — the jac path is :$(strategy) " *
+              "(param_vjp requires :reaction_sharded). Adjoint ∂f/∂p uses the default AD channel."
+    end
     if strategy === :reaction_sharded
         prob_baseline = ODEProblem(sys, pairs, tspan)
         rhs_iip = generate_rhs(sys; expression=Val{false}, wrap_gfw=Val{false})[2]
@@ -127,7 +135,8 @@ function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
         vjpp = nothing
         if param_vjp
             vjpp, gaps = build_param_vjp(phase.mech; config=phase.config,
-                                         checks=false, sys=sys)
+                                         checks=false,  # phase already validated at construction
+                                         sys=sys)
             vjpp === nothing && @warn(
                 "build_problem: param_vjp=true not attachable — $(join(gaps, "; ")). " *
                 "Adjoint ∂f/∂p falls back to the default AD channel (ReverseDiff tape).")
