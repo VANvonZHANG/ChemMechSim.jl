@@ -48,7 +48,9 @@ function _param_vjp_blocks(mech::Mechanism, sys, config::MechanismConfig)
     param_syms = ModelingToolkit.parameters(sys)
     flat_of = Dict(p => i for (i, p) in enumerate(param_syms))
     state_idx = _state_name_index(sys)
-    @assert !haskey(state_idx, "T") && !haskey(state_idx, "P")  # caller gate: isothermal, no P-ODE (v1)
+    # caller gate (structural, mirrors build_param_vjp): species-concentration states only —
+    # a non-species state (energy T, P-ODE) would get a silently zero adjoint row.
+    @assert isempty(setdiff(Set(keys(state_idx)), Set(String(sp.name) for sp in mech.species)))
     sid_to_idx = _species_id_to_state_index(mech, sys)
     blocks = ParamVjpBlock[]
     for (j, rx) in enumerate(mech.reactions)
@@ -121,18 +123,25 @@ function _stoich_csc(mech::Mechanism, sys, blocks::Vector{ParamVjpBlock})
 end
 
 """Build the parameter-VJP function, or (nothing, reasons) when not attachable.
-Gate: T/P must not be states (v1 covers isothermal concentration-state systems only).
-The T PARAMETER stays a zero column by design — the opaque keq node is not Dual-generic
+Gate: the system's states must be species concentrations only (v1 is isothermal, no
+pressure-ODE — a STRUCTURAL check rejects any non-species state, whose adjoint row would
+otherwise be silently dropped; energy/pressure states get a mode hint, and a species
+legitimately named "T"/"P" is not rejected). `sys` is REQUIRED and must be the exact
+structural instance the ODEProblem is built from — a separately lowered sys can order
+parameters differently (the 8277716 lesson) and lengths alone cannot detect it. The T
+PARAMETER stays a zero column by design — the opaque keq node is not Dual-generic
 (spec amendment 2026-10-13); temperature sensitivity remains the default channel's job."""
 function build_param_vjp(mech::Mechanism; config::MechanismConfig=MechanismConfig(),
-                         checks::Bool=false, sys=nothing)
-    if sys === nothing
-        phase = ChemPhaseSystem(mech; config=config, checks=checks)
-        sys = extract_system(phase)
-    end
+                         checks::Bool=false, sys)
     state_idx = _state_name_index(sys)
-    haskey(state_idx, "T") && return (nothing, ["T is a state (energy mode) — vjp_p v1 is isothermal-only"])
-    haskey(state_idx, "P") && return (nothing, ["P is a state (pressure-ODE mode) — vjp_p v1 covers concentration states only"])
+    # structural (not name-based): any state that is not a species would get a silently
+    # zero adjoint row; a species legitimately named "T"/"P" must NOT be rejected.
+    species_names = Set(String(sp.name) for sp in mech.species)
+    extras = sort!(collect(setdiff(Set(keys(state_idx)), species_names)))
+    if !isempty(extras)
+        hint = "T" in extras ? " (energy mode?)" : "P" in extras ? " (pressure-ODE mode?)" : ""
+        return (nothing, ["states beyond species ($(join(extras, ", ")))$hint — vjp_p v1 covers concentration states only"])
+    end
     blocks, covered = _param_vjp_blocks(mech, sys, config)
     _materialize_param_vjp_blocks!(blocks, mech, sys, config)
     param_syms = ModelingToolkit.parameters(sys)

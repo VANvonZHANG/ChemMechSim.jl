@@ -179,9 +179,29 @@ end
     # T parameter column is ZERO by design (v1 spec amendment)
     iT = findfirst(p -> String(getname(p)) == "T", ps)
     iT === nothing || (@test iszero(dgrad[iT]))
-    # Float64 λ (plain) and Dual λ must both work — eltype-generic assembly:
-    # (testset-local `using` is illegal; the file head already imports Dual)
+    # Float64 λ (plain) and Dual λ must both work — eltype-generic assembly, and the
+    # λ-seed partials must flow through multiplicatively (dgrad is linear in λ):
+    # λ_B = Dual(0.7, 1), λ_A = Dual(−0.3, 2) → ∂/∂seed dgrad_k1 = 0.4·(1−2) = −0.4,
+    # dgrad_k2 = 0.6·(2−1) = 0.6. (testset-local `using` is illegal; file head has Dual)
     dgradD = fill(Dual{Nothing}(0.0, 0.0), length(ps))
-    vjpp(dgradD, Dual{Nothing}.(λ, 0.0), u, prob.p, 0.0)
+    λD = [Dual{Nothing}(0.7, 1.0), Dual{Nothing}(-0.3, 2.0)]   # state order [B, A]
+    vjpp(dgradD, λD, u, prob.p, 0.0)
     @test ForwardDiff.value(dgradD[ikA]) ≈ 0.4 atol = 1e-12
+    @test ForwardDiff.value(dgradD[ikB]) ≈ -0.6 atol = 1e-12
+    @test ForwardDiff.partials(dgradD[ikA], 1) ≈ -0.4 atol = 1e-12
+    @test ForwardDiff.partials(dgradD[ikB], 1) ≈ 0.6 atol = 1e-12
+end
+
+@testset "param_vjp: structural state gate" begin
+    # a species legitimately named "T" is a concentration state, NOT an energy state —
+    # the gate is structural (states ∉ mech.species), not name-based
+    spT = SpeciesData(id=1, name="T"); spB = SpeciesData(id=2, name="B")
+    rx = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                      kinetics=ElementaryArrhenius(0.8, 0.0, 0.0), reverse_policy=Irreversible())
+    mech = Mechanism(species=[spT, spB], reactions=[rx])
+    r = BatchReactor(mech; mode=:kinetic, checks=false, name=:pvjpgate)
+    sys = extract_system(r)
+    vjpp, gaps = build_param_vjp(mech; config=r.phase.config, checks=false, sys=sys)
+    @test vjpp !== nothing          # species-T must NOT trip the energy-mode rejection
+    @test isempty(gaps)
 end
