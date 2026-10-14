@@ -64,7 +64,9 @@ function _param_vjp_blocks(mech::Mechanism, sys, config::MechanismConfig)
 end
 
 # Shared θ-dummy pool: each block's kernel binds its slice from its own xvars. Toplevel
-# array variables (NOT runtime symbol creation — Symbolics isn't a direct dep).
+# array variables (NOT runtime symbol creation — Symbolics isn't a direct dep). The dummies
+# are POSITIONAL, per generated function — never combine two blocks' substituted bodies
+# symbolically (block 1's and block 5's _pvjp_θ[1] would alias).
 @variables _pvjp_θ[1:12]
 
 """Materialize each block's rate kernel: the SAME symbolic net-rate body the sharded
@@ -72,13 +74,19 @@ Jacobian uses (`_reaction_rate_expr`), built as a function of x = [dep states…
 Each θ symbol is first substituted by a dummy from `_pvjp_θ`: a symbol appearing in BOTH
 xvars and the parameter list gets bound from `p` (verified 2026-10-14 — the kernel would
 read Float64 θ and ForwardDiff tags would never enter). Dummies keep the full param_syms
-list positionally intact, so shared T/R/P_std still read from `p` in parameters(sys) order.
+list positionally intact, so remaining params (T/R/P_std) read from `p` positionally, in
+`parameters(sys)` order — callers must pass the FLAT vector (`_parameter_vector`), never a
+raw MTKParameters (its `p[j]` returns the j-th component, not the j-th scalar).
 Mirrors the build_function call at jac_reaction_sharded.jl:402 (IIP, [2] slot, cse)."""
 function _materialize_param_vjp_blocks!(blocks::Vector{ParamVjpBlock}, mech::Mechanism,
                                         sys, config::MechanismConfig)
     state_syms = ModelingToolkit.unknowns(sys)
     param_syms = ModelingToolkit.parameters(sys)
     for b in blocks
+        b.fn === nothing || error("block $(b.rx_idx) already materialized")
+        nθ = length(b.θ_syms)
+        nθ > length(_pvjp_θ) && error(
+            "param_vjp: θ pool exhausted — reaction $(b.rx_idx) has $nθ θ params (pool $(length(_pvjp_θ))). Enlarge _pvjp_θ.")
         dummies = Any[_pvjp_θ[i] for i in eachindex(b.θ_syms)]
         rate_expr = _reaction_rate_expr(mech.reactions[b.rx_idx], mech, sys, config, b.rx_idx)
         rate_expr = ModelingToolkit.substitute(rate_expr, Dict(zip(b.θ_syms, dummies)))
@@ -86,7 +94,6 @@ function _materialize_param_vjp_blocks!(blocks::Vector{ParamVjpBlock}, mech::Mec
         fn = ModelingToolkit.build_function(
             [rate_expr], xvars, param_syms, [ModelingToolkit.t_nounits];
             expression=Val{false}, wrap_gfw=Val{false}, cse=true)[2]
-        b.fn === nothing || error("block $(b.rx_idx) already materialized")
         b.fn = fn
     end
     return blocks

@@ -97,10 +97,12 @@ end
     ChemMechSim._materialize_param_vjp_blocks!(blocks, mech, sys, r.phase.config)
     si = Dict(String(getname(s)) => i for (i, s) in enumerate(unknowns(sys)))
     u = zeros(length(si)); u[si["A"]] = 0.4; u[si["B"]] = 0.6   # state order [B, A]
-    # the real p object (prob.p-shaped), so kernels' positional p reads work
+    # p shaped like prob.p (the toy is T-independent, so its kernels never read p —
+    # the reversible testset below exercises the positional-p contract)
     prob = build_problem(r, Dict("A" => 0.4, "B" => 0.6), (0.0, 1.0); jac=true)
     p = prob.p
     for (k, b) in enumerate(blocks)
+        @test b.rx_idx == k
         θv = k == 1 ? [0.8] : [0.3]               # θ segment length == length(pidx) (1 here)
         buf = [0.0]
         x = vcat(u[b.dep_cols], θv)
@@ -111,5 +113,45 @@ end
         xD = vcat(u[b.dep_cols], [Dual{Nothing}(θv[1], 1.0)])
         b.fn(bufD, xD, p, 0.0)
         @test ForwardDiff.partials(bufD[1], 1) ≈ (k == 1 ? 0.4 : 0.6)
+    end
+    # double materialization is loud
+    @test_throws ErrorException ChemMechSim._materialize_param_vjp_blocks!(
+        blocks, mech, sys, r.phase.config)
+end
+
+@testset "param_vjp: multi-θ kernel gradient (reversible) + positional p read" begin
+    # net = kf·[A] − kr·[B], kf = k_1_A·exp(-k_1_theta/T), kr = k_1_rev_A·exp(-k_1_rev_theta/T).
+    # T enters ONLY via the kernel's positional p read (T ∉ θ — zero-column policy), so this
+    # is the suite's first exercise of that contract; partials hand-derived, recomputed inline.
+    spA = SpeciesData(id=1, name="A"); spB = SpeciesData(id=2, name="B")
+    rx = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                      kinetics=ElementaryArrhenius(0.8, 0.0, 1000.0),
+                      reverse_policy=ExplicitReverse(ElementaryArrhenius(0.5, 0.0, 3000.0)))
+    mech = Mechanism(species=[spA, spB], reactions=[rx])
+    r = BatchReactor(mech; mode=:kinetic, checks=false, name=:pvjp5)
+    sys = extract_system(r)
+    blocks, _ = ChemMechSim._param_vjp_blocks(mech, sys, r.phase.config)
+    ChemMechSim._materialize_param_vjp_blocks!(blocks, mech, sys, r.phase.config)
+    prob = build_problem(r, Dict("A" => 0.4, "B" => 0.6), (0.0, 1.0); jac=true)
+    pv = ChemMechSim._parameter_vector(prob.p)          # FLAT vector — the kernels' p contract
+    ps = parameters(sys)
+    Tval = pv[findfirst(p -> String(getname(p)) == "T", ps)]
+    θfwd, θrev = 1000.0 / R_GAS, 3000.0 / R_GAS         # k_theta defaults are Ea/R
+    kf, kr = 0.8 * exp(-θfwd / Tval), 0.5 * exp(-θrev / Tval)
+    u = zeros(2)                                         # state order [B, A]
+    u[1] = 0.6; u[2] = 0.4
+    b = blocks[1]
+    g = ForwardDiff.gradient(θv -> begin
+            buf = Vector{promote_type(Float64, eltype(θv))}(undef, 1)
+            b.fn(buf, vcat(u[b.dep_cols], θv), pv, 0.0)
+            buf[1]
+        end, pv[b.pidx])
+    expected = Dict("k_1_A"         =>  exp(-θfwd / Tval) * 0.4,
+                    "k_1_theta"     => -kf * 0.4 / Tval,
+                    "k_1_rev_A"     => -exp(-θrev / Tval) * 0.6,
+                    "k_1_rev_theta" =>  kr * 0.6 / Tval)
+    @test length(g) == 4
+    for (i, s) in enumerate(b.θ_syms)
+        @test g[i] ≈ expected[String(getname(s))] rtol = 1e-10
     end
 end
