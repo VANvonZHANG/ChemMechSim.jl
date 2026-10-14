@@ -24,3 +24,4 @@ include("lowering/energy.jl")
 include("lowering/core.jl")
 
 include("lowering/jac_reaction_sharded.jl")
+include("lowering/param_vjp.jl")

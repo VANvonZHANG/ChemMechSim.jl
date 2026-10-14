@@ -36,3 +36,15 @@ function replace_T(pvals, sys, Tv)
     ps = ModelingToolkit.parameters(sys)
     [String(ModelingToolkit.getname(p)) == "T" ? Tv : v for (p, v) in zip(ps, pvals)]
 end
+
+# ---- the golden toy used by every adjoint test: A --k1--> B --k2--> A ----
+# Linear, so the exact solution and Jacobian are closed forms. STATE ORDER IS MTK's:
+# unknowns(sys) = [B, A] (verified 2026-10-09) — never assume species-id order.
+function ab_toy()
+    spA = SpeciesData(id=1, name="A"); spB = SpeciesData(id=2, name="B")
+    rx1 = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
+                       kinetics=ElementaryArrhenius(0.8, 0.0, 0.0), reverse_policy=Irreversible())
+    rx2 = ReactionData(reactants=Dict(2 => 1.0), products=Dict(1 => 1.0),
+                       kinetics=ElementaryArrhenius(0.3, 0.0, 0.0), reverse_policy=Irreversible())
+    return Mechanism(species=[spA, spB], reactions=[rx1, rx2])
+end
