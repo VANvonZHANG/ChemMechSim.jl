@@ -62,3 +62,32 @@ function _param_vjp_blocks(mech::Mechanism, sys, config::MechanismConfig)
     covered = sort!(unique(Int[i for b in blocks for i in b.pidx]))
     return blocks, covered
 end
+
+# Shared θ-dummy pool: each block's kernel binds its slice from its own xvars. Toplevel
+# array variables (NOT runtime symbol creation — Symbolics isn't a direct dep).
+@variables _pvjp_θ[1:12]
+
+"""Materialize each block's rate kernel: the SAME symbolic net-rate body the sharded
+Jacobian uses (`_reaction_rate_expr`), built as a function of x = [dep states…; θ…].
+Each θ symbol is first substituted by a dummy from `_pvjp_θ`: a symbol appearing in BOTH
+xvars and the parameter list gets bound from `p` (verified 2026-10-14 — the kernel would
+read Float64 θ and ForwardDiff tags would never enter). Dummies keep the full param_syms
+list positionally intact, so shared T/R/P_std still read from `p` in parameters(sys) order.
+Mirrors the build_function call at jac_reaction_sharded.jl:402 (IIP, [2] slot, cse)."""
+function _materialize_param_vjp_blocks!(blocks::Vector{ParamVjpBlock}, mech::Mechanism,
+                                        sys, config::MechanismConfig)
+    state_syms = ModelingToolkit.unknowns(sys)
+    param_syms = ModelingToolkit.parameters(sys)
+    for b in blocks
+        dummies = Any[_pvjp_θ[i] for i in eachindex(b.θ_syms)]
+        rate_expr = _reaction_rate_expr(mech.reactions[b.rx_idx], mech, sys, config, b.rx_idx)
+        rate_expr = ModelingToolkit.substitute(rate_expr, Dict(zip(b.θ_syms, dummies)))
+        xvars = vcat(Any[state_syms[c] for c in b.dep_cols], dummies)
+        fn = ModelingToolkit.build_function(
+            [rate_expr], xvars, param_syms, [ModelingToolkit.t_nounits];
+            expression=Val{false}, wrap_gfw=Val{false}, cse=true)[2]
+        b.fn === nothing || error("block $(b.rx_idx) already materialized")
+        b.fn = fn
+    end
+    return blocks
+end

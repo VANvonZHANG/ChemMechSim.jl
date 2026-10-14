@@ -3,6 +3,7 @@ using ChemMechSim
 using ChemMechSim: SpeciesData, ReactionData, ElementaryArrhenius, ThirdBodyArrhenius,
                    Irreversible, ExplicitReverse, Mechanism, BatchReactor, extract_system
 using ModelingToolkit: parameters, getname, unknowns
+using ForwardDiff: Dual, ForwardDiff
 
 @testset "param_vjp: θ-block plan" begin
     mech = ab_toy()
@@ -86,4 +87,29 @@ ChemMechSim.body(kin::_ConstRateLaw) = (k, T) -> k            # generic material
     blocks, covered = ChemMechSim._param_vjp_blocks(mech, sys, r.phase.config)
     @test isempty(blocks)
     @test isempty(covered)
+end
+
+@testset "param_vjp: θ-explicit rate kernel values + dual propagation" begin
+    mech = ab_toy()
+    r = BatchReactor(mech; mode=:kinetic, checks=false, name=:pvjp2)
+    sys = extract_system(r)
+    blocks, _ = ChemMechSim._param_vjp_blocks(mech, sys, r.phase.config)
+    ChemMechSim._materialize_param_vjp_blocks!(blocks, mech, sys, r.phase.config)
+    si = Dict(String(getname(s)) => i for (i, s) in enumerate(unknowns(sys)))
+    u = zeros(length(si)); u[si["A"]] = 0.4; u[si["B"]] = 0.6   # state order [B, A]
+    # the real p object (prob.p-shaped), so kernels' positional p reads work
+    prob = build_problem(r, Dict("A" => 0.4, "B" => 0.6), (0.0, 1.0); jac=true)
+    p = prob.p
+    for (k, b) in enumerate(blocks)
+        θv = k == 1 ? [0.8] : [0.3]               # θ segment length == length(pidx) (1 here)
+        buf = [0.0]
+        x = vcat(u[b.dep_cols], θv)
+        b.fn(buf, x, p, 0.0)
+        @test buf[1] ≈ (k == 1 ? 0.8 * 0.4 : 0.3 * 0.6)   # r1 = k1·[A], r2 = k2·[B]
+        # dual propagation: tags MUST enter through the θ segment (∂r/∂θ = dep state value)
+        bufD = [Dual{Nothing}(0.0, 0.0)]  # Dual-typed buffer: the kernel returns a Dual
+        xD = vcat(u[b.dep_cols], [Dual{Nothing}(θv[1], 1.0)])
+        b.fn(bufD, xD, p, 0.0)
+        @test ForwardDiff.partials(bufD[1], 1) ≈ (k == 1 ? 0.4 : 0.6)
+    end
 end
