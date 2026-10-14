@@ -7,7 +7,7 @@
 the parameter symbols matching `pidx` order, and (Task 2) a generated rate kernel
 `fn(buf, x, p, t)` with `x = [u[dep_cols]…; θ…]` — parameters as EXPLICIT inputs, the
 only door through which ForwardDiff can inject tags."""
-struct ParamVjpBlock
+mutable struct ParamVjpBlock
     rx::Int                       # reaction index into mech.reactions
     dep_cols::Vector{Int}         # dependency state columns into u
     pidx::Vector{Int}             # flat tunable indices (parameters(sys) order), ascending
