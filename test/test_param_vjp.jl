@@ -2,16 +2,20 @@ using Test
 using ChemMechSim
 using ChemMechSim: SpeciesData, ReactionData, ElementaryArrhenius, ThirdBodyArrhenius,
                    Irreversible, ExplicitReverse, Mechanism, BatchReactor, extract_system,
-                   build_param_vjp, flat_params, flat_to_mtk, state_index
+                   build_param_vjp, flat_params, flat_to_mtk, state_index, load_mechanism
 using ModelingToolkit: parameters, getname, unknowns
 using ForwardDiff: Dual, ForwardDiff
-# head-of-file (testset-local `using` is illegal) imports for the wiring testset below.
+# head-of-file (testset-local `using`/`const` is illegal) imports for the testsets below.
 # Deviations from the brief's list: no `using ReverseDiff` (not a direct dep / test extra —
-# `ReverseDiffVJP` itself comes from SciMLSensitivity), and full `using OrdinaryDiffEq`
-# instead of `: FBDF` (solve/remake are not exported by SciMLSensitivity; OrdinaryDiffEq
-# re-exports SciMLBase, which supplies them — same import set as test_adjoint_sensitivity.jl).
+# `ReverseDiffVJP` itself comes from SciMLSensitivity), no `using LinearAlgebra` (nothing
+# in the snippet needs it), and full `using OrdinaryDiffEq` instead of `: FBDF`
+# (solve/remake are not exported by SciMLSensitivity; OrdinaryDiffEq re-exports SciMLBase,
+# which supplies them — same import set as test_adjoint_sensitivity.jl).
 using SciMLSensitivity, Zygote
 using OrdinaryDiffEq
+# GRI30 fixture for the end-to-end testset below (mirrors test_gri30.jl:66; same-valued
+# toplevel const redefinition across included test files is fine on Julia 1.12).
+const _GRI30_YAML = joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml")
 
 @testset "param_vjp: θ-block plan" begin
     mech = ab_toy()
@@ -327,4 +331,77 @@ end
     @test iszero(g2[tcol])                          # vjp_p channel: T column EXACTLY zero
     @test abs(g1[tcol]) > 1e-8                      # tape channel: T column nonzero → canary sensitive
     @test g2[kcols] ≈ g1[kcols] rtol = 1e-5         # and the compared columns still agree
+end
+
+@testset "param_vjp: GRI30 end-to-end (FD cross-check, no-tape channel)" begin
+    # Task 5 acceptance at real scale (53 sp / 325 rx). Step 1 diagnostic verdict
+    # (2026-10-14, /tmp/gri30_vjpp_cover.jl): params=704 covered=703, uncovered=["T"]
+    # only — no `expected_zero` extension was needed. `using`/`const` live at file head.
+    mech = load_mechanism(_GRI30_YAML)
+    r = BatchReactor(mech; mode=:kinetic, checks=false, name=:gjv)
+    T0, P0, R = 1500.0, 101325.0, 8.314
+    C = P0 / (R * T0)
+    # Deviation from the brief (CRITICAL, probe 2026-10-14): the snippet's u0 named only
+    # H2/O2 — omitted species become INIT unknowns with 0 equations (MTK warns "0 equations
+    # for 51 unknowns… least squares") and get assigned garbage (~0.9 mol/m³, NOT 0), so the
+    # forward goes Unstable at t≈1e-10 in EVERY solver/algorithm/jac combination probed
+    # (FBDF ±autodiff, QNDF, Rodas5P, jac on/off). Fill ALL species like test_gri30.jl:114.
+    X0 = Dict("H2" => 0.67, "O2" => 0.33)
+    u0 = Dict(sp.name => get(X0, sp.name, 0.0) * C for sp in mech.species)
+    # Deviation from the brief (CRITICAL, probe 2026-10-14): :kinetic mode's T PARAMETER
+    # defaults to 300 K (lowering/core.jl: `rate_param(:T, 300.0, u"K")`) and the brief's
+    # snippet never overrides it — T0 only fed the initial-concentration calculation. At
+    # 300 K the forward solve goes Unstable in BOTH the test and probe envs (npts=1 at
+    # t≈5e-10), and the adjoint then returns all-zeros (test env) or garbage (probe env)
+    # depending on SciMLSensitivity's failed-solve handling. Override T like test_h2o2.jl:74.
+    sys = extract_system(r); ps = parameters(sys)
+    Tparam = ps[findfirst(p -> String(getname(p)) == "T", ps)]
+    kw = (reltol=1e-8, abstol=1e-12, saveat=[5e-4])          # gradient leg (brief's values)
+    kwfd = (reltol=1e-11, abstol=1e-14, saveat=[5e-4])       # FD leg — see below
+    SOL = FBDF(autodiff=false)
+    prob_v = build_problem(r, u0, (0.0, 5e-4); params=[Tparam => T0], jac=true, param_vjp=true)
+    @test prob_v.f.vjp_p !== nothing
+    @test flat_params(prob_v)[findfirst(isequal(Tparam), ps)] == T0   # override reached the problem
+    # the forward must actually solve — with the 300-K default bug this retcode was
+    # Unstable and every downstream gradient/FD number was garbage; fail with the real
+    # cause instead of mysterious FD mismatches (ReturnCode: SciMLBase via OrdinaryDiffEq).
+    @test solve(prob_v, SOL; kw...).retcode == ReturnCode.Success
+    v0 = flat_params(prob_v)
+    iOH = state_index(sys, "OH")
+    # Deviation from the brief's snippet: it passed `sensealg=InterpolatingAdjoint(
+    # autojacvec=ReverseDiffVJP(false))` to Gv — but an EXPLICIT autojacvec bypasses the
+    # vjp_p channel entirely (Task 4 probe; see the toy wiring testset above), which would
+    # FD-check the TAPE channel and fail the T-column-zero test below on GRI30 (T is in
+    # nearly every rate law, so a tape fallback gives a nonzero T column). Gv uses the
+    # default autojacvec, which routes into vjp_p — this testset's whole subject.
+    Gv(v; kw_ = kw) = solve(remake(prob_v, p=flat_to_mtk(prob_v, v)), SOL;
+                            kw_..., sensealg=InterpolatingAdjoint(), verbose=false).u[end][iOH]
+    g2 = Zygote.gradient(Gv, v0)[1]
+    # FD cross-check: top-3 |g| among k_A params + one deliberately weak param.
+    # Deviation from the brief: h scale 1e-6 → 1e-4 (at 1e-6 the central difference sits
+    # below the solver-noise floor — Task 4; measured adjoint-vs-FD agreement ~3e-6 at
+    # 1e-4 on the toy). If a param fails here, probe scales {1e-3, 3e-4} for THAT param.
+    kcols = [i for (i, p) in enumerate(ps) if occursin(r"^k_\d+_A$", String(getname(p)))]
+    top = sort(kcols; by = i -> abs(g2[i]), rev=true)[1:3]
+    weak = kcols[argmin(abs.(g2[kcols]))]
+    # Deviation from the brief (probe 2026-10-15): the FD leg needs TIGHTER tolerances
+    # than the gradient leg. At (1e-8, 1e-12) the ±h solves take different step sequences
+    # whose local-error difference is amplified through the radical-induction growth: the
+    # effective fd noise makes k_3_A rel≈0.43 and k_47_A sign-flip (probed at scales
+    # 1e-5…1e-3, BOTH horizons 5e-4/1e-3 — roundoff-type h-dependence, while a
+    # zero-chemistry perturbation probe showed pure solver noise δG≈7e-12 for a
+    # well-conditioned column; k_86_A agreed to ≤1.5e-3 at every scale, vindicating the
+    # channel). fd solves at (1e-11, 1e-14) give k_86 1.2e-6 / k_3 2.1e-5 / k_47 9.8e-5 /
+    # weak 0.0 — all ≪ the 2e-2 gate, which is UNCHANGED.
+    for i in vcat(top, weak)
+        h = 1e-4 * max(abs(v0[i]), 1e-3)
+        e = zeros(length(v0)); e[i] = h
+        fd = (Gv(v0 .+ e; kw_ = kwfd) - Gv(v0 .- e; kw_ = kwfd)) / (2h)
+        rel = abs(fd - g2[i]) / max(abs(fd), abs(g2[i]), 1e-30)
+        @test rel < 2e-2                       # FD-of-stiff-ODE floor; channel precedent 0.06–0.26%
+        @info "GRI30 FD" param=String(getname(ps[i])) adjoint=g2[i] fd=fd rel_err=rel
+    end
+    # T column zero by design (v1 spec amendment) — doubles as the routing canary here.
+    iT = findfirst(p -> String(getname(p)) == "T", ps)
+    iT === nothing || @test iszero(g2[iT])
 end
