@@ -56,6 +56,14 @@ plog_kf_dP(T::Quantity, P::Quantity, id) = plog_kf_dP(ustrip(T), ustrip(P), _id_
 @register_derivative plog_kf(T, P, id) 1 plog_kf_dT(T, P, id)     # ∂/∂T
 @register_derivative plog_kf(T, P, id) 2 plog_kf_dP(T, P, id)     # ∂/∂P  (id is a literal Int — no rule)
 
+# —— param_vjp contract (2026-10-13) ————————————————————————————————————————————
+# Custom rate types reached by the parameter VJP (`build_problem(...; param_vjp=true)`)
+# must keep their parameters as symbolic rate_param variables (the generic paramspec
+# protocol) — the VJP collects each reaction's θ-block from its symbolic net-rate body
+# and materializes a θ-EXPLICIT kernel; parameters hidden in runtime tables (the PLOG
+# pattern) are invisible to it by construction and stay out of the gradient. v1 leaves
+# the T-parameter column zero (opaque keq is not Dual-generic).
+
 "Explicit per-type T-dependence (migrated verbatim from _is_T_dependent; Brusselator-safe).
  True iff rate law `kin` needs a temperature symbol (T-dependent Arrhenius)."
 needs_T(kin::ElementaryArrhenius) = !(iszero(kin.b) && iszero(kin.Ea))

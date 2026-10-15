@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `build_problem(...; param_vjp=true)`: analytic parameter VJP (`vjp_p`) for adjoint
+  ∂f/∂p — Sᵀλ + per-reaction local ForwardDiff over θ-explicit rate kernels; no AD
+  tape, no parameter-Jacobian materialization. GRI30 first gradient: 66.5 CPU-s vs
+  1913 CPU-s with the default AD channel. T-parameter column is zero in this version.
+
 ## [1.3.0] - 2026-11-06
 
 ### Added
