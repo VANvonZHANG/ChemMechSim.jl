@@ -14,7 +14,8 @@ using ForwardDiff: Dual, ForwardDiff
 using SciMLSensitivity, Zygote
 using OrdinaryDiffEq
 # GRI30 fixture for the end-to-end testset below (mirrors test_gri30.jl:66; same-valued
-# toplevel const redefinition across included test files is fine on Julia 1.12).
+# toplevel const redefinition across included test files is fine on Julia 1.12; the 1.10
+# paper line still emits a harmless same-value redefinition warning in the test log).
 const _GRI30_YAML = joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml")
 
 @testset "param_vjp: θ-block plan" begin
@@ -374,8 +375,13 @@ end
     # FD-check the TAPE channel and fail the T-column-zero test below on GRI30 (T is in
     # nearly every rate law, so a tape fallback gives a nonzero T column). Gv uses the
     # default autojacvec, which routes into vjp_p — this testset's whole subject.
-    Gv(v; kw_ = kw) = solve(remake(prob_v, p=flat_to_mtk(prob_v, v)), SOL;
-                            kw_..., sensealg=InterpolatingAdjoint(), verbose=false).u[end][iOH]
+    Gv(v; kw_ = kw) = (sol = solve(remake(prob_v, p=flat_to_mtk(prob_v, v)), SOL;
+                                   kw_..., sensealg=InterpolatingAdjoint(), verbose=false);
+                       # loud, self-diagnosing failure: a stalled/early-terminated tight
+                       # FD solve (abstol 1e-14 is near the machine floor) would return
+                       # u[end] at the WRONG time and produce a mystery rel number
+                       sol.retcode == ReturnCode.Success || error("Gv solve failed: ", sol.retcode);
+                       sol.u[end][iOH])
     g2 = Zygote.gradient(Gv, v0)[1]
     # FD cross-check: top-3 |g| among k_A params + one deliberately weak param.
     # Deviation from the brief: h scale 1e-6 → 1e-4 (at 1e-6 the central difference sits
@@ -393,15 +399,22 @@ end
     # well-conditioned column; k_86_A agreed to ≤1.5e-3 at every scale, vindicating the
     # channel). fd solves at (1e-11, 1e-14) give k_86 1.2e-6 / k_3 2.1e-5 / k_47 9.8e-5 /
     # weak 0.0 — all ≪ the 2e-2 gate, which is UNCHANGED.
+    # the weak column is EXACTLY zero by structure (pure H2/O2 feed: every C/N-bearing
+    # reaction has a reactant concentration identically 0 for all time — element
+    # conservation), so its rel gate passes bit-exactly and is near-vacuous as a CHANNEL
+    # check (an all-zeros channel is caught by the top-3 columns' rel→1). Its real value
+    # is catching garbage written into dead columns — hence the ABSOLUTE asserts.
+    @test abs(g2[weak]) < 1e-12
     for i in vcat(top, weak)
         h = 1e-4 * max(abs(v0[i]), 1e-3)
         e = zeros(length(v0)); e[i] = h
         fd = (Gv(v0 .+ e; kw_ = kwfd) - Gv(v0 .- e; kw_ = kwfd)) / (2h)
-        rel = abs(fd - g2[i]) / max(abs(fd), abs(g2[i]), 1e-30)
+        rel = abs(fd - g2[i]) / max(abs(fd), abs(g2[i]), 1e-6)
         @test rel < 2e-2                       # FD-of-stiff-ODE floor; channel precedent 0.06–0.26%
+        i == weak && @test abs(fd) < 1e-8      # dead column: bit-identical ±h trajectories
         @info "GRI30 FD" param=String(getname(ps[i])) adjoint=g2[i] fd=fd rel_err=rel
     end
     # T column zero by design (v1 spec amendment) — doubles as the routing canary here.
-    iT = findfirst(p -> String(getname(p)) == "T", ps)
-    iT === nothing || @test iszero(g2[iT])
+    # (Tparam lookup above already throws if T is absent, so no nothing-guard needed.)
+    @test iszero(g2[findfirst(isequal(Tparam), ps)])
 end
