@@ -101,7 +101,22 @@ function _net_rate(rx::ReactionData, mech, cvar, T, j, ctx)
 end
 
 _reverse_rate(::Irreversible, rx, mech, cvar, T, kf, ctx) = 0.0
+
+"Reverse rates are mass-action over the forward products (kr·∏[products]^ν), so a
+ negative product coefficient — the ensemble/bookkeeping stoichiometry of the KPP/MCM
+ dialect, e.g. NCAR MM's `A => B - 2.0 XAOO` — would silently turn that factor into a
+ division by concentration. Reversible lowering of negative product stoichiometry fails
+ loudly instead; such reactions must be irreversible (`=>` / `Irreversible()`)."
+function _assert_nonneg_products_for_reverse(rx::ReactionData)
+    any(<(0.0), values(rx.products)) &&
+        error("reverse rate cannot be lowered with negative product stoichiometry " *
+              "(reverse mass-action over products would divide by concentration); use an " *
+              "irreversible reaction (`=>` / Irreversible()) for negative product " *
+              "coefficients. Reaction: $(rx.reactants) => $(rx.products)")
+end
+
 function _reverse_rate(::ThermoReverse, rx, mech, cvar, T, kf, ctx)
+    _assert_nonneg_products_for_reverse(rx)
     T === nothing &&
         error("_reverse_rate(ThermoReverse): K_c(T) needs a T parameter, but none exists.")
     id = (KEQ_NEXT_ID[] += 1)
@@ -118,6 +133,7 @@ end
 "Reverse rate for an ExplicitReverse policy: kr(T)·∏products, kr from the policy's own rate law.
  Currently supports policy.rate::ElementaryArrhenius (the common explicit-reverse form)."
 function _reverse_rate(policy::ExplicitReverse, rx::ReactionData, mech, cvar, T, j, ctx)
+    _assert_nonneg_products_for_reverse(rx)
     policy.rate isa ElementaryArrhenius ||
         error("_reverse_rate(ExplicitReverse): non-Arrhenius reverse rate ($(typeof(policy.rate))) " *
               "deferred; use ElementaryArrhenius.")
