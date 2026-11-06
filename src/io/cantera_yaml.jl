@@ -109,12 +109,10 @@ end
 _a_factor(ctx::_UnitCtx, order::Real) =
     (1.0 / ctx.length_m)^(3 * (1 - order)) * ctx.amount_per_mol^(order - 1)
 
-"Convert a Cantera A-factor value to canonical m-mol-s units given reaction order."
-_convert_A(A::Real, ctx::_UnitCtx, order::Real) = A * _a_factor(ctx, order)
-
-"Handler-facing: convert a raw YAML A-factor to canonical m-mol-s units given reaction
- order. For use inside rate_type_handlers callbacks, where the ctx is passed opaquely."
-convert_afactor(A::Real, ctx, order::Real) = _convert_A(A, ctx, order)
+"Convert a raw YAML A-factor value to canonical m-mol-s units given reaction order.
+ Handler-facing: for use inside rate_type_handlers callbacks, where the ctx is passed
+ opaquely."
+convert_afactor(A::Real, ctx, order::Real) = A * _a_factor(ctx, order)
 
 "Handler-facing: activation energy from the file's declared unit to J/mol
  (K→8.314, cal/mol→4.184, J/mol→1.0)."
@@ -243,7 +241,7 @@ end
 
 "Build an ElementaryArrhenius from a Cantera rate-constant dict, converting units."
 function _arrhenius_from_rc(rc, ctx::_UnitCtx, order::Real)
-    A  = _convert_A(Float64(rc["A"]), ctx, order)
+    A  = convert_afactor(Float64(rc["A"]), ctx, order)
     b  = Float64(rc["b"])
     Ea = Float64(rc["Ea"]) * ctx.ea_J_per_mol
     return ElementaryArrhenius(A, b, Ea)
@@ -299,7 +297,7 @@ function _parse_plog_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
     pts = PlogPoint[]
     for rc in rxn_dict["rate-constants"]
         P_Pa = _parse_pressure(rc["P"], ctx)
-        A    = _convert_A(Float64(rc["A"]), ctx, order)
+        A    = convert_afactor(Float64(rc["A"]), ctx, order)
         b    = Float64(rc["b"])
         Ea   = Float64(rc["Ea"]) * ctx.ea_J_per_mol
         push!(pts, PlogPoint(P_Pa, A, b, Ea))

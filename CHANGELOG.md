@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bit-identically; a non-1.0 default materializes the efficiencies dict over all phase
   species, matching lowering's resolved α vectors.
 
+### Changed
+
+- Internal: `_convert_A` merged into `convert_afactor` (the two bodies were identical;
+  `convert_afactor` remains the public, handler-facing name — no API change).
+
 ## [1.2.0] - 2026-10-12
 
 ### Added
