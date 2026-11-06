@@ -11,7 +11,11 @@ on:
     - cron: 0 0 * * *
 jobs:
   TagBot:
-    if: github.event_name == 'workflow_dispatch' || github.actor == 'JuliaTagBot'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.actor == 'JuliaTagBot'
+    permissions:
+      # Push the version tag + create the release. The repo's Actions default is
+      # read-only, which 403-killed every tag push since v1.0.0.
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -19,8 +23,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
       # No `ssh:` deploy key: the tagged version commit does not touch
-      # .github/workflows/. If a future release commit does, add a TAGBOT_KEY
-      # deploy key (see auxiliary docs) to avoid the GITHUB_TOKEN 403.
+      # .github/workflows/. (GITHUB_TOKEN additionally cannot push tags whose
+      # commits modify workflow files — if a future release commit does, add a
+      # TAGBOT_KEY deploy key; see auxiliary docs.)
       - name: Prepend CHANGELOG to release notes
         run: |
           # Target the version in the checked-out Project.toml (the version just released),
