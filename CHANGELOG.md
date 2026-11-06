@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Native `default-efficiency` support for `three-body` and `falloff` reactions in the
+  Cantera-YAML parser: unlisted third bodies take the row's `default-efficiency` instead
+  of an implicit 1.0 (converter output uses `default-efficiency: 0.0` on
+  catalyst-preservation rows). Key absent → 1.0 → previous sparse-dict behavior
+  bit-identically; a non-1.0 default materializes the efficiencies dict over all phase
+  species, matching lowering's resolved α vectors.
+
 ## [1.2.0] - 2026-10-12
 
 ### Added

@@ -212,14 +212,31 @@ function _names_to_ids(name_coeff::Dict{String,Float64}, name_to_id::Dict{String
     return out
 end
 
-"Parse efficiencies dict (species name -> α). Defaults to 1.0 for unlisted species."
-function _parse_efficiencies(eff_dict::Union{Dict,Nothing}, name_to_id::Dict{String,SpeciesID})
+"""Parse efficiencies dict (species name -> α) honoring the row's `default-efficiency`
+ (Cantera semantics: unlisted third bodies take this efficiency; the converter emits
+ `default-efficiency: 0.0` on catalyst-preservation rows).
+
+ Returns a SPARSE dict (only listed species present) when `default_α == 1.0`, and a
+ MATERIALIZED dict (every phase species, unlisted → `default_α`) otherwise. Sparseness
+ matters: lowering's `_meff` (src/lowering/kinetics.jl) resolves unlisted species to
+ α=1.0 at lower time and memoizes M_eff variables by the RESOLVED α vector, so returning
+ the sparse dict when the default is 1.0 preserves that M_eff sharing across reactions.
+ Materializing only when `default_α != 1.0` yields resolved α vectors identical to the
+ runner-override behavior being adopted here."""
+function _parse_efficiencies(eff_dict::Union{Dict,Nothing}, default_α::Float64,
+                             name_to_id::Dict{String,SpeciesID})
     out = Dict{SpeciesID,Float64}()
-    eff_dict === nothing && return out
-    for (name, α) in eff_dict
-        haskey(name_to_id, String(name)) ||
-            error("load_mechanism: efficiency references unknown species \"$name\"")
-        out[name_to_id[String(name)]] = Float64(α)
+    eff_dict === nothing && default_α == 1.0 && return out
+    if eff_dict !== nothing
+        for (name, α) in eff_dict
+            haskey(name_to_id, String(name)) ||
+                error("load_mechanism: efficiency references unknown species \"$name\"")
+            out[name_to_id[String(name)]] = Float64(α)
+        end
+    end
+    default_α == 1.0 && return out          # sparse: unlisted species stay absent
+    for (name, id) in name_to_id            # materialize: unlisted → default_α
+        haskey(out, id) || (out[id] = default_α)
     end
     return out
 end
@@ -246,7 +263,11 @@ end
 function _parse_three_body_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
     order = sum(values(reactants)) + 1                  # +1 for [M]
     base = _arrhenius_from_rc(rxn_dict["rate-constant"], ctx, order)
-    eff  = _parse_efficiencies(get(rxn_dict, "efficiencies", nothing), name_to_id)
+    # `default-efficiency`: efficiency of unlisted third bodies (Cantera semantics; the
+    # converter emits 0.0 on catalyst-preservation rows). Key absent → 1.0 → the
+    # historical sparse dict, bit-identically.
+    default_α = Float64(get(rxn_dict, "default-efficiency", 1.0))
+    eff  = _parse_efficiencies(get(rxn_dict, "efficiencies", nothing), default_α, name_to_id)
     return ThirdBodyArrhenius(base, eff)
 end
 
@@ -254,7 +275,11 @@ function _parse_falloff_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
     base_order = sum(values(reactants))                 # excludes (+M)
     high_rate = _arrhenius_from_rc(rxn_dict["high-P-rate-constant"], ctx, base_order)
     low_rate  = _arrhenius_from_rc(rxn_dict["low-P-rate-constant"],  ctx, base_order + 1)
-    eff = _parse_efficiencies(get(rxn_dict, "efficiencies", nothing), name_to_id)
+    # `default-efficiency`: efficiency of unlisted third bodies (Cantera semantics; the
+    # converter emits 0.0 on catalyst-preservation rows). Key absent → 1.0 → the
+    # historical sparse dict, bit-identically.
+    default_α = Float64(get(rxn_dict, "default-efficiency", 1.0))
+    eff = _parse_efficiencies(get(rxn_dict, "efficiencies", nothing), default_α, name_to_id)
     if haskey(rxn_dict, "Troe")
         t = rxn_dict["Troe"]
         # Cantera {A,T3,T1,T2} -> TroeParams(α=A, T1, T2, T3) — field-aligned, NO reorder (spec T1;
