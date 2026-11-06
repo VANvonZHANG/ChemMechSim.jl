@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-06
+
 ### Added
 
 - Native `default-efficiency` support for `three-body` and `falloff` reactions in the
