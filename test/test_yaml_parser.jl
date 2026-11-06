@@ -336,6 +336,109 @@ $reactions_block
     @test ea_to_J_per_mol(600.0, ctx) == 600.0 * 8.314                        # K → J/mol
 end
 
+# —— default-efficiency (three-body / falloff) ———————————————————————————————————
+# Cantera semantics: unlisted third bodies take the row's `default-efficiency` (converter
+# output uses 0.0 on catalyst-preservation rows). Key absent → 1.0 → the historical
+# sparse efficiencies dict, bit-identically (zero-drift guard below).
+
+_p1_yaml(reactions_block) = """
+phases:
+  - name: gas
+    thermo: ideal-gas
+    species: [A, B, C]
+    reactions: all
+species:
+  - name: A
+    composition: {Ar: 1}
+    thermo: {model: constant-cp, h0: 0, s0: 0, cp0: 0}
+  - name: B
+    composition: {Ar: 1}
+    thermo: {model: constant-cp, h0: 0, s0: 0, cp0: 0}
+  - name: C
+    composition: {Ar: 1}
+    thermo: {model: constant-cp, h0: 0, s0: 0, cp0: 0}
+reactions:
+$reactions_block
+"""
+
+@testset "P1: default-efficiency" begin
+    sid(mech, name) = first(sp.id for sp in mech.species if sp.name == name)
+
+    # a) three-body, default-efficiency: 0.0 → MATERIALIZED: every species present,
+    #    listed → its α, unlisted → 0.0
+    path_a = tempname() * ".yaml"
+    write(path_a, _p1_yaml(
+        "  - {equation: \"A + M => B + M\", type: three-body, " *
+        "rate-constant: {A: 1.0e-30, b: -1.0, Ea: 0.0}, " *
+        "efficiencies: {C: 1.0}, default-efficiency: 0.0}\n"))
+    mech_a = load_mechanism(path_a)
+    @test mech_a.reactions[1].kinetics isa ThirdBodyArrhenius
+    eff_a = mech_a.reactions[1].kinetics.efficiencies
+    @test length(eff_a) == 3                       # all three species materialized
+    @test eff_a[sid(mech_a, "C")] == 1.0           # listed → its α
+    @test eff_a[sid(mech_a, "A")] == 0.0           # unlisted → default 0.0
+    @test eff_a[sid(mech_a, "B")] == 0.0
+
+    # b) falloff, default-efficiency: 2.5 → unlisted species α == 2.5
+    path_b = tempname() * ".yaml"
+    write(path_b, _p1_yaml(
+        "  - {equation: \"2 A (+M) => B (+M)\", type: falloff, " *
+        "high-P-rate-constant: {A: 1.0e-10, b: 0.0, Ea: 0.0}, " *
+        "low-P-rate-constant: {A: 1.0e-30, b: -1.0, Ea: 0.0}, " *
+        "Troe: {A: 0.6, T3: 90.0, T1: 1500.0}, " *
+        "efficiencies: {C: 1.0}, default-efficiency: 2.5}\n"))
+    mech_b = load_mechanism(path_b)
+    @test mech_b.reactions[1].kinetics isa TroeFalloff
+    eff_b = mech_b.reactions[1].kinetics.efficiencies
+    @test eff_b[sid(mech_b, "C")] == 1.0
+    @test eff_b[sid(mech_b, "A")] == 2.5           # unlisted → default 2.5
+    @test eff_b[sid(mech_b, "B")] == 2.5
+
+    # c) key absent → sparse dict exactly as before: only the listed species present
+    path_c = tempname() * ".yaml"
+    write(path_c, _p1_yaml(
+        "  - {equation: \"A + M => B + M\", type: three-body, " *
+        "rate-constant: {A: 1.0e-30, b: -1.0, Ea: 0.0}, " *
+        "efficiencies: {C: 1.0}}\n"))
+    mech_c = load_mechanism(path_c)
+    eff_c = mech_c.reactions[1].kinetics.efficiencies
+    @test collect(keys(eff_c)) == [sid(mech_c, "C")]
+    @test eff_c[sid(mech_c, "C")] == 1.0
+
+    # d) default-efficiency: 1.0 → sparse (early return), NOT materialized
+    path_d = tempname() * ".yaml"
+    write(path_d, _p1_yaml(
+        "  - {equation: \"A + M => B + M\", type: three-body, " *
+        "rate-constant: {A: 1.0e-30, b: -1.0, Ea: 0.0}, " *
+        "efficiencies: {C: 2.0}, default-efficiency: 1.0}\n"))
+    mech_d = load_mechanism(path_d)
+    eff_d = mech_d.reactions[1].kinetics.efficiencies
+    @test collect(keys(eff_d)) == [sid(mech_d, "C")]
+    @test eff_d[sid(mech_d, "C")] == 2.0
+
+    # e) efficiencies referencing an unknown species → loud error
+    path_e = tempname() * ".yaml"
+    write(path_e, _p1_yaml(
+        "  - {equation: \"A + M => B + M\", type: three-body, " *
+        "rate-constant: {A: 1.0e-30, b: -1.0, Ea: 0.0}, " *
+        "efficiencies: {Z: 1.0}, default-efficiency: 0.5}\n"))
+    @test_throws ErrorException load_mechanism(path_e)
+
+    # f) NO efficiencies key + default ≠ 1.0 → every species at the default.
+    #    Guards the first early-return: regressing it to `eff_dict === nothing &&
+    #    return out` would silently hand every species α=1.0 (a chemically wrong
+    #    rate with no error) and no other case would notice.
+    path_f = tempname() * ".yaml"
+    write(path_f, _p1_yaml(
+        "  - {equation: \"A + M => B + M\", type: three-body, " *
+        "rate-constant: {A: 1.0e-30, b: -1.0, Ea: 0.0}, " *
+        "default-efficiency: 0.0}\n"))
+    mech_f = load_mechanism(path_f)
+    eff_f = mech_f.reactions[1].kinetics.efficiencies
+    @test length(eff_f) == 3                       # nothing listed → all materialized
+    @test all(==(0.0), values(eff_f))
+end
+
 @testset "P2: underscore species names" begin
     # WRF mechanisms use names like O1D_CB4; underscore joins the allowed charset
     @test ChemMechSim._parse_terms("2 O1D_CB4 + N2") == Dict("O1D_CB4"=>2.0, "N2"=>1.0)
