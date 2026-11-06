@@ -423,4 +423,18 @@ $reactions_block
         "rate-constant: {A: 1.0e-30, b: -1.0, Ea: 0.0}, " *
         "efficiencies: {Z: 1.0}, default-efficiency: 0.5}\n"))
     @test_throws ErrorException load_mechanism(path_e)
+
+    # f) NO efficiencies key + default ≠ 1.0 → every species at the default.
+    #    Guards the first early-return: regressing it to `eff_dict === nothing &&
+    #    return out` would silently hand every species α=1.0 (a chemically wrong
+    #    rate with no error) and no other case would notice.
+    path_f = tempname() * ".yaml"
+    write(path_f, _p1_yaml(
+        "  - {equation: \"A + M => B + M\", type: three-body, " *
+        "rate-constant: {A: 1.0e-30, b: -1.0, Ea: 0.0}, " *
+        "default-efficiency: 0.0}\n"))
+    mech_f = load_mechanism(path_f)
+    eff_f = mech_f.reactions[1].kinetics.efficiencies
+    @test length(eff_f) == 3                       # nothing listed → all materialized
+    @test all(==(0.0), values(eff_f))
 end
