@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Species names in Cantera-YAML equations may now contain underscores
+  (WRF `O1D_CB4`-style). A strict superset of the previous charset:
+  underscore names were unparseable before, so no existing name changes
+  meaning.
+
 ## [1.2.0] - 2026-10-12
 
 ### Added
