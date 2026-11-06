@@ -25,6 +25,8 @@ reactions:
   rate-constant: [A, b, Ea]
   # type: elementary (default) | three-body | falloff | pressure-dependent-Arrhenius
   # duplicate: true  (bookkept on ReactionMeta)
+  # three-body/falloff rows: efficiencies: {SP: α, …} and default-efficiency: α
+  #   (every species the map does not list uses default-efficiency, 1.0 unless set)
 ```
 
 - `units` drives unit conversion of A-factors and activation energies at parse time
@@ -45,6 +47,10 @@ reactions:
 | `pressure-dependent-Arrhenius` | `PlogRate` |
 
 `ChebyshevRate` exists as a data-layer struct but is **not parsed** today.
+
+`three-body` and `falloff` rows accept the Cantera `efficiencies` map (species →
+third-body enhancement factor α); `default-efficiency` (default `1.0`) sets α for
+every species the map does not list.
 
 Reversible arrows (`<=>`) lower via the reaction's reverse policy (thermodynamic
 `K_c` from NASA7 by default); explicit reverse rate-constants are read where
