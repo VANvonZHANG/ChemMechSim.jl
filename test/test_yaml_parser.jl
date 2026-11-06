@@ -335,3 +335,16 @@ $reactions_block
     @test convert_afactor(0.0089, ctx, 1) ≈ 0.0089                            # order 1: s⁻¹ unchanged
     @test ea_to_J_per_mol(600.0, ctx) == 600.0 * 8.314                        # K → J/mol
 end
+
+@testset "P2: underscore species names" begin
+    # WRF mechanisms use names like O1D_CB4; underscore joins the allowed charset
+    @test ChemMechSim._parse_terms("2 O1D_CB4 + N2") == Dict("O1D_CB4"=>2.0, "N2"=>1.0)
+    # regression guards for the already-widened class: each parses to itself with coeff 1.0
+    @test ChemMechSim._parse_terms("CH*") == Dict("CH*"=>1.0)                 # asterisk (Aramco/FFCM2)
+    @test ChemMechSim._parse_terms("C2H4O1-2") == Dict("C2H4O1-2"=>1.0)       # hyphenated isomer label
+    @test ChemMechSim._parse_terms("CH2(S)") == Dict("CH2(S)"=>1.0)           # GRI30 singlet methylene
+    # end-to-end through the equation parser (bare = arrow, N2 on both sides)
+    r = ChemMechSim._parse_equation("O1D_CB4 + N2 = O + O2 + N2")
+    @test r.reactants == Dict("O1D_CB4"=>1.0, "N2"=>1.0)
+    @test r.products == Dict("O"=>1.0, "O2"=>1.0, "N2"=>1.0)
+end
