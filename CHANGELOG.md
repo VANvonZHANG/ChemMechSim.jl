@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bit-identically; a non-1.0 default materializes the efficiencies dict over all phase
   species, matching lowering's resolved α vectors.
 
+- Species names in Cantera-YAML equations may now contain underscores
+  (WRF `O1D_CB4`-style). A strict superset of the previous charset:
+  underscore names were unparseable before, so no existing name changes
+  meaning.
+
 ### Changed
 
 - Internal: `_convert_A` merged into `convert_afactor` (the two bodies were identical;

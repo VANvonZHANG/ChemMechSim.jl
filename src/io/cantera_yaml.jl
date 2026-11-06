@@ -22,7 +22,10 @@ function _parse_terms(s::AbstractString)
         # Parens allowed for labelled/excited states (e.g. GRI30's CH2(S) singlet methylene).
         # Hyphens, asterisks, #, commas allowed for Aramco/FFCM2 isomer labels
         # (e.g. C2H4O1-2, CH*, C4H5-2, 1,3-C3H6-style — note no species name starts with a digit).
-        m = match(r"^(\d+\.?\d*|\.\d+)?\s*([A-Za-z][A-Za-z0-9()\-*,#]*)$", term)
+        # Underscores allowed for WRF-style names (e.g. O1D_CB4); a strict superset of the
+        # previous charset — underscore names were simply unparseable before, so no
+        # previously-parseable term changes meaning.
+        m = match(r"^(\d+\.?\d*|\.\d+)?\s*([A-Za-z][A-Za-z0-9_()\-*,#]*)$", term)
         m === nothing && error("_parse_terms: cannot parse term \"$term\"")
         coef = isnothing(m.captures[1]) ? 1.0 : parse(Float64, m.captures[1])
         name = m.captures[2]
