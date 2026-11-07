@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `build_problem(...; jac=true, param_vjp=true)` attaches a generated `vjp_p`
+  (plus the state `vjp` needed for routing) so the adjoint parameter gradient
+  skips SciMLSensitivity's AD tape — assembled from Sᵀλ and per-reaction local
+  ForwardDiff over θ-explicit rate kernels (no parameter-Jacobian
+  materialization). Falls back loudly (warning) when not attachable:
+  energy/pressure-ODE states, the non-sharded jac path, uncovered tunables. v1
+  leaves the T-parameter gradient column zero by design (opaque keq/PLOG
+  evaluators are not Dual-generic); temperature sensitivity keeps the default
+  channel. Measured: GRI30 first gradient 66.5 CPU-s vs 1913 CPU-s baseline
+  (29×; CPU time, 1-core).
+
 ### Changed
 
 - Test environment: temporary compat cap `EnzymeCore = "0.8.20 - 0.8.26"` via a

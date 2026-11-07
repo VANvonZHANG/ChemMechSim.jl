@@ -116,6 +116,12 @@ Two runnable applications of the same channel:
   InterpolatingAdjoint(autojacvec = ReverseDiffVJP(false))` with `using ReverseDiff` —
   and budget the first gradient as a heavyweight one-time compile.
 
+For isothermal mechanisms `build_problem(...; jac=true, param_vjp=true)` attaches a
+generated `vjp_p` so the adjoint parameter gradient skips SciMLSensitivity's AD tape
+entirely — assembled from Sᵀλ and per-reaction local ForwardDiff (GRI30 first gradient:
+see CHANGELOG for the measured speedup). Temperature-parameter sensitivity still uses
+the default channel.
+
 Standing caveats: kinks (clamps, cutoffs) make gradients meaningless at the kink;
 discrete callbacks (e.g. the atmospheric diurnal ticks) need segmented treatment; and
 λ grows exponentially on chaotic trajectories — adjoint gradients there are correct but

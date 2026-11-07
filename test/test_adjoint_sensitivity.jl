@@ -7,14 +7,7 @@ using OrdinaryDiffEq, LinearSolve, ADTypes, SciMLSensitivity, Zygote, ForwardDif
 
 const SOLVER = FBDF(autodiff = ADTypes.AutoFiniteDiff(), linsolve = LUFactorization())
 
-function ab_toy()
-    spA = SpeciesData(id=1, name="A"); spB = SpeciesData(id=2, name="B")
-    rx1 = ReactionData(reactants=Dict(1 => 1.0), products=Dict(2 => 1.0),
-                       kinetics=ElementaryArrhenius(0.8, 0.0, 0.0), reverse_policy=Irreversible())
-    rx2 = ReactionData(reactants=Dict(2 => 1.0), products=Dict(1 => 1.0),
-                       kinetics=ElementaryArrhenius(0.3, 0.0, 0.0), reverse_policy=Irreversible())
-    return Mechanism(species=[spA, spB], reactions=[rx1, rx2])
-end
+# ab_toy lives in helpers.jl (promoted there by the param_vjp work, 2026-10-13).
 
 # Closed form (state order [B, A]; N = total mass). GOLD is computed independently with
 # ForwardDiff over these expressions — a different channel than the adjoint under test.

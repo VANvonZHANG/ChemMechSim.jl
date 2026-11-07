@@ -44,8 +44,8 @@ end
 """Build an `ODEProblem` from a `ChemPhaseSystem` (a `BatchReactor` too).
 
     build_problem(phase, u0, tspan; params=Pair[], jac=false, jac_chunked=false,
-                  jac_strategy=:auto, chunk_size=200, cse_chunk_size=chunk_size,
-                  write_chunk_size=500)
+                  jac_strategy=:auto, param_vjp=false, chunk_size=200,
+                  cse_chunk_size=chunk_size, write_chunk_size=500)
 
 `u0` is a `Dict(speciesname => value)` mapping species names to concentrations
 [mol/m³], plus `"T"` for the initial temperature [K] in adiabatic modes; `params`
@@ -63,12 +63,23 @@ case, where T is a state); otherwise from the T PARAMETER default (the
 explicitly for a precise P0 — the auto-fill falls back to the T-param default,
 not the overridden value.
 
+`param_vjp=true` (with `jac=true`'s `:reaction_sharded` path) attaches BOTH a state VJP
+(computing dλ = Jᵀλ over the analytic Jacobian — required for routing) and a
+parameter VJP (`vjp_p`, assembled from Sᵀλ + per-reaction local ForwardDiff), so the
+adjoint skips SciMLSensitivity's AD tape entirely (no matrix, no tape). Not attachable
+(energy/pressure-ODE modes, uncovered tunables, non-sharded jac path) degrades LOUDLY
+to the default AD channel; do not pass an explicit `autojacvec` sensealg option — it
+bypasses this channel. The T-parameter column of the gradient is zero by design in v1.
+The attached closures share buffers per problem — solving the SAME problem from multiple
+threads needs separately built problems.
+
 # Example
 prob = build_problem(reactor, u0, (0.0, 5e-3); jac=true)
 """
 function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
                         params=Pair[], jac::Bool=false, jac_chunked::Bool=false,
                         jac_strategy::Symbol=:auto,
+                        param_vjp::Bool=false,
                         chunk_size::Int=200, cse_chunk_size::Int=chunk_size,
                         write_chunk_size::Int=500)
     sys = phase.sys
@@ -110,12 +121,30 @@ function build_problem(phase::ChemPhaseSystem, u0::AbstractDict, tspan;
         end
         strategy = supported ? :reaction_sharded : :none
     end
+    # param_vjp only lives on the :reaction_sharded path — an explicit request that cannot
+    # be honored must not degrade silently (same lesson as the jac=true fallback above).
+    if param_vjp && strategy !== :reaction_sharded
+        @warn "build_problem: param_vjp=true ignored — the jac path is :$(strategy) " *
+              "(param_vjp requires :reaction_sharded). Adjoint ∂f/∂p uses the default AD channel."
+    end
     if strategy === :reaction_sharded
         prob_baseline = ODEProblem(sys, pairs, tspan)
         rhs_iip = generate_rhs(sys; expression=Val{false}, wrap_gfw=Val{false})[2]
         jac!, J_proto = build_reaction_sharded_jac(
             phase.mech; config=phase.config, checks=false, sys=sys)
-        ofn = ODEFunction{true, NoSpecialize}(rhs_iip; jac=jac!, jac_prototype=J_proto)
+        vjpp = nothing
+        if param_vjp
+            vjpp, gaps = build_param_vjp(phase.mech; config=phase.config,
+                                         checks=false,  # phase already validated at construction
+                                         sys=sys)
+            vjpp === nothing && @warn(
+                "build_problem: param_vjp=true not attachable — $(join(gaps, "; ")). " *
+                "Adjoint ∂f/∂p falls back to the default AD channel (ReverseDiff tape).")
+        end
+        ofn = vjpp === nothing ?
+            ODEFunction{true, NoSpecialize}(rhs_iip; jac=jac!, jac_prototype=J_proto) :
+            ODEFunction{true, NoSpecialize}(rhs_iip; jac=jac!, jac_prototype=J_proto,
+                                            vjp=_jac_vjp!(jac!, J_proto), vjp_p=vjpp)
         return ODEProblem(ofn, prob_baseline.u0, tspan, prob_baseline.p)
     else
         return ODEProblem(sys, pairs, tspan)
@@ -173,7 +202,7 @@ end
 """Simulate over `tspan` — one-call convenience over `build_problem` + `solve`.
 
     simulate(x, tspan=(0.0, 1.0); u0, solver=Tsit5(), params=Pair[], jac=false,
-             jac_chunked=false, jac_strategy=:auto, chunk_size=200,
+             jac_chunked=false, jac_strategy=:auto, param_vjp=false, chunk_size=200,
              cse_chunk_size=chunk_size, write_chunk_size=500, kwargs...)
 
 `x` is a `ChemPhaseSystem` or a `BatchReactor`. `u0` maps species names to
@@ -182,7 +211,8 @@ parameter values (e.g. `[T => 500.0]`); `kwargs` forward to `solve` (`reltol`,
 `abstol`, callbacks, ...). The default solver `Tsit5()` suits non-stiff toy
 mechanisms; pass a stiff solver for real chemistry (e.g. `Rodas5P()` or
 `FBDF()`). Jacobian options are those of `build_problem` (`jac=true` and
-friends).
+friends, incl. `param_vjp=true` for the tape-free adjoint ∂f/∂p channel — see
+`build_problem` for its loud-fallback caveats).
 
 # Example
 reactor = BatchReactor(mech; mode=:adiabatic_constV)
@@ -191,10 +221,12 @@ sol = simulate(reactor, (0.0, 5e-3); u0=u0, solver=FBDF(), reltol=1e-8, abstol=1
 function simulate(phase::ChemPhaseSystem, tspan=(0.0, 1.0); u0, solver=Tsit5(),
                   params=Pair[], jac::Bool=false, jac_chunked::Bool=false,
                   jac_strategy::Symbol=:auto,
+                  param_vjp::Bool=false,
                   chunk_size::Int=200, cse_chunk_size::Int=chunk_size,
                   write_chunk_size::Int=500, kwargs...)
     prob = build_problem(phase, u0, tspan; params=params, jac=jac,
                          jac_chunked=jac_chunked, jac_strategy=jac_strategy,
+                         param_vjp=param_vjp,
                          chunk_size=chunk_size, cse_chunk_size=cse_chunk_size,
                          write_chunk_size=write_chunk_size)
     return solve(prob, solver; kwargs...)
@@ -217,10 +249,12 @@ extract_system(r::BatchReactor) = extract_system(r.phase)
 "Build an ODEProblem from a BatchReactor. `u0` is a Dict(speciesname => value);
  `params` is an optional Pair vector."
 build_problem(r::BatchReactor, u0::AbstractDict, tspan; params=Pair[], jac::Bool=false,
-              jac_chunked::Bool=false, jac_strategy::Symbol=:auto, chunk_size::Int=200,
+              jac_chunked::Bool=false, jac_strategy::Symbol=:auto,
+              param_vjp::Bool=false, chunk_size::Int=200,
               cse_chunk_size::Int=chunk_size, write_chunk_size::Int=500) =
     build_problem(r.phase, u0, tspan; params=params, jac=jac,
                   jac_chunked=jac_chunked, jac_strategy=jac_strategy,
+                  param_vjp=param_vjp,
                   chunk_size=chunk_size, cse_chunk_size=cse_chunk_size,
                   write_chunk_size=write_chunk_size)
 
@@ -229,10 +263,12 @@ for the full argument documentation (the kwargs are identical)."""
 function simulate(r::BatchReactor, tspan=(0.0, 1.0); u0, solver=Tsit5(),
                   params=Pair[], jac::Bool=false, jac_chunked::Bool=false,
                   jac_strategy::Symbol=:auto,
+                  param_vjp::Bool=false,
                   chunk_size::Int=200, cse_chunk_size::Int=chunk_size,
                   write_chunk_size::Int=500, kwargs...)
     return simulate(r.phase, tspan; u0=u0, solver=solver, params=params, jac=jac,
                     jac_chunked=jac_chunked, jac_strategy=jac_strategy,
+                    param_vjp=param_vjp,
                     chunk_size=chunk_size, cse_chunk_size=cse_chunk_size,
                     write_chunk_size=write_chunk_size, kwargs...)
 end
