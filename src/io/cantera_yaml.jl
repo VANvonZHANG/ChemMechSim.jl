@@ -12,23 +12,35 @@ using ..ChemMechSim: SpeciesData, SpeciesID, ReactionData, ReactionMeta,
 
 # —— Equation string parser ———————————————————————————————————
 
-"Parse one side of a reaction equation (e.g. \"2 OH + H2O\") into Dict(name=>coeff)."
+"Parse one side of a reaction equation (e.g. \"2 OH + H2O\") into Dict(name=>coeff).
+ Negative coefficients are accepted (the KPP/MCM-dialect ensemble-bookkeeping extension,
+ e.g. NCAR MM's `1.0 A - 2.0 XAOO`): a whitespace-bounded `-` separates terms exactly
+ like `+` does, and each term may carry its own leading sign (`-X`, `-1.0 X`, `- 1.0 X`).
+ Species names contain no spaces, so a space-bounded ` - ` can never occur inside a name
+ like `C4H5-2` — the separator normalization below cannot split a name. Repeated terms
+ accumulate with their signs."
 function _parse_terms(s::AbstractString)
     result = Dict{String,Float64}()
+    # ` - ` → ` + -`: normalize the spaced-minus separator into an explicit per-term sign,
+    # so `B - 1.0 C` and `B + -1.0 C` reach the term regex in the same shape.
+    s = replace(s, r"\s-\s" => " + -")
     for term in split(s, "+")
         term = strip(term)
         isempty(term) && continue
-        # optional leading coefficient (int/float) then species name (letter-led).
+        # optional leading sign (negative PRODUCT coefficients, ensemble-bookkeeping
+        # dialect), then optional coefficient (int/float), then species name (letter-led).
         # Parens allowed for labelled/excited states (e.g. GRI30's CH2(S) singlet methylene).
         # Hyphens, asterisks, #, commas allowed for Aramco/FFCM2 isomer labels
-        # (e.g. C2H4O1-2, CH*, C4H5-2, 1,3-C3H6-style — note no species name starts with a digit).
-        # Underscores allowed for WRF-style names (e.g. O1D_CB4); a strict superset of the
-        # previous charset — underscore names were simply unparseable before, so no
-        # previously-parseable term changes meaning.
-        m = match(r"^(\d+\.?\d*|\.\d+)?\s*([A-Za-z][A-Za-z0-9_()\-*,#]*)$", term)
+        # (e.g. C2H4O1-2, CH*, C4H5-2, 1,3-C3H6-style — note no species name starts with a
+        # digit, and the sign group at term start cannot shadow an in-name hyphen: names
+        # never start with `-`). Underscores allowed for WRF-style names (e.g. O1D_CB4);
+        # a strict superset of the previous charset — underscore names were simply
+        # unparseable before, so no previously-parseable term changes meaning.
+        m = match(r"^(-)?\s*((?:\d+\.?\d*|\.\d+))?\s*([A-Za-z][A-Za-z0-9_()\-*,#]*)$", term)
         m === nothing && error("_parse_terms: cannot parse term \"$term\"")
-        coef = isnothing(m.captures[1]) ? 1.0 : parse(Float64, m.captures[1])
-        name = m.captures[2]
+        mag  = isnothing(m.captures[2]) ? 1.0 : parse(Float64, m.captures[2])
+        coef = isnothing(m.captures[1]) ? mag : -mag
+        name = m.captures[3]
         result[name] = get(result, name, 0.0) + coef
     end
     return result
@@ -36,7 +48,8 @@ end
 
 "Parse a Cantera equation string into (reactants, products, reversible, third_body).
  Handles: elementary `A + B <=> C`, irreversible `A => B`, three-body `A + M <=> C + M`,
- falloff `2 OH (+M) <=> H2O2 (+M)`."
+ falloff `2 OH (+M) <=> H2O2 (+M)`, and negative PRODUCT coefficients
+ (`A => B - 1.0 C`, the ensemble-bookkeeping dialect — see `_parse_terms`)."
 function _parse_equation(eq::AbstractString)
     s = strip(eq)
     third_body = false
@@ -59,6 +72,13 @@ function _parse_equation(eq::AbstractString)
     end
     reactants = _parse_terms(left)
     products  = _parse_terms(right)
+    # Negative stoichiometry is a PRODUCT-side extension. Reactant coefficients must stay
+    # positive: the forward rate law is mass-action over the reactants and the A-factor
+    # unit conversion uses order = Σν_reactants, so a negative reactant exponent would
+    # silently divide by a concentration and corrupt the unit conversion. Fail loudly here.
+    any(<(0.0), values(reactants)) &&
+        error("_parse_equation: negative reactant coefficient in \"$eq\" " *
+              "(negative stoichiometry is supported on the product side only)")
     # three-body + M — remove M from both sides, flag third_body
     if haskey(reactants, "M")
         third_body = true

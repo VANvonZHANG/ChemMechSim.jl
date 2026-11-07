@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Negative product stoichiometric coefficients in Cantera-YAML equations (the
+  KPP/MCM ensemble-bookkeeping dialect, e.g. NCAR MM's `A + 2.0 B => 1.0 A -
+  2.0 XAOO`): a whitespace-bounded `-` separates product terms like `+` does,
+  and explicit per-term signs (`B + -2.0 XAOO`) are accepted. Semantics: the
+  rate law stays mass-action over the reactants only; a negative product
+  coefficient contributes a negative stoichiometric term to that species' ODE
+  (`d[XAOO]/dt = -2·rate`). Two loud guards: reactant-side coefficients must
+  stay positive (rate law + A-factor unit conversion consume Σν_reactants),
+  and negative product stoichiometry must be irreversible (`=>`) — reverse
+  mass-action over the products would divide by a concentration.
 - `build_problem(...; jac=true, param_vjp=true)` attaches a generated `vjp_p`
   (plus the state `vjp` needed for routing) so the adjoint parameter gradient
   skips SciMLSensitivity's AD tape — assembled from Sᵀλ and per-reaction local
