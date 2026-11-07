@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   channel. Measured: GRI30 first gradient 66.5 CPU-s vs 1913 CPU-s baseline
   (29×; CPU time, 1-core).
 
+### Changed
+
+- Test environment: temporary compat cap `EnzymeCore = "0.8.20 - 0.8.26"` via a
+  test-target entry. EnzymeCore 0.8.27 (registered 2026-11-04) removed
+  `EnzymeRules.has_easy_rule`, which DiffEqBase 7.21.6's Enzyme ext still extends —
+  any fresh test-env resolve that includes SciMLSensitivity fails to precompile. The
+  cap keeps CI resolvable until upstream (EnzymeCore ≥ 0.8.28 or DiffEqBase ≥ 7.21.7)
+  fixes it; lift it then. No effect on the package's runtime dependencies.
+
 ## [1.3.0] - 2026-11-06
 
 ### Added
