@@ -1,4 +1,5 @@
 using Test
+using ModelingToolkit
 using ChemMechSim
 
 @testset "Phase 5a T1: molecular_weight from composition" begin
@@ -450,4 +451,135 @@ end
     r = ChemMechSim._parse_equation("O1D_CB4 + N2 = O + O2 + N2")
     @test r.reactants == Dict("O1D_CB4"=>1.0, "N2"=>1.0)
     @test r.products == Dict("O"=>1.0, "O2"=>1.0, "N2"=>1.0)
+end
+
+# —— negative product stoichiometry (NCAR MM X*OO ensemble-bookkeeping dialect) ———————
+# Semantics guaranteed downstream: rate law = mass-action over REACTANTS ONLY; a negative
+# product coefficient contributes a negative stoichiometric term to that species' ODE
+# (d[C]/dt = -1·rate for `A => B - 1.0 C`) — exactly NCAR MM gear DIFFUN's ct += sc·rt.
+
+@testset "negative product coefficients: parse-level" begin
+    # canonical dialect form: whitespace-bounded minus separates product terms like + does
+    r = ChemMechSim._parse_equation("A => B - 1.0 C")
+    @test r.reactants == Dict("A"=>1.0)
+    @test r.products == Dict("B"=>1.0, "C"=>-1.0)
+    @test !r.reversible && !r.third_body
+    # the de-risk-fixture form (NCAR MM project, julia/derisk_negative.yaml): species on
+    # BOTH sides stays in separate dicts (net A = 1 - 1 = 0 happens in the ODE, not here)
+    r2 = ChemMechSim._parse_equation("A + 2.0 B => 1.0 A - 2.0 XAOO")
+    @test r2.reactants == Dict("A"=>1.0, "B"=>2.0)
+    @test r2.products == Dict("A"=>1.0, "XAOO"=>-2.0)
+    # explicit per-term sign after the + separator: -X, -1.0 X, - 1.0 X
+    @test ChemMechSim._parse_equation("A => B + -X").products == Dict("B"=>1.0, "X"=>-1.0)
+    @test ChemMechSim._parse_equation("A => B + -1.0 X").products == Dict("B"=>1.0, "X"=>-1.0)
+    @test ChemMechSim._parse_equation("A => B + - 1.0 X").products == Dict("B"=>1.0, "X"=>-1.0)
+    @test ChemMechSim._parse_equation("A => B - X").products == Dict("B"=>1.0, "X"=>-1.0)
+    @test ChemMechSim._parse_equation("A => B -  1.0  X").products == Dict("B"=>1.0, "X"=>-1.0)
+    # repeated terms net with their signs within one side
+    @test ChemMechSim._parse_equation("A => 2.0 C - 0.5 C").products == Dict("C"=>1.5)
+    @test ChemMechSim._parse_equation("A => C - 2.0 C").products == Dict("C"=>-1.0)
+    # hyphenated species names are unaffected: sign binds only at term start, and the
+    # ` - ` separator can never occur inside a space-free species name
+    r3 = ChemMechSim._parse_equation("C4H5-2 + OH <=> 2.0 C4H5-2")
+    @test r3.reactants == Dict("C4H5-2"=>1.0, "OH"=>1.0)
+    @test r3.products == Dict("C4H5-2"=>2.0)
+    @test ChemMechSim._parse_equation("A => B - 1.0 C4H5-2").products == Dict("B"=>1.0, "C4H5-2"=>-1.0)
+    # reactant side must stay nonnegative: loud parse error, never a silent [X]^-ν rate law
+    @test_throws ErrorException ChemMechSim._parse_equation("A - 1.0 B => C")
+    @test_throws ErrorException ChemMechSim._parse_equation("A + -1.0 B => C")
+end
+
+@testset "negative product coefficients: load + lowering (A => B - 1.0 C)" begin
+    yaml = """
+    phases:
+      - name: gas
+        thermo: ideal-gas
+        elements: [Ar]
+        species: [A, B, C]
+        reactions: all
+    species:
+      - {name: A, composition: {Ar: 1}, thermo: {model: constant-cp, h0: 0, s0: 0, cp0: 0}}
+      - {name: B, composition: {Ar: 1}, thermo: {model: constant-cp, h0: 0, s0: 0, cp0: 0}}
+      - {name: C, composition: {Ar: 1}, thermo: {model: constant-cp, h0: 0, s0: 0, cp0: 0}}
+    reactions:
+      - {equation: 'A => B - 1.0 C', rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}}
+    """
+    path = tempname() * ".yaml"
+    write(path, yaml)
+    mech = load_mechanism(path)
+    @test length(mech.reactions) == 1
+    rx = mech.reactions[1]
+    @test rx.reactants == Dict(SpeciesID(1) => 1.0)
+    @test rx.products[SpeciesID(2)] == 1.0            # B
+    @test rx.products[SpeciesID(3)] == -1.0           # C: negative bookkeeping coefficient
+    @test rx.reverse_policy isa Irreversible
+    @test rx.kinetics.A == 1.0                        # SI units, order 1: A unchanged
+
+    # lowering: rate = k·[A] only; d[A]/dt = -rate, d[B]/dt = +rate, d[C]/dt = -rate.
+    # Analytic solution at k=1: A=e⁻ᵗ, B=1-e⁻ᵗ, C=C₀-(1-e⁻ᵗ).
+    phase = ChemMechSim.ChemPhaseSystem(mech; config=MechanismConfig())
+    sys = ChemMechSim.extract_system(phase)
+    var(n) = unknowns(sys)[findfirst(s -> String(ModelingToolkit.getname(s)) == n, unknowns(sys))]
+    A, B, C = var("A"), var("B"), var("C")
+    sol = simulate(phase, (0.0, 2.0); u0=Dict("A"=>1.0, "B"=>0.0, "C"=>0.5),
+                   reltol=1e-10, abstol=1e-12)
+    for t in (0.5, 1.0, 2.0)
+        @test sol(t; idxs=A) ≈ exp(-t)          rtol=1e-8
+        @test sol(t; idxs=B) ≈ 1 - exp(-t)      rtol=1e-8
+        @test sol(t; idxs=C) ≈ 0.5 - (1 - exp(-t))  rtol=1e-8
+    end
+    # rate ∝ [A] ONLY: perturbing [C](0) must not move the A/B trajectories (a rate law
+    # accidentally containing [C] — e.g. a mis-signed mass-action — would diverge here)
+    sol2 = simulate(phase, (0.0, 2.0); u0=Dict("A"=>1.0, "B"=>0.0, "C"=>5.0),
+                    reltol=1e-10, abstol=1e-12)
+    @test sol2(2.0; idxs=A) ≈ sol(2.0; idxs=A)   rtol=1e-8
+    @test sol2(2.0; idxs=B) ≈ sol(2.0; idxs=B)   rtol=1e-8
+    @test sol2(2.0; idxs=C) ≈ 5.0 - (1 - exp(-2.0))  rtol=1e-8
+
+    # validation semantics with signed stoichiometry (documented decisions):
+    rep = validate(mech)
+    # (a) element conservation counts signed coefficients: consuming Ar-composed C at -1
+    #     makes the reaction genuinely unbalanced → error (ensemble species with empty
+    #     composition are skipped with a warning instead, so MCM dialect files stay quiet)
+    @test any(e -> occursin("not element-balanced", e), rep.errors)
+    # (b) duplicate detection compares exact SIGNED per-side maps (no cross-side netting):
+    #     two identical negative-stoich equations still see each other as twins
+    yaml_dup = replace(yaml,
+        "- {equation: 'A => B - 1.0 C', rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}}" =>
+        "- {equation: 'A => B - 1.0 C', rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}}\n" *
+        "  - {equation: 'A => B - 1.0 C', rate-constant: {A: 2.0, b: 0.0, Ea: 0.0}}\n" *
+        "  - {equation: 'A => B - 1.0 C', rate-constant: {A: 3.0, b: 0.0, Ea: 0.0}}")
+    path_dup = tempname() * ".yaml"
+    write(path_dup, yaml_dup)
+    mech_dup = load_mechanism(path_dup)
+    @test length(mech_dup.reactions) == 3
+    rep_dup = validate(mech_dup)
+    @test count(w -> occursin("same stoichiometry", w), rep_dup.warnings) == 3   # none flagged duplicate
+    # ... and WITH the duplicate flag on all three the warning stays silent
+    yaml_flagged = replace(yaml_dup,
+        "- {equation: 'A => B - 1.0 C', rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}}" =>
+        "- {equation: 'A => B - 1.0 C', rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}, duplicate: true}",
+        "- {equation: 'A => B - 1.0 C', rate-constant: {A: 2.0, b: 0.0, Ea: 0.0}}" =>
+        "- {equation: 'A => B - 1.0 C', rate-constant: {A: 2.0, b: 0.0, Ea: 0.0}, duplicate: true}",
+        "- {equation: 'A => B - 1.0 C', rate-constant: {A: 3.0, b: 0.0, Ea: 0.0}}" =>
+        "- {equation: 'A => B - 1.0 C', rate-constant: {A: 3.0, b: 0.0, Ea: 0.0}, duplicate: true}")
+    path_fl = tempname() * ".yaml"
+    write(path_fl, yaml_flagged)
+    rep_fl = validate(load_mechanism(path_fl))
+    @test count(w -> occursin("same stoichiometry", w), rep_fl.warnings) == 0
+
+    # reversible + negative product coefficient: parses, but lowering must FAIL LOUDLY
+    # (reverse mass-action over products would divide by [C]) — never a silent wrong rate
+    path_rev = tempname() * ".yaml"
+    write(path_rev, replace(yaml, "A => B" => "A <=> B"))
+    mech_rev = load_mechanism(path_rev)
+    @test mech_rev.reactions[1].reverse_policy isa ThermoReverse
+    err = try
+        ChemMechSim.ChemPhaseSystem(mech_rev; config=MechanismConfig())
+        nothing
+    catch e
+        e
+    end
+    @test err isa ErrorException
+    @test occursin("negative product", err.msg)
 end

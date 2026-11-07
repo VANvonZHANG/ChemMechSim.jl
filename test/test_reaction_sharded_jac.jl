@@ -53,6 +53,48 @@ end
     @test stats.n_nonzeros == length(observed)
 end
 
+@testset "reaction-sharded Jacobian carries negative product stoichiometry (A => B - 1.0 C)" begin
+    # Signed net stoichiometry through the sharded assembly: the negative product
+    # coefficient must reach the species row as -1 (d[C]/dt = -rate) and the fixedT
+    # pressure row as R·T·Δν with the signed Δν = (1 - 1) - 1 = -1. No row/key drops.
+    mech = Mechanism(
+        species = [
+            SpeciesData(id=1, name="A"),
+            SpeciesData(id=2, name="B"),
+            SpeciesData(id=3, name="C"),
+        ],
+        reactions = [
+            ReactionData(
+                reactants = Dict(1 => 1.0),
+                products = Dict(2 => 1.0, 3 => -1.0),
+                kinetics = ElementaryArrhenius(1.0, 0.0, 0.0),
+                reverse_policy = Irreversible(),
+            ),
+        ],
+    )
+    config = convenience_config(:fixedT)
+    phase = ChemPhaseSystem(mech; config=config, checks=false)
+    sys = extract_system(phase)
+    prob = build_problem(phase, Dict("A" => 2.0, "B" => 0.25, "C" => 0.5), (0.0, 0.1))
+
+    jac_sharded!, J_proto = ChemMechSim.build_reaction_sharded_jac(
+        mech; config=config, checks=false)
+    J_sharded = copy(J_proto)
+    fill!(J_sharded.nzval, NaN)
+    jac_sharded!(J_sharded, prob.u0, prob.p, 0.0)
+
+    # truth from the full MTK Jacobian of the same system (signed by construction)
+    J_full = _full_sparse_jacobian(sys, prob.u0, prob.p, 0.0)
+    @test Matrix(J_sharded) ≈ Matrix(J_full)
+
+    # and the analytic anchors: rate = [A] (k=1), so the A-column is the whole story
+    idx = ChemMechSim._state_name_index(sys)
+    @test J_sharded[idx["A"], idx["A"]] ≈ -1.0            # d[A]/dt = -rate
+    @test J_sharded[idx["B"], idx["A"]] ≈ +1.0            # d[B]/dt = +rate
+    @test J_sharded[idx["C"], idx["A"]] ≈ -1.0            # d[C]/dt = -rate (negative stoich)
+    @test J_sharded[idx["P"], idx["A"]] ≈ 8.314 * 300.0 * (-1.0)   # R·T·Δν, Δν signed
+end
+
 @testset "reaction-sharded Jacobian prototype matches full MTK Jacobian on fixedT chain" begin
     mech = Mechanism(
         species = [

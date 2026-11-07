@@ -56,6 +56,30 @@ Reversible arrows (`<=>`) lower via the reaction's reverse policy (thermodynamic
 `K_c` from NASA7 by default); explicit reverse rate-constants are read where
 Cantera's format carries them.
 
+## Negative product coefficients (ensemble bookkeeping)
+
+The product side may carry **negative stoichiometric coefficients** — the
+KPP/MCM-dialect form used for ensemble/bookkeeping species (e.g. NCAR MM's X*OO
+radicals, consumed by the reaction that creates the observable products):
+
+```yaml
+- equation: A + 2.0 B => 1.0 A - 2.0 XAOO     # XAOO consumed as an ensemble member
+  rate-constant: {A: 1.0e-12, b: 0.0, Ea: 0.0}
+```
+
+A whitespace-bounded `-` separates product terms exactly like `+` does, and an
+explicit per-term sign (`B + -2.0 XAOO`) is accepted too; species names contain
+no spaces, so this can never split a hyphenated name like `C4H5-2`. Semantics:
+the rate law is mass-action over the **reactants only**, and a negative product
+coefficient contributes a negative stoichiometric term to that species' ODE
+(`d[XAOO]/dt = -2·rate` above), mirroring how the NCAR MM gear integrator
+accumulates `ct += sc·rt`. Two restrictions, both loud errors rather than
+silent mis-lowering: reactant-side coefficients must stay positive (the rate
+law and the A-factor unit conversion both consume Σν_reactants), and reactions
+with negative product stoichiometry must be **irreversible** (`=>`) — a reverse
+rate is mass-action over the forward products, and a negative exponent would
+divide by a concentration.
+
 ## Unsupported rate types — extend, don't fork
 
 Reactions whose `type` has no parser are **skipped with one aggregated warning**
