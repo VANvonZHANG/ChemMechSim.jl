@@ -103,6 +103,21 @@ flat_to_mtk
 state_index
 ```
 
+### Tape-free parameter VJP (`param_vjp`)
+
+For isothermal mechanisms on the reaction-sharded Jacobian path,
+`build_problem(...; jac = true, param_vjp = true)` attaches a generated `vjp_p`
+(plus the `vjp` state that routes it): the adjoint parameter gradient is assembled
+from Sᵀλ and a per-reaction local ForwardDiff over the rate kernels, so
+SciMLSensitivity's AD tape — and any parameter-Jacobian materialization — is
+skipped entirely. The temperature-parameter gradient column stays zero by design
+(opaque equilibrium-constant / PLOG evaluators are not Dual-generic); temperature
+sensitivity keeps the default channel. When the structure does not allow
+attachment — energy or pressure-ODE states, the non-sharded `jac` path, uncovered
+tunable parameters — the request falls back **loudly** with a warning rather than
+silently degrading. The README "Adjoint gradients" section carries the recipe and
+the measured speedup.
+
 ## Lowering & the rate-law protocol
 
 ```@docs

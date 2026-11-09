@@ -52,6 +52,10 @@ reactions:
 third-body enhancement factor α); `default-efficiency` (default `1.0`) sets α for
 every species the map does not list.
 
+Species names in equations are letter-led; beyond letters and digits the name may
+contain `_`, `()`, `-`, `*`, `#`, and `,` (excited-state and isomer labels, e.g.
+GRI-30's `CH2(S)` or Aramco's `C2H4O1-2`; WRF dialects use `_`, e.g. `O1D_CB4`).
+
 Reversible arrows (`<=>`) lower via the reaction's reverse policy (thermodynamic
 `K_c` from NASA7 by default); explicit reverse rate-constants are read where
 Cantera's format carries them.
