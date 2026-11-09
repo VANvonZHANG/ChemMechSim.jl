@@ -34,7 +34,8 @@ mass action).
 """
 struct ReactionMeta
     duplicate::Bool
-    orders::Dict{SpeciesID,Float64}   # non-mass-action reaction orders
+    orders::Dict{SpeciesID,Float64}   # per-species kinetic-order overrides (the YAML
+                                      # `kinetic-order` key); empty = pure stoichiometry
 end
 ReactionMeta(; duplicate::Bool=false,
                orders::Dict{SpeciesID,Float64}=Dict{SpeciesID,Float64}()) =
@@ -68,3 +69,31 @@ function ReactionData(; reactants::Dict{SpeciesID,Float64},
                         meta::ReactionMeta=ReactionMeta())
     ReactionData(reactants, products, kinetics, reverse_policy, meta)
 end
+
+"Per-species rate-law powers: `meta.orders` overrides the stoichiometric coefficient
+ per reactant, unlisted reactants keep ν. THE single source both the mass-action product
+ and the effective total order consume — `load_mechanism` validates orders keys ⊆
+ reactants; the belt-and-braces check below catches hand-built `ReactionData` that
+ bypassed it. Returns `rx.reactants` itself when no override exists (zero-cost,
+ bit-identical lowering for override-free mechanisms)."
+function rate_powers(rx::ReactionData)
+    orders = rx.meta.orders
+    isempty(orders) && return rx.reactants
+    powers = Dict{SpeciesID,Float64}()
+    for (sid, ν) in rx.reactants
+        powers[sid] = get(orders, sid, ν)
+    end
+    for sid in keys(orders)
+        haskey(powers, sid) ||
+            error("rate_powers: ReactionMeta.orders species $sid is not a reactant of the " *
+                  "reaction — per-species orders must reference reactants (load_mechanism " *
+                  "enforces this at parse time; hand-built ReactionData bypassed it).")
+    end
+    return powers
+end
+
+"Effective total reaction order = Σ per-species powers (`meta.orders` override, ν
+ default). By construction N can never disagree with the mass-action powers — there is
+ no way to state N directly (the scalar `kinetic-order` form was evaluated and rejected:
+ P3 grilling, 2026-11-09)."
+effective_order(rx::ReactionData) = sum(values(rate_powers(rx)))

@@ -102,16 +102,17 @@ direct_mtk_lowering(rx::ReactionData, mech::Mechanism, cvar, T, j::Int, ctx::Rat
     _direct_rate(rx.kinetics, rx, mech, cvar, T, j, ctx)
 
 "Elementary Arrhenius forward rate: k(T)·∏ reactants. k is a unit-bearing rate_param.
- Thin wrapper over `symbolic_kf` (DRY): rate = kf · mass_action(reactants)."
+ Thin wrapper over `symbolic_kf` (DRY): rate = kf · mass_action(rate_powers(rx)) — the
+ per-species powers honor ReactionMeta.orders (P3 `kinetic-order`), stoichiometry by default."
 _direct_rate(kin::ElementaryArrhenius, rx, mech, cvar, T, j, ctx::RateCtx) =
-    symbolic_kf(kin, ctx) * _mass_action(rx.reactants, cvar)
+    symbolic_kf(kin, ctx) * _mass_action(rate_powers(rx), cvar)
 
 "Third-body enhanced rate: k_base(T)·∏ reactants·[M]_eff. The third body is
  NOT a reactant — it enters via the efficiencies map. k_base carries a unit one order higher
  than the elementary base (the [M]_eff factor adds one concentration).
- Thin wrapper over `symbolic_kf` (DRY): rate = kf · mass_action(reactants)."
+ Thin wrapper over `symbolic_kf` (DRY): rate = kf · mass_action(rate_powers(rx))."
 _direct_rate(kin::ThirdBodyArrhenius, rx, mech, cvar, T, j, ctx::RateCtx) =
-    symbolic_kf(kin, ctx) * _mass_action(rx.reactants, cvar)
+    symbolic_kf(kin, ctx) * _mass_action(rate_powers(rx), cvar)
 
 "Troe falloff forward rate. k_blend = kinf·(Pr/(1+Pr))·F_Troe, with
  Pr = k0·[M]_eff/kinf (dimensionless). kinf carries the high-pressure (Σν-reactant) unit;
@@ -119,7 +120,7 @@ _direct_rate(kin::ThirdBodyArrhenius, rx, mech, cvar, T, j, ctx::RateCtx) =
  mtkCompile and the dimension check passes (Pr dimensionless)."
 function _direct_rate(kin::TroeFalloff, rx, mech, cvar, T, j, ctx::RateCtx)
     T === nothing && error("_direct_rate(TroeFalloff): falloff is T-dependent but no T parameter exists.")
-    return symbolic_kf(kin, ctx) * _mass_action(rx.reactants, cvar)
+    return symbolic_kf(kin, ctx) * _mass_action(rate_powers(rx), cvar)
 end
 
 "Lindemann falloff forward rate. F≡1 (no center broadening), so the rate is
@@ -127,7 +128,7 @@ end
  forward rate constant so ThermoReverse can compute kr = kf/Kc consistently."
 function _direct_rate(kin::LindemannFalloff, rx, mech, cvar, T, j, ctx::RateCtx)
     T === nothing && error("_direct_rate(LindemannFalloff): falloff is T-dependent but no T parameter exists.")
-    return symbolic_kf(kin, ctx) * _mass_action(rx.reactants, cvar)
+    return symbolic_kf(kin, ctx) * _mass_action(rate_powers(rx), cvar)
 end
 
 # Fallback for custom kinetics types: route through symbolic_rate (design §5 protocol),
@@ -252,11 +253,13 @@ function symbolic_kf(kin::AbstractKinetics, ctx)
     return body(kin)(vals..., ctx.T)
 end
 
-"Default full forward rate = symbolic_kf × mass-action(reactants). Laws with extra
+"Default full forward rate = symbolic_kf × mass-action(rate_powers(rx)). Laws with extra
  concentration-dependent factors (e.g. inhibition, [M]_eff beyond the rate constant)
- override this with an explicit method."
+ override this with an explicit method. Powers honor ReactionMeta.orders (P3
+ `kinetic-order`) — a custom law overriding this method owns its own powers (rate-side,
+ per the v3 rate/ledger boundary) but still finds the row's effective order on ctx.order."
 symbolic_rate(kin::AbstractKinetics, rx::ReactionData, ctx::RateCtx) =
-    symbolic_kf(kin, ctx) * _mass_action(rx.reactants, ctx.cvar)
+    symbolic_kf(kin, ctx) * _mass_action(rate_powers(rx), ctx.cvar)
 
 "Effective third-body concentration [M]_eff = Σ_i α_i·[X_i] over all species (default α=1).
  `M_eff = Σ α_i·c_i` depends on NOTHING but the composition and α, so the resolved α vector IS

@@ -71,7 +71,7 @@ function lower_to_mtk(mech::Mechanism; config::MechanismConfig=MechanismConfig()
     meff_cache = Dict{Vector{Float64},Any}()
     rates = [lower_reaction(rx, mech, cvar, Tparam, config, j,
                 RateCtx(mech, cvar, Tparam, j,
-                        sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache, Pvar,
+                        effective_order(rx), tcx.R, tcx.P_std, tcx.coeff_cache, Pvar,
                         meff_eqs, meff_cache))
              for (j, rx) in enumerate(mech.reactions)]
     eqs = [D(cvars[i]) ~ _species_rhs(mech.species[i].id, mech, rates)
@@ -167,7 +167,7 @@ function _lower_constP(mech::Mechanism, config::MechanismConfig, checks::Bool=tr
     meff_cache = Dict{Vector{Float64},Any}()   # shared across this lowering (see _meff)
     rates  = [lower_reaction(rx, mech, cvar, Tsym, config, j,
                  RateCtx(mech, cvar, Tsym, j,
-                         sum(values(rx.reactants)), tcx.R, tcx.P_std, tcx.coeff_cache, Pparam,
+                         effective_order(rx), tcx.R, tcx.P_std, tcx.coeff_cache, Pparam,
                          meff_eqs, meff_cache))
               for (j, rx) in enumerate(mech.reactions)]
     eqs = Equation[D(nvars[i]) ~ Vvar * _species_rhs(mech.species[i].id, mech, rates)

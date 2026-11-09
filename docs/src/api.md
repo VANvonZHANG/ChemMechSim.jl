@@ -17,6 +17,8 @@ molecular_weight
 SpeciesData
 ReactionData
 ReactionMeta
+rate_powers
+effective_order
 ReverseRatePolicy
 Irreversible
 ExplicitReverse

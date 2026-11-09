@@ -84,6 +84,50 @@ with negative product stoichiometry must be **irreversible** (`=>`) — a revers
 rate is mass-action over the forward products, and a negative exponent would
 divide by a concentration.
 
+## Per-species kinetic-order overrides
+
+A reaction row may carry a **per-species reaction order** mapping that overrides
+the stoichiometric exponent in the rate law — mass action over `rate_powers`
+instead of `ν`:
+
+```yaml
+- equation: XO2 + NO => NO2 + XO            # WRF-peroxy: forward order 2 on XO2 alone
+  rate-constant: {A: 2.7e-12, b: 0.0, Ea: 0.0}
+  kinetic-order: {XO2: 2.0}
+```
+
+The mapping form is the **only** form: the effective total order `N` is always
+the per-species sum (override where given, stoichiometric `ν` for the rest) and
+is **never stated directly**. `N` and the mass-action powers cannot disagree by
+construction. Semantics:
+
+- **Rate law only** — the ledger (stoichiometric ODE terms, `K_c`, energy) keeps
+  `ν`; a species with override `0` leaves the rate law but stays in the ledger
+  (legal zero-order kinetics).
+- The A-factor unit conversion consumes `N` (a `conc^(N-1)·s⁻¹` rate constant),
+  so `A` converts consistently with the overridden rate law.
+- Rows without the key lower **bit-identically** to before — `rate_powers`
+  returns the reactants map itself when no override exists.
+
+Restrictions, all loud `load_mechanism` errors (no silent mis-lowering):
+
+| Rule | Reason |
+|---|---|
+| mapping only — a scalar `kinetic-order: 2` is rejected | `N` is derived, never stated |
+| keys must be **reactants** of the row | products/unknown species have no exponent to override |
+| values finite and ≥ 0 | negative powers would divide by a concentration |
+| not on `three-body` / `falloff` rows | the `[M]_eff` factor is not a per-species power |
+| not on reversible (`<=>`) rows | the thermodynamic reverse `k_f/K_c` needs mass-action stoichiometry — one `k_f` cannot carry the two units `conc^(1-N)·s⁻¹` (forward) and `conc^(1-Σν)·s⁻¹` (reverse) |
+
+The last row is the one subtlety: with `N ≠ Σν`, a thermodynamic reverse is
+unit-inconsistent, so `<=>` + `kinetic-order` is rejected; use an irreversible
+row (`=>`) or a programmatic `ExplicitReverse` policy (its `k_r` is independent).
+
+Programmatic side: overrides live on `ReactionMeta.orders`; `rate_powers(rx)`
+returns the per-species powers and `effective_order(rx)` their sum — the single
+source the lowering consumes. Custom rate-law handlers receive the precomputed
+order on the parse context (`convert_afactor(A, ctx)` reads `ctx.effective_order`).
+
 ## Unsupported rate types — extend, don't fork
 
 Reactions whose `type` has no parser are **skipped with one aggregated warning**

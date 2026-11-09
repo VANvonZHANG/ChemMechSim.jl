@@ -94,7 +94,14 @@ struct _UnitCtx
     length_m::Float64        # length unit in meters (cm→0.01, m→1.0)
     ea_J_per_mol::Float64    # activation-energy factor to J/mol (cal/mol→4.184, J/mol→1.0, K→8.314)
     amount_per_mol::Float64  # declared amount units per mole (mol→1.0, kmol→1e-3, molec→N_A)
+    effective_order::Float64 # per-row effective total order (Σ kinetic-order overrides, ν
+                             # default) — set by _build_reaction before each parser/handler
+                             # dispatch, so nobody downstream recomputes it by hand
 end
+
+# 3-arg convenience: file-level callers (the units block) keep working, order unset (0.0).
+_UnitCtx(length_m::Float64, ea_J_per_mol::Float64, amount_per_mol::Float64) =
+    _UnitCtx(length_m, ea_J_per_mol, amount_per_mol, 0.0)
 
 # 2-arg convenience: callers that only care about length/Ea keep working, amount defaults to mol.
 _UnitCtx(length_m::Float64, ea_J_per_mol::Float64) = _UnitCtx(length_m, ea_J_per_mol, 1.0)
@@ -136,6 +143,14 @@ _a_factor(ctx::_UnitCtx, order::Real) =
  Handler-facing: for use inside rate_type_handlers callbacks, where the ctx is passed
  opaquely."
 convert_afactor(A::Real, ctx, order::Real) = A * _a_factor(ctx, order)
+
+"Convert a raw YAML A-factor using the ctx's precomputed effective order.
+ `load_mechanism` sets `ctx.effective_order` per row (Σ of the `kinetic-order` overrides,
+ ν default) before any parser or handler runs, so handlers stop hand-computing the
+ order — the historically omitted-conversion bug class lived exactly there. Equivalent to
+ `convert_afactor(A, ctx, ctx.effective_order)`; the 3-arg form remains for handlers
+ that genuinely need an explicit order."
+convert_afactor(A::Real, ctx) = A * _a_factor(ctx, ctx.effective_order)
 
 "Handler-facing: activation energy from the file's declared unit to J/mol
  (K→8.314, cal/mol→4.184, J/mol→1.0)."
@@ -277,12 +292,14 @@ end
 # built-ins. Nothing here knows about any specific non-Cantera dialect.
 
 function _parse_elementary_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
-    order = sum(values(reactants))
-    return _arrhenius_from_rc(rxn_dict["rate-constant"], ctx, order)
+    # ctx.effective_order: precomputed by _build_reaction (Σ kinetic-order overrides, ν
+    # default) — the ONE order source; identical to sum(values(reactants)) when the row
+    # carries no `kinetic-order` key.
+    return _arrhenius_from_rc(rxn_dict["rate-constant"], ctx, ctx.effective_order)
 end
 
 function _parse_three_body_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
-    order = sum(values(reactants)) + 1                  # +1 for [M]
+    order = ctx.effective_order + 1                     # +1 for [M]
     base = _arrhenius_from_rc(rxn_dict["rate-constant"], ctx, order)
     # `default-efficiency`: efficiency of unlisted third bodies (Cantera semantics; the
     # converter emits 0.0 on catalyst-preservation rows). Key absent → 1.0 → the
@@ -293,7 +310,7 @@ function _parse_three_body_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
 end
 
 function _parse_falloff_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
-    base_order = sum(values(reactants))                 # excludes (+M)
+    base_order = ctx.effective_order                    # excludes (+M)
     high_rate = _arrhenius_from_rc(rxn_dict["high-P-rate-constant"], ctx, base_order)
     low_rate  = _arrhenius_from_rc(rxn_dict["low-P-rate-constant"],  ctx, base_order + 1)
     # `default-efficiency`: efficiency of unlisted third bodies (Cantera semantics; the
@@ -316,7 +333,7 @@ function _parse_falloff_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
 end
 
 function _parse_plog_rc(rxn_dict, reactants, name_to_id, ctx::_UnitCtx)
-    order = sum(values(reactants))
+    order = ctx.effective_order
     pts = PlogPoint[]
     for rc in rxn_dict["rate-constants"]
         P_Pa = _parse_pressure(rc["P"], ctx)
@@ -342,6 +359,45 @@ const DEFAULT_RATE_PARSERS = Dict{String,Function}(
     "pressure-dependent-Arrhenius" => _parse_plog_rc,
 )
 
+"Parse the row-level `kinetic-order` override (P3): a species→apparent-order mapping.
+ Only the mapping form exists — the effective total order is ALWAYS the per-species sum
+ (override where given, stoichiometric ν otherwise), never stated directly, so N and the
+ mass-action powers cannot disagree by construction. All failures are loud
+ `load_mechanism:` errors: unsupported on `three-body`/`falloff` rows (the [M]_eff
+ factor is not a per-species power), keys must name reactants of the row, values must
+ be finite and ≥ 0 (a negative power would divide by a concentration; 0 is legal
+ zero-order kinetics — the species leaves the rate law but stays in the ledger).
+ An empty mapping is treated as no key."
+function _parse_kinetic_order(rxn_dict, rtype::AbstractString,
+                              reactants::Dict{SpeciesID,Float64},
+                              name_to_id::Dict{String,SpeciesID})
+    ko = get(rxn_dict, "kinetic-order", nothing)
+    ko === nothing && return Dict{SpeciesID,Float64}()
+    eq = String(rxn_dict["equation"])
+    (rtype == "three-body" || rtype == "falloff") &&
+        error("load_mechanism: kinetic-order is not supported on $rtype rows — the " *
+              "third-body [M]_eff factor is not a per-species power. Row: \"$eq\".")
+    ko isa AbstractDict ||
+        error("load_mechanism: kinetic-order must be a species→order mapping (e.g. " *
+              "{ICNOO: 1.0}); the effective total order is the per-species sum and is " *
+              "never stated directly. Got: $ko. Row: \"$eq\".")
+    out = Dict{SpeciesID,Float64}()
+    for (name, ν) in ko
+        sname = String(name)
+        haskey(name_to_id, sname) ||
+            error("load_mechanism: kinetic-order references unknown species \"$sname\". Row: \"$eq\".")
+        sid = name_to_id[sname]
+        haskey(reactants, sid) ||
+            error("load_mechanism: kinetic-order species \"$sname\" is not a reactant of \"$eq\".")
+        ν isa Real && isfinite(ν) && ν >= 0 ||
+            error("load_mechanism: kinetic-order for \"$sname\" must be a finite number " *
+                  "≥ 0 (a negative power would divide by a concentration; 0 is legal " *
+                  "zero-order kinetics). Got: $ν. Row: \"$eq\".")
+        out[sid] = Float64(ν)
+    end
+    return out
+end
+
 "Parse one reaction dict into ReactionData, dispatching the YAML `type` string through
  `parsers`. Returns `nothing` for a type with no parser — the caller counts and
  aggregates the skip into one warning."
@@ -354,12 +410,30 @@ function _build_reaction(rxn_dict, parsers::Dict{String,Function},
     rtype = get(rxn_dict, "type", "elementary")
     parser = get(parsers, rtype, nothing)
     parser === nothing && return nothing
-    kin = parser(rxn_dict, reactants, name_to_id, ctx)
+    orders = _parse_kinetic_order(rxn_dict, rtype, reactants, name_to_id)
+    # Reversible rows reject overrides: the thermodynamic reverse (kf/K_c) requires
+    # mass-action stoichiometry — with N_eff ≠ Σν one kf would need two different units
+    # (conc^(1-N_eff)·s⁻¹ forward vs conc^(1-Σν)·s⁻¹ reverse), which the symbolic unit
+    # check rejects. P3 grilling amendment, 2026-11-09.
+    if !isempty(orders) && parsed.reversible
+        error("load_mechanism: `kinetic-order` on a reversible (`<=>`) row is not supported — " *
+              "the thermodynamic reverse rate (kf/K_c) requires mass-action stoichiometry " *
+              "(one kf cannot carry both branch units). Use an irreversible row (`=>`) or " *
+              "remove the override. Equation: $eq")
+    end
+    # Per-row ctx: the effective order (Σ overrides, ν default) rides the ctx so built-in
+    # parsers and custom handlers consume ONE order source (see `convert_afactor(A, ctx)`).
+    # When no override exists this is bitwise the former sum(values(reactants)).
+    # init=0.0: an empty reactants side (source term `=> A`) is order 0 — the bare sum
+    # would throw on the empty collection (source rows never reached this sum before).
+    eff_order = sum(get(orders, sid, ν) for (sid, ν) in reactants; init=0.0)
+    rowctx = _UnitCtx(ctx.length_m, ctx.ea_J_per_mol, ctx.amount_per_mol, eff_order)
+    kin = parser(rxn_dict, reactants, name_to_id, rowctx)
 
     # reversibility: <=> → ThermoReverse (default); => → Irreversible
     reverse_policy = parsed.reversible ? ThermoReverse() : Irreversible()
     duplicate = Bool(get(rxn_dict, "duplicate", false))
-    meta = ReactionMeta(duplicate=duplicate)
+    meta = ReactionMeta(duplicate=duplicate, orders=orders)
     return ReactionData(reactants=reactants, products=products,
                         kinetics=kin, reverse_policy=reverse_policy, meta=meta)
 end
