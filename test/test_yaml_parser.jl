@@ -1,6 +1,7 @@
 using Test
 using ModelingToolkit
 using ChemMechSim
+using OrdinaryDiffEq: ReturnCode
 
 @testset "Phase 5a T1: molecular_weight from composition" begin
     @test molecular_weight(Dict("H"=>2)) ≈ 0.002016  atol=1e-6          # H2
@@ -451,6 +452,165 @@ end
     r = ChemMechSim._parse_equation("O1D_CB4 + N2 = O + O2 + N2")
     @test r.reactants == Dict("O1D_CB4"=>1.0, "N2"=>1.0)
     @test r.products == Dict("O"=>1.0, "O2"=>1.0, "N2"=>1.0)
+end
+
+# —— kinetic-order override (P3, 2026-11-09) ————————————————————————————————————
+# Row-level apparent-order override, MAPPING form only: the effective total order is
+# ALWAYS the per-species sum (override where given, stoichiometric ν otherwise) — there
+# is deliberately NO scalar form (P3 grilling decision), so N and the mass-action powers
+# cannot disagree by construction. Rate-law only: powers, A-factor conversion and the
+# k-param unit derivation all consume the same per-species powers; the ODE net
+# stoichiometry (and Δν for K_c / energy) stays stoichiometric — the zero-order test
+# below asserts both halves (rate law linear, ledger still consuming A).
+
+_p3_yaml(reactions_block) = """
+units: {length: cm, quantity: molec, activation-energy: K}
+phases:
+  - name: gas
+    thermo: ideal-gas
+    species: [A, B, C]
+    reactions: all
+species:
+  - name: A
+    composition: {Ar: 1}
+    thermo: {model: constant-cp, h0: 0, s0: 0, cp0: 0}
+  - name: B
+    composition: {Ar: 1}
+    thermo: {model: constant-cp, h0: 0, s0: 0, cp0: 0}
+  - name: C
+    composition: {Ar: 1}
+    thermo: {model: constant-cp, h0: 0, s0: 0, cp0: 0}
+reactions:
+$reactions_block
+"""
+
+@testset "P3: kinetic-order mapping — orders, effective order, A-factor" begin
+    sid(mech, name) = first(sp.id for sp in mech.species if sp.name == name)
+
+    # partial override: the 0.67 LEDGER coefficient decouples from the 1.0 POWER.
+    # Effective N = 1.0 (A) + 1.0 (B, unlisted → ν) = 2.0 — never stated directly.
+    path = tempname() * ".yaml"
+    write(path, _p3_yaml(
+        "  - {equation: \"0.67 A + B => 0.67 A + C\", " *
+        "rate-constant: {A: 1.0e-12, b: 0.0, Ea: 0.0}, kinetic-order: {A: 1.0}}\n"))
+    mech = load_mechanism(path)
+    rx = mech.reactions[1]
+    @test rx.meta.orders == Dict(sid(mech, "A") => 1.0)
+    @test ChemMechSim.rate_powers(rx) ==
+        Dict(sid(mech, "A") => 1.0, sid(mech, "B") => 1.0)
+    @test ChemMechSim.effective_order(rx) == 2.0
+    @test rx.reactants[sid(mech, "A")] == 0.67                  # ledger untouched
+    # A-factor conversion consumed N=2 (cm³ molec → m³ mol): 1e-6 · N_A
+    @test rx.kinetics.A ≈ 1.0e-12 * 1e-6 * _NA  rtol=1e-9
+
+    # peroxy shape: monomolecular equation, sole reactant carries the full order 2
+    path2 = tempname() * ".yaml"
+    write(path2, _p3_yaml(
+        "  - {equation: \"A => B + C\", rate-constant: {A: 1.0e-12, b: 0.0, Ea: 0.0}, " *
+        "kinetic-order: {A: 2.0}}\n"))
+    mech2 = load_mechanism(path2)
+    @test ChemMechSim.effective_order(mech2.reactions[1]) == 2.0
+    @test mech2.reactions[1].kinetics.A ≈ 1.0e-12 * 1e-6 * _NA  rtol=1e-9
+    # control: identical row WITHOUT the key → N=1 → A unchanged
+    path3 = tempname() * ".yaml"
+    write(path3, _p3_yaml(
+        "  - {equation: \"A => B + C\", rate-constant: {A: 1.0e-12, b: 0.0, Ea: 0.0}}\n"))
+    mech3 = load_mechanism(path3)
+    @test isempty(mech3.reactions[1].meta.orders)
+    @test ChemMechSim.effective_order(mech3.reactions[1]) == 1.0
+    @test mech3.reactions[1].kinetics.A ≈ 1.0e-12  rtol=1e-12
+
+    # empty mapping {} is treated as no key
+    path4 = tempname() * ".yaml"
+    write(path4, _p3_yaml(
+        "  - {equation: \"0.67 A + B => 0.67 A + C\", " *
+        "rate-constant: {A: 1.0e-12, b: 0.0, Ea: 0.0}, kinetic-order: {}}\n"))
+    mech4 = load_mechanism(path4)
+    @test isempty(mech4.reactions[1].meta.orders)
+    @test ChemMechSim.effective_order(mech4.reactions[1]) == 0.67 + 1.0
+
+    # ctx-ridden 2-arg convert_afactor: same as 3-arg with ctx.effective_order
+    ctx = ChemMechSim._UnitCtx(0.01, 8.314, 1234.0, 2.5)
+    @test convert_afactor(7.0e-11, ctx) == convert_afactor(7.0e-11, ctx, 2.5)
+end
+
+@testset "P3: zero order — species leaves the rate law, stays in the ledger" begin
+    # SI units (no units block) → A unchanged; k = 2.0 constant; rate = 2·[A]^0 ≡ 2.
+    # Zero-order kinetics: A decays LINEARLY (3 - 2t), not exponentially; B grows 2t.
+    path = tempname() * ".yaml"
+    write(path, _p1_yaml(
+        "  - {equation: \"A => B\", rate-constant: {A: 2.0, b: 0.0, Ea: 0.0}, " *
+        "kinetic-order: {A: 0.0}}\n"))
+    mech = load_mechanism(path)
+    r = BatchReactor(mech)
+    sol = simulate(r, (0.0, 1.2); u0 = Dict("A" => 3.0, "B" => 0.0, "C" => 0.0),
+                   reltol = 1e-10, abstol = 1e-10)
+    iA = findfirst(s -> String(ModelingToolkit.getname(s)) == "A", unknowns(extract_system(r)))
+    iB = findfirst(s -> String(ModelingToolkit.getname(s)) == "B", unknowns(extract_system(r)))
+    @test sol.u[end][iA] ≈ 3.0 - 2.0 * 1.2  atol = 1e-6     # linear, not exp
+    @test sol.u[end][iB] ≈ 2.0 * 1.2        atol = 1e-6
+end
+
+@testset "P3: validation — loud errors" begin
+    loadk(block) = (p = tempname() * ".yaml"; write(p, _p3_yaml(block));
+                    load_mechanism(p))
+    # scalar form rejected: N is always the per-species sum, never stated directly
+    err = try loadk("  - {equation: \"A => B\", rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}, " *
+                    "kinetic-order: 2}\n"); nothing
+        catch e; e end
+    @test err !== nothing && occursin("never stated directly", sprint(showerror, err))
+    # key must be a reactant (C is a product here)
+    @test_throws ErrorException loadk(
+        "  - {equation: \"A + B => C\", rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}, " *
+        "kinetic-order: {C: 1.0}}\n")
+    # unknown species key
+    @test_throws ErrorException loadk(
+        "  - {equation: \"A => B\", rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}, " *
+        "kinetic-order: {ZZ: 1.0}}\n")
+    # negative value (a negative power would divide by a concentration)
+    @test_throws ErrorException loadk(
+        "  - {equation: \"A + B => C\", rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}, " *
+        "kinetic-order: {A: -0.5}}\n")
+    # enhanced rows: [M]_eff is not a per-species power
+    @test_throws ErrorException loadk(
+        "  - {equation: \"A + B + M => C + M\", type: three-body, " *
+        "rate-constant: {A: 1.0e-30, b: -1.0, Ea: 0.0}, kinetic-order: {A: 1.0}}\n")
+    @test_throws ErrorException loadk(
+        "  - {equation: \"A + B (+M) => C (+M)\", type: falloff, " *
+        "high-P-rate-constant: {A: 1.0e-10, b: 0.0, Ea: 0.0}, " *
+        "low-P-rate-constant: {A: 1.0e-30, b: -1.0, Ea: 0.0}, kinetic-order: {A: 1.0}}\n")
+end
+
+@testset "P3: reversible rows reject kinetic-order (thermodynamic reverse needs mass-action)" begin
+    # parse-time: <=> + kinetic-order → loud error. With N_eff ≠ Σν one kf would need
+    # two different units (conc^(1-N_eff)·s⁻¹ forward vs conc^(1-Σν)·s⁻¹ reverse) — the
+    # symbolic unit check rejects exactly this. P3 grilling amendment, 2026-11-09.
+    path = tempname() * ".yaml"
+    write(path, _p3_yaml(
+        "  - {equation: \"A + B <=> C\", rate-constant: {A: 1.0e-12, b: 0.0, Ea: 0.0}, " *
+        "kinetic-order: {A: 0.5}}\n"))
+    @test_throws ErrorException load_mechanism(path)
+
+    # programmatic bypass guard: hand-built ThermoReverse + orders fails loudly at
+    # lowering with the reason, not as a cryptic unit-check failure
+    gri = load_mechanism(joinpath(@__DIR__, "..", "examples", "mechanism", "gri30.yaml"))
+    j = findfirst(rx -> rx.reverse_policy isa ThermoReverse &&
+                        rx.kinetics isa ElementaryArrhenius, gri.reactions)
+    rx = gri.reactions[j]
+    rxo = ReactionData(reactants = rx.reactants, products = rx.products,
+                       kinetics = rx.kinetics, reverse_policy = rx.reverse_policy,
+                       meta = ReactionMeta(orders = Dict(first(keys(rx.reactants)) => 0.5)))
+    mecho = Mechanism(species = gri.species,
+                      reactions = [i == j ? rxo : rx for (i, rx) in enumerate(gri.reactions)],
+                      thermo = gri.thermo, elements = gri.elements)
+    @test_throws ErrorException BatchReactor(mecho)
+end
+
+@testset "P3: fixtures carry no kinetic-order key (zero-drift nail)" begin
+    for f in ("gri30.yaml", "h2o2.yaml", "FFCM2.yaml", "AramcoMech3.0.yaml")
+        txt = read(joinpath(@__DIR__, "..", "examples", "mechanism", f), String)
+        @test !occursin("kinetic-order", txt)
+    end
 end
 
 # —— negative product stoichiometry (NCAR MM X*OO ensemble-bookkeeping dialect) ———————

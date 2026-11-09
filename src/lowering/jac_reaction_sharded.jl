@@ -317,10 +317,10 @@ function _reaction_rate_expr_with_meff(rx::ReactionData, mech::Mechanism, sys,
     T = haskey(state_by_name, "T") ? state_by_name["T"] : _optional_T_parameter_symbol(sys)
     tcx = make_thermo_ctx(T)
     meff_eqs = Any[]
-    ctx = RateCtx(mech, cvar, T, j, sum(values(rx.reactants)),
+    ctx = RateCtx(mech, cvar, T, j, effective_order(rx),
                   tcx.R, tcx.P_std, tcx.coeff_cache, P, meff_eqs)
     rate_expr = rx.reverse_policy isa Irreversible ?
-        symbolic_kf(rx.kinetics, ctx) * _mass_action(rx.reactants, cvar) :
+        symbolic_kf(rx.kinetics, ctx) * _mass_action(rate_powers(rx), cvar) :
         _net_rate(rx, mech, cvar, T, j, ctx)
     if isempty(meff_eqs)
         return (rate_expr, nothing, nothing)
@@ -344,10 +344,10 @@ function _reaction_rate_expr(rx::ReactionData, mech::Mechanism, sys,
     T = haskey(state_by_name, "T") ? state_by_name["T"] : _optional_T_parameter_symbol(sys)
     tcx = make_thermo_ctx(T)
     meff_eqs = Any[]
-    ctx = RateCtx(mech, cvar, T, j, sum(values(rx.reactants)),
+    ctx = RateCtx(mech, cvar, T, j, effective_order(rx),
                   tcx.R, tcx.P_std, tcx.coeff_cache, P, meff_eqs)
     rate_expr = rx.reverse_policy isa Irreversible ?
-        _reaction_sharded_symbolic_kf(rx.kinetics, ctx) * _mass_action(rx.reactants, cvar) :
+        _reaction_sharded_symbolic_kf(rx.kinetics, ctx) * _mass_action(rate_powers(rx), cvar) :
         _net_rate(rx, mech, cvar, T, j, ctx)
     # Falloff forward rates (symbolic_kf) introduce M_eff_j(t) algebraic variables via _meff.
     # The sharded path runs no MTK tearing to eliminate them, so inline each M_eff_j → its

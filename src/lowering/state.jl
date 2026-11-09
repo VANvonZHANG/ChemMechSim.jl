@@ -15,7 +15,8 @@ struct RateCtx
     cvar::Dict{SpeciesID,Any}               # species concentration symbols
     T::Any                                  # temperature symbol (Num) or nothing
     j::Int                                  # reaction index — unique param naming
-    order::Real                             # Σ reactant stoich — k unit derivation
+    order::Real                             # effective order (Σ kinetic-order overrides,
+                                            # ν default) — k unit derivation
     R::Any                                  # shared R_gas param
     P_std::Any                              # shared P° param
     coeff_cache::Dict{Int,Any}              # per-species NASA coeff cache (ThermoCtx shares this Dict)

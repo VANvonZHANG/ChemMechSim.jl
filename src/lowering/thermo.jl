@@ -94,7 +94,7 @@ function _net_rate(rx::ReactionData, mech, cvar, T, j, ctx)
     end
     if policy isa ThermoReverse
         kf = symbolic_kf(rx.kinetics, ctx)
-        fwd = kf * _mass_action(rx.reactants, cvar)
+        fwd = kf * _mass_action(rate_powers(rx), cvar)   # kinetic-order overrides honored forward-only
         return fwd - _reverse_rate(policy, rx, mech, cvar, T, kf, ctx)
     end
     error("_net_rate: unsupported policy $(typeof(policy))")
@@ -117,6 +117,13 @@ end
 
 function _reverse_rate(::ThermoReverse, rx, mech, cvar, T, kf, ctx)
     _assert_nonneg_products_for_reverse(rx)
+    # Overrides on a thermo-reversed row are rejected at parse time; this guard catches
+    # hand-built ReactionData that bypassed it, with a reason instead of the cryptic
+    # unit-check failure it would otherwise produce.
+    isempty(rx.meta.orders) ||
+        error("_reverse_rate(ThermoReverse): kinetic-order overrides on a thermo-reversed " *
+              "reaction are unsupported (one kf cannot carry both branch units); " *
+              "load_mechanism rejects this at parse time — hand-built ReactionData bypassed it.")
     T === nothing &&
         error("_reverse_rate(ThermoReverse): K_c(T) needs a T parameter, but none exists.")
     id = (KEQ_NEXT_ID[] += 1)

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Per-species kinetic-order overrides (`kinetic-order: {SP: val}`) on reaction
+  rows: the rate law becomes mass-action over the overrides (unlisted reactants
+  keep `ν`) while the ledger keeps stoichiometry. The mapping form is the only
+  form — the effective total order is always the per-species sum, never stated
+  directly (a scalar form is a loud error). `override: 0` is legal zero-order
+  kinetics (the species leaves the rate law but stays in the ledger), and the
+  A-factor conversion consumes the effective order (`convert_afactor(A, ctx)`
+  2-arg form). Storage: `ReactionMeta.orders`, consumed through the new data
+  helpers `rate_powers(rx)` / `effective_order(rx)` — rows without the key
+  `rate_powers` returns `rx.reactants` itself, so override-free mechanisms lower
+  through exactly the same expressions (verified: parsed constants bit-identical
+  on gri30/h2o2, RHS numerically equal to same-source environment noise). Loud
+  `load_mechanism` errors: scalar form, non-reactant/unknown keys, negative or
+  non-finite values, `three-body`/`falloff` rows, and reversible (`<=>`) rows — with
+  `N ≠ Σν` one `k_f` cannot carry the two units the forward
+  (`conc^(1-N)·s⁻¹`) and thermodynamic-reverse (`conc^(1-Σν)·s⁻¹`) branches
+  demand; hand-built `ReactionData` bypassing the parse-time guard fails loudly
+  at lowering with the same reason.
+
 ## [1.4.0] - 2026-11-07
 
 ### Added
