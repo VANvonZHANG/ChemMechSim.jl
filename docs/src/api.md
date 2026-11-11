@@ -17,8 +17,8 @@ molecular_weight
 SpeciesData
 ReactionData
 ReactionMeta
-rate_powers
-effective_order
+ChemMechSim.rate_powers
+ChemMechSim.effective_order
 ReverseRatePolicy
 Irreversible
 ExplicitReverse
