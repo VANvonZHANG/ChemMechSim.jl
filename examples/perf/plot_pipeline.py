@@ -1,129 +1,93 @@
 #!/usr/bin/env python3
-"""Pipeline-cost decomposition figure, two panels, no log scale.
+"""Plot pipeline stage times and the composition of model build time.
 
-Reads output/bench_pipeline.csv (from bench_pipeline_stages.jl):
-  (a) stacked horizontal bars, linear scale with a BROKEN x axis (0–52 s and
-      190–260 s) so GRI-Mech 3.0 (~13 s) and FFCM 2.0 (~40 s) keep real width
-      next to Aramco 3.0 (~249 s; post PLOG-runtime-fix medians); segments: build/JIT/warm;
-  (b) build breakdown only, linear scale (0–60 s): each mechanism's build bar
-      split into parse / lowering / build_problem.
-
-Usage: python3 examples/perf/plot_pipeline.py [--out-dir examples/perf/output]
+Reads bench_pipeline.csv and writes fig_pipeline.{svg,pdf,png} in --out-dir.
 """
-import argparse, os
-import numpy as np
-import pandas as pd
-import matplotlib as mpl
+import argparse
+from pathlib import Path
+
 import matplotlib.pyplot as plt
+from matplotlib.ticker import LogLocator, NullFormatter
+import numpy as np
+import csv
 
-OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
-mpl.rcParams.update({
-    "font.family": "sans-serif", "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans", "sans-serif"],
-    "svg.fonttype": "none", "pdf.fonttype": 42, "font.size": 7,
-    "axes.linewidth": 0.6, "axes.spines.right": False, "axes.spines.top": False,
-    "legend.frameon": False,
-})
-
+OUT_DIR = Path(__file__).resolve().parent / "output"
 MECH_LABEL = {"gri30": "GRI-Mech 3.0", "ffcm2": "FFCM 2.0", "aramco": "Aramco 3.0"}
-A_COLORS = {"build": "#4393c3", "jit_compile": "#b2182b", "warm": "#1b7837"}
-A_LABELS = {"build": "build (total)", "jit_compile": "JIT compile", "warm": "warm integrate"}
-B_STAGES = ("parse", "lower", "build_problem")
-B_COLORS = {"parse": "#d1e5f0", "lower": "#92c5de", "build_problem": "#2166ac"}
-B_LABELS = {"parse": "parse", "lower": "lowering + mtkcompile", "build_problem": "build_problem (codegen)"}
-
-
-def stacked_barh(ax, df, stages, colors, labels, height=0.5):
-    y = np.arange(len(df))
-    left = np.zeros(len(df))
-    for stage in stages:
-        vals = df[f"{stage}_s"].values
-        ax.barh(y, vals, left=left, height=height, color=colors[stage],
-                label=labels[stage], edgecolor="white", linewidth=0.3)
-        left += vals
-    ax.invert_yaxis()
-    return y, left
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--out-dir", default=OUT_DIR)
-    args = ap.parse_args()
-    d = args.out_dir
-    csv = os.path.join(d, "bench_pipeline.csv")
-    if not os.path.exists(csv):
-        raise SystemExit(f"no {csv} — run bench_pipeline_stages.jl first")
-    df = pd.read_csv(csv).sort_values("n_states")
-    mechs = df["mech"].tolist()
-    ylabels = [f"{MECH_LABEL[m]}\n({r} sp)" for m, r in zip(mechs, df["n_species"])]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--out-dir", type=Path, default=OUT_DIR)
+    directory = parser.parse_args().out_dir
+    with (directory / "bench_pipeline.csv").open(newline="") as source:
+        rows = sorted(csv.DictReader(source), key=lambda row: int(row["n_states"]))
+    plt.rcParams.update({
+        "font.family": "sans-serif", "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
+        "font.size": 7, "axes.linewidth": 0.6, "axes.spines.right": False,
+        "axes.spines.top": False, "axes.spines.left": False, "legend.frameon": False,
+        "pdf.fonttype": 42, "svg.fonttype": "none",
+    })
+    fig, (time, build) = plt.subplots(
+        1, 2, sharey=True, figsize=(183 / 25.4, 65 / 25.4),
+        gridspec_kw={"width_ratios": [1.5, 1]},
+    )
+    fig.subplots_adjust(left=0.135, right=0.98, bottom=0.20, top=0.72, wspace=0.14)
+    y = np.arange(len(rows))
+    time.set_yticks(y, [f"{MECH_LABEL[row['mech']]}\n{row['n_species']} species"
+                        for row in rows])
+    time.set_ylim(len(rows) - 0.54, -0.54)
+    time.set_xscale("log")
+    stages = [
+        ("warm_s", "Warm solve", "#64707b", "o", -0.20),
+        ("build_s", "Build", "#447598", "s", 0),
+        ("jit_compile_s", "JIT estimate", "#a1532d", "D", 0.20),
+    ]
+    values = np.array([[float(row[column]) for row in rows] for column, *_ in stages])
+    if not np.isfinite(values).all() or (values <= 0).any():
+        raise ValueError("The logarithmic time axis requires finite, positive stage times")
+    time.set_xlim(values.min() / 1.5, values.max() * 3.2)
+    time.xaxis.set_major_locator(LogLocator(base=10, numticks=8))
+    time.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, pos: f"{x:g}"))
+    time.xaxis.set_minor_formatter(NullFormatter())
+    time.grid(axis="x", which="major", color="#dddddd", linewidth=0.5)
+    time.set_axisbelow(True)
+    for stage_values, (_, label, color, marker, offset) in zip(values, stages):
+        time.plot(stage_values, y + offset, linestyle="none", marker=marker,
+                  markersize=4, color=color, label=label)
+        for value, row in zip(stage_values, y + offset):
+            time.annotate(f"{value:.2f}", (value, row), xytext=(5, 0),
+                          textcoords="offset points", va="center", fontsize=6.5)
+    time.set_xlabel("Elapsed time (s, log scale)")
 
-    fig, (ax1, ax2, axb) = plt.subplots(
-        1, 3, figsize=(6.6, 2.5), sharey=True,
-        gridspec_kw={"width_ratios": [2.6, 1.1, 2.2], "wspace": 0.06})
-
-    # ---- (a) broken-axis stacked bars: same bars drawn on both axes ----
-    y, totals = stacked_barh(ax1, df, ("build", "jit_compile", "warm"), A_COLORS, A_LABELS)
-    stacked_barh(ax2, df, ("build", "jit_compile", "warm"), A_COLORS, A_LABELS)
-    ax1.set_xlim(0, 52)    # GRI (~13 s) and FFCM (~40 s) live fully here
-    ax2.set_xlim(190, 260)  # Aramco JIT tail + warm (~249 s total)
-    ax1.set_title("(a) stacked, linear", loc="left", fontsize=7)
-    ax1.set_xlabel("time (s)", fontsize=6)
-
-    jit = df["jit_compile_s"].values
-    # JIT labels: on the left range where the segment lives inside it
-    for i in range(len(df)):
-        c = totals[i] - jit[i] / 2
-        if 4 < c < 48 and jit[i] > 8:
-            ax1.text(c, y[i], f"{jit[i]:.0f}s", ha="center", va="center",
-                     fontsize=5, color="white", fontweight="bold")
-    # Aramco's JIT tail + total end live on the right range
-    for i in range(len(df)):
-        if totals[i] > 190:  # only Aramco crosses into the right range
-            ax2.text((190 + totals[i] - df["warm_s"].values[i]) / 2, y[i],
-                     f"{jit[i]:.0f}s", ha="center", va="center",
-                     fontsize=5, color="white", fontweight="bold")
-            ax2.text(totals[i] + 4, y[i], f"{totals[i]:.0f}s", ha="left",
-                     va="center", fontsize=5, color="dimgray")
-        else:
-            ax1.text(totals[i] + 1.5, y[i], f"{totals[i]:.1f}s", ha="left",
-                     va="center", fontsize=5, color="dimgray")
-
-    # break marks on the junction
-    kw = dict(marker=[(-1, -0.6), (1, 0.6)], markersize=9, linestyle="none",
-              color="k", mec="k", mew=1, clip_on=False)
-    for yy in (0.3, 0.7):
-        ax1.plot([1], [yy], transform=ax1.transAxes, **kw)
-        ax2.plot([0], [yy], transform=ax2.transAxes, **kw)
-
-    ax1.set_yticks(np.arange(len(mechs)))
-    ax1.set_yticklabels(ylabels)
-    ax1.legend(fontsize=5, loc="upper right")
-
-    # ---- (b) build breakdown, linear, zoomed to the build range ----
-    yb, btot = stacked_barh(axb, df, B_STAGES, B_COLORS, B_LABELS)
-    axb.set_xlim(0, 62)
-    axb.set_title("(b) build breakdown", loc="left", fontsize=7)
-    axb.set_xlabel("build time (s)", fontsize=6)
-    for i in range(len(df)):
-        axb.text(btot[i] + 1, yb[i], f"{btot[i]:.1f}s", ha="left",
-                 va="center", fontsize=5, color="dimgray")
-    # label the two dominant segments of the largest mechanism
-    low, bpr = df["lower_s"].values, df["build_problem_s"].values
-    for i in range(len(df)):
-        if low[i] > 6:
-            axb.text(low[i] / 2, yb[i], f"{low[i]:.0f}s", ha="center", va="center",
-                     fontsize=5, color="black")
-        if bpr[i] > 6:
-            axb.text(low[i] + bpr[i] / 2, yb[i], f"{bpr[i]:.0f}s", ha="center",
-                     va="center", fontsize=5, color="white")
-    axb.legend(fontsize=5, loc="upper right")
-
+    parts = np.array([[float(row[c]) for c in ("parse_s", "lower_s", "build_problem_s")]
+                      for row in rows])
+    shares = 100 * parts / parts.sum(axis=1, keepdims=True)
+    left = np.zeros(len(rows))
+    for width, (column, label, color) in zip(shares.T, [
+        ("parse_s", "Parse", "#d8dfe2"),
+        ("lower_s", "Lowering", "#447598"),
+        ("build_problem_s", "Build problem", "#a9c5d5"),
+    ]):
+        build.barh(y, width, left=left, height=0.42, color=color, label=label)
+        for row, start, share in zip(y, left, width):
+            if share >= 15:
+                build.text(start + share / 2, row, f"{share:.0f}%", ha="center",
+                           va="center", color="white" if column == "lower_s" else "#20272b")
+        left += width
+    build.set_xlim(0, 100)
+    build.set_xticks([0, 25, 50, 75, 100])
+    build.set_xlabel("Share of build time (%)")
+    for ax, letter, title in [(time, "a", "Pipeline stage times"), (build, "b", "Build composition")]:
+        ax.text(-0.01, 1.36, letter, transform=ax.transAxes, weight="bold", fontsize=10)
+        ax.text(0.06, 1.36, title, transform=ax.transAxes, fontsize=8)
+        ax.tick_params(axis="y", length=0, pad=5)
+        ax.tick_params(axis="x", width=0.6, length=3)
+        ax.legend(loc="lower left", bbox_to_anchor=(0, 1.04), ncol=3, fontsize=6.5,
+                  handlelength=1, columnspacing=0.9, handletextpad=0.4, borderaxespad=0)
     for ext in ("svg", "pdf", "png"):
-        p = os.path.join(d, f"fig_pipeline.{ext}")
-        fig.savefig(p, dpi=300 if ext == "png" else None, bbox_inches="tight")
-        print(f"  saved {p}")
+        fig.savefig(directory / f"fig_pipeline.{ext}", dpi=600)
     plt.close(fig)
-    print("Done.")
 
 
 if __name__ == "__main__":
