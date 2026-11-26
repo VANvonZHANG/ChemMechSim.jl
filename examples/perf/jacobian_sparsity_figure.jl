@@ -234,6 +234,10 @@ function _bench_rows(path::String, selected_mechs::Vector{String})
     return out
 end
 
+function _panel_letter(i::Int)
+    return Char('a' + i - 1)
+end
+
 function _fmt(x::Float64; digits::Int=3)
     return isfinite(x) ? @sprintf("%.*f", digits, x) : ""
 end
@@ -268,11 +272,18 @@ function _plot_patterns(patterns::Vector{PatternData}, out_dir::String)
 end
 
 function _plot_patterns_loaded(patterns::Vector{PatternData}, out_dir::String)
-    fig = CairoMakie.Figure(size=(360 * length(patterns), 330), backgroundcolor=:white)
+    # one column per mechanism; the width follows the (square) heatmap + its tick
+    # labels instead of a fixed per-panel width, so neighbouring panels sit close
+    # together; the two-line title costs some headroom
+    fig = CairoMakie.Figure(size=(330 * length(patterns), 360), backgroundcolor=:white)
+    CairoMakie.colgap!(fig.layout, 8)
     for (i, p) in enumerate(patterns)
         ax = CairoMakie.Axis(
             fig[1, i];
-            title="$(p.label): $(p.n_states) states, nnz=$(p.n_nonzeros), density=$(_fmt(p.density_pct; digits=1))%",
+            # line 1: panel tag + mechanism; line 2: size / nnz / density
+            title="($(_panel_letter(i))) $(p.label)\n" *
+                  "$(p.n_states) states, nnz=$(p.n_nonzeros), density=$(_fmt(p.density_pct; digits=1))%",
+            titlealign=:left,
             xlabel="state index",
             ylabel=i == 1 ? "state index" : "",
             aspect=CairoMakie.DataAspect(),

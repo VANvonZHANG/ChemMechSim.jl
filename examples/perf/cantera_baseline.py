@@ -9,14 +9,44 @@ cold + warm wall-clock time so the paper can compare:
   - ChemMechSim cold (Julia JIT compile + solve — the compile cost)
   - ChemMechSim warm (cached native code — integrate only)
 
-Usage: python3 examples/perf/cantera_baseline.py
-Outputs: examples/perf/output/bench_cantera.csv
+Usage: python3 examples/perf/cantera_baseline.py \
+           [--runs 3] [--reltol 1e-8 --abstol 1e-12] [--out-dir examples/perf/output]
+Each run is a cold (first) + warm (second) solve per mechanism.  Both timers wrap
+only the integration loop; the mechanism is loaded with ct.Solution() beforehand,
+so neither number includes the yaml load.  --runs N repeats that N times in the
+SAME process; for a median over independent processes, launch N processes with
+--runs 1 (as run_bench_j1134_bound.sh does).
+Tolerances: omitted → Cantera/ReactorNet defaults; given → sim.rtol/atol are set
+(to mirror ChemMechSim's reltol/abstol).
+Outputs: examples/perf/output/bench_cantera.csv (one row per mech × run × cold/warm)
 """
 import cantera as ct
-import time, csv, os, warnings
+import time, csv, os, sys, warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+
+def parse_args(argv):
+    cfg = dict(runs=1, reltol=None, abstol=None,
+               out_dir=os.path.join(os.path.dirname(os.path.abspath(__file__)), "output"))
+    i = 1
+    while i < len(argv):
+        a = argv[i]
+        if a == "--runs" and i + 1 < len(argv):
+            cfg["runs"] = int(argv[i + 1]); i += 1
+        elif a == "--reltol" and i + 1 < len(argv):
+            cfg["reltol"] = float(argv[i + 1]); i += 1
+        elif a == "--abstol" and i + 1 < len(argv):
+            cfg["abstol"] = float(argv[i + 1]); i += 1
+        elif a == "--out-dir" and i + 1 < len(argv):
+            cfg["out_dir"] = argv[i + 1]; i += 1
+        else:
+            sys.exit(f"unknown arg {a}")
+        i += 1
+    return cfg
+
+_CFG = parse_args(sys.argv)
+RUNS, OUT_DIR = _CFG["runs"], _CFG["out_dir"]
+RELTOL, ABSTOL = _CFG["reltol"], _CFG["abstol"]
 T0, P0 = 1500.0, ct.one_atm
 T_END = 5.0e-3
 
@@ -36,6 +66,10 @@ def run_once(yaml_path):
     reactor = ct.IdealGasReactor(gas, energy="on")
     reactor.volume = 1.0
     sim = ct.ReactorNet([reactor])
+    if RELTOL is not None:
+        sim.rtol = RELTOL
+    if ABSTOL is not None:
+        sim.atol = ABSTOL
     n_steps = 0
     t0 = time.perf_counter()
     while sim.time < T_END:
@@ -48,17 +82,20 @@ def run_once(yaml_path):
 os.makedirs(OUT_DIR, exist_ok=True)
 out_csv = os.path.join(OUT_DIR, "bench_cantera.csv")
 rows = []
-for name, yaml in MECHS:
-    print(f"=== {name} ===")
-    cold_s, n_steps, T_end, nsp = run_once(yaml)
-    print(f"  cold: {cold_s:.3f}s  {n_steps} steps  T_end={T_end:.1f} K")
-    warm_s, _, _, _ = run_once(yaml)
-    print(f"  warm: {warm_s:.3f}s")
-    rows.append({"mech": name, "n_species": nsp, "cold_s": round(cold_s, 4),
-                 "warm_s": round(warm_s, 4), "steps": n_steps, "T_end_K": round(T_end, 1)})
+for run_idx in range(1, RUNS + 1):
+    for name, yaml in MECHS:
+        print(f"=== run {run_idx} {name} ===")
+        cold_s, n_steps, T_end, nsp = run_once(yaml)
+        print(f"  cold: {cold_s:.3f}s  {n_steps} steps  T_end={T_end:.1f} K")
+        warm_s, _, _, _ = run_once(yaml)
+        print(f"  warm: {warm_s:.3f}s")
+        rows.append({"mech": name, "run": run_idx, "n_species": nsp,
+                     "cold_s": round(cold_s, 4), "warm_s": round(warm_s, 4),
+                     "steps": n_steps, "T_end_K": round(T_end, 1), "cantera": ct.__version__})
 
 with open(out_csv, "w", newline="") as f:
-    w = csv.DictWriter(f, fieldnames=["mech", "n_species", "cold_s", "warm_s", "steps", "T_end_K"])
+    w = csv.DictWriter(f, fieldnames=["mech", "run", "n_species", "cold_s",
+                                      "warm_s", "steps", "T_end_K", "cantera"])
     w.writeheader()
     w.writerows(rows)
 print(f"\nWrote {out_csv}")
