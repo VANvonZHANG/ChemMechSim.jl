@@ -141,8 +141,13 @@ def _interp(t_new, t_orig, y_orig):
     return np.interp(t_new, t_orig, y_orig)
 
 
-def _stylish_ax(ax, i, ylabel):
+def _stylish_ax(ax, i, ylabel, panel_tag=None):
+    """Axis styling for one panel; optional bold (a)/(b)/… tag in the top-left
+    corner (outside the axes, above the y-axis top) for multi-panel figures."""
     ax.set_ylabel(ylabel, fontsize=6)
+    if panel_tag is not None:
+        ax.text(0.0, 1.0, panel_tag, transform=ax.transAxes, fontsize=7,
+                fontweight="bold", ha="left", va="bottom")
     if i >= 4:
         ax.set_xlabel("time (ms)", fontsize=6)
     else:
@@ -198,7 +203,7 @@ def plot_combined(specs, prefix):
             ax.plot(t_ref, ref_d[col], color=col_hex, lw=1.0, alpha=0.9)
             t_m, y_m = _arc_sample(t_cms, cms_d[col], n=50, aspect=1.4)
             ax.plot(t_m, y_m, "x", color=col_hex, ms=2.0, mew=0.5)
-        _stylish_ax(ax, i, ylabel)
+        _stylish_ax(ax, i, ylabel, panel_tag=f"({chr(ord('a') + i)})")
 
     # Two separated, framed legends in the figure's upper-right corner (over
     # the CH4 panel, whose upper-right stays empty): "mechanism" (color

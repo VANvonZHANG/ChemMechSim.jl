@@ -79,8 +79,18 @@ def main():
     build.set_xticks([0, 25, 50, 75, 100])
     build.set_xlabel("Share of build time (%)")
     for ax, letter, title in [(time, "a", "Pipeline stage times"), (build, "b", "Build composition")]:
-        ax.text(-0.01, 1.36, letter, transform=ax.transAxes, weight="bold", fontsize=10)
-        ax.text(0.06, 1.36, title, transform=ax.transAxes, fontsize=8)
+        # tag at the panel's top-left; the title sits a fixed gap to the right of
+        # the tag's own bounding box, so the spacing is the same for panels of
+        # different widths
+        tag = ax.text(-0.01, 1.36, f"({letter})", transform=ax.transAxes,
+                      weight="bold", fontsize=10, va="center")
+        fig.canvas.draw()
+        box = tag.get_window_extent()
+        origin = ax.transAxes.transform((0, 0))
+        x_points = (box.x1 - origin[0]) * 72 / fig.dpi + 6
+        ax.annotate(title, xy=(0, 1.36), xycoords=ax.transAxes,
+                    xytext=(x_points, 0), textcoords="offset points",
+                    fontsize=8, va="center")
         ax.tick_params(axis="y", length=0, pad=5)
         ax.tick_params(axis="x", width=0.6, length=3)
         ax.legend(loc="lower left", bbox_to_anchor=(0, 1.04), ncol=3, fontsize=6.5,

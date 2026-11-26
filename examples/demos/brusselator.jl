@@ -164,11 +164,13 @@ pub_theme = Theme(fontsize=14,
                         titlesize=20, titlealign=:left))
 fig = Figure(size=(1050, 430), backgroundcolor=:white, theme=pub_theme)
 
-ax_t = Axis(fig[1, 1]; xlabel="t", ylabel="concentration",
+# y-limit raised to 5.2 (Y peaks near 4.75) so the legend fits in the empty
+# top-left corner above the curves instead of over the Y(t) start.
+ax_t = Axis(fig[1, 1]; xlabel="t", ylabel="concentration", limits=(nothing, (nothing, 5.2)),
             title="(a)", titlealign=:left)
 lines!(ax_t, tm, xm; color=:midnightblue, linewidth=2.5, label="X(t)")
 lines!(ax_t, tm, ym; color=:cornflowerblue, linewidth=2, linestyle=:dash, label="Y(t)")
-axislegend(ax_t; position=:rt)
+axislegend(ax_t; position=:lt, backgroundcolor=:white)
 
 # limits chosen so the cycle (and the fixed point it encircles) sits near the
 # middle of the axes instead of being pushed aside by the outer starts
