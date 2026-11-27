@@ -3,18 +3,15 @@
 # ChemMechSim's parser:
 #   * source/sink terms are written with an empty reactant/product side
 #     (" => X" / "X => ");
-#   * abstract species carry placeholder compositions from the real element
-#     table (molecular weight is unused in the :kinetic mode).
+#   * species carry no composition: X and Y are abstract, not molecules, so
+#     there are no elements and no molecular weight (unused in :kinetic mode).
 phases:
   - name: brusselator
     thermo: ideal-gas
-    elements: [C, O]
     species: [X, Y]
 species:
   - name: X
-    composition: {C: 1}
   - name: Y
-    composition: {O: 1}
 reactions:
   - equation: " => X"                                # source: empty reactant side
     rate-constant: {A: 1.0, b: 0.0, Ea: 0.0}
