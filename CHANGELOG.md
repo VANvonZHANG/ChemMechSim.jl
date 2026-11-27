@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   demand; hand-built `ReactionData` bypassing the parse-time guard fails loudly
   at lowering with the same reason.
 
+### Changed
+
+- Cantera-YAML species `composition` is optional: an omitted key reads as an
+  empty composition (no elements, molecular weight 0), the same as the converter
+  dialect's `composition: {}`.
+
 ## [1.4.0] - 2026-11-07
 
 ### Added

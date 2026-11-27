@@ -17,7 +17,7 @@ phases:
 
 species:
 - name: CH4
-  composition: {C: 1, H: 4}
+  composition: {C: 1, H: 4}   # optional — omit for abstract species (no elements)
   thermo: …            # NASA7 two-range polynomial
 
 reactions:
@@ -31,8 +31,11 @@ reactions:
 
 - `units` drives unit conversion of A-factors and activation energies at parse time
   (`convert_afactor`, `ea_to_J_per_mol`).
-- Species `composition` feeds `molecular_weight`; `elements` in the phase block is
-  optional.
+- Species `composition` feeds `molecular_weight`; it is optional, as is `elements` in
+  the phase block. An omitted composition reads as an empty one — no elements,
+  molecular weight 0 — the same as the converter dialect's `composition: {}` (fine for
+  concentration-based `:kinetic` runs; the EOS / mass-fraction state bases need the
+  molecular weight).
 - Thermo: NASA7 two-coefficient-range polynomials. The MCM dialect's
   `constant-cp` thermo and `activation-energy: K` / `quantity: molec` units are
   handled.

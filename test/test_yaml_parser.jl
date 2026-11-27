@@ -80,6 +80,17 @@ end
     @test ar.thermo === nothing                           # AR dict had no thermo key
 end
 
+@testset "species without composition: reads as the empty composition" begin
+    # omitted key ≡ the converter dialect's `composition: {}`: no elements, molecular weight 0
+    name_to_id = Dict("X"=>SpeciesID(1), "Y"=>SpeciesID(2))
+    sp, db = ChemMechSim._parse_species(
+        [Dict("name"=>"X"), Dict("name"=>"Y", "composition"=>Dict())], name_to_id)
+    @test [s.name for s in sp] == ["X", "Y"]
+    @test all(s -> isempty(s.elements) && s.molecular_weight == 0.0, sp)
+    @test all(s -> s.thermo === nothing, sp)
+    @test isempty(db.entries)
+end
+
 # —— Phase 5a T4: load_mechanism + per-type characterization (h2o2.yaml) ——
 
 using ChemMechSim: ElementaryArrhenius, ThirdBodyArrhenius, TroeFalloff, TroeParams,
