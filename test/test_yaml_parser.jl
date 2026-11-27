@@ -270,6 +270,11 @@ end
     end
     r3 = mech.reactions[3]                       # X => Y with A = 3.0
     @test r3.kinetics.A == 3.0
+    # no element concept: neither an `elements` list nor species compositions, so the
+    # element-conservation check is skipped and validation reports no errors
+    @test isempty(mech.elements)
+    @test all(s -> isempty(s.elements) && s.molecular_weight == 0.0, mech.species)
+    @test isempty(validate(mech).errors)
 end
 
 # —— rate-type registry (2026-09-24 direct-load spec §1) ——————————————————————————

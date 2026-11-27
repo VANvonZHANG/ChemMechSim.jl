@@ -34,7 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Cantera-YAML species `composition` is optional: an omitted key reads as an
   empty composition (no elements, molecular weight 0), the same as the converter
-  dialect's `composition: {}`.
+  dialect's `composition: {}`. The `brusselator.yaml` fixture drops its
+  placeholder element compositions — its abstract species X and Y are not
+  molecules.
 
 ## [1.4.0] - 2026-11-07
 
