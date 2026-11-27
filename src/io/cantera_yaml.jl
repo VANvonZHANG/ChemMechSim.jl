@@ -214,7 +214,9 @@ function _parse_thermo(thermo_dict)
 end
 
 "Parse the species list. Returns (Vector{SpeciesData}, ThermoDatabase).
- Only species in name_to_id (phase-declared) are kept; others skipped."
+ Only species in name_to_id (phase-declared) are kept; others skipped. A species may
+ omit `composition`: it then reads as an empty composition (no elements, molecular
+ weight 0), exactly like the converter dialect's `composition: {}`."
 function _parse_species(species_list, name_to_id::Dict{String,SpeciesID})
     species = SpeciesData[]
     thermo_entries = Dict{String,ThermoModel}()
@@ -222,8 +224,11 @@ function _parse_species(species_list, name_to_id::Dict{String,SpeciesID})
         name = String(sp_dict["name"])
         haskey(name_to_id, name) || continue
         id = name_to_id[name]
-        comp_raw = sp_dict["composition"]                  # Dict{Any,Any} from YAML.jl
-        elements = Dict{String,Int}(String(k) => Int(v) for (k, v) in comp_raw)
+        # `composition` is optional: an omitted key is the empty composition (abstract
+        # species of a toy mechanism are not molecules), the same as `composition: {}`.
+        comp_raw = get(sp_dict, "composition", nothing)   # Dict{Any,Any} from YAML.jl
+        elements = comp_raw === nothing ? Dict{String,Int}() :
+                   Dict{String,Int}(String(k) => Int(v) for (k, v) in comp_raw)
         mw = molecular_weight(elements)
         thermo = haskey(sp_dict, "thermo") ? _parse_thermo(sp_dict["thermo"]) : nothing
         if thermo !== nothing
